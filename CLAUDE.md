@@ -139,7 +139,8 @@ Each unit's PR updates its track's line; the last slice removes it.
 
 - **Canary evaluation ladder** (biohackathon 0013): a promptfoo suite that proves canary leaks on the
   deployment as built, then cumulative Ansible hardening steps (one control each) proven by the same suite.
-  Design agreed in chat up to the leak paths and ladder. **Next: spec** `spec/canary-eval-ladder`.
+  Spec drafted in `docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/` (its part 02, injections, is
+  left to the team). **Next: the user approves the spec** on `spec/canary-eval-ladder`, then the plan.
 - **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice.
 
 ## Project in brief

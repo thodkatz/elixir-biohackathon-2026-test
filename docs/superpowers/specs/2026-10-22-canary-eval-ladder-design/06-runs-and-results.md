@@ -15,7 +15,7 @@ measured restore time. Every report is labelled from it.
 3. `npm run eval:agent -- --repeat N --no-cache`: the agent suite. Writes `reports/agent.json`.
 
 `maxConcurrency: 1` stays: all tests share one instance. Running the agent suite makes paid model calls and
-needs the user's OK each time (`AGENTS.md`, *Working rules*).
+needs the user's OK each time (`AGENTS.md`, *Project rules*).
 
 ## Repeats and cost
 
@@ -23,8 +23,8 @@ needs the user's OK each time (`AGENTS.md`, *Working rules*).
 11 × (5 + 3 × 4 + 5) ≈ 240 agent runs, plus restores. Whether de.NBI runs cost money or only rate is
 not known.
 
-Model: `qwen3.8-27b` on de.NBI (`spe_agent_model_provider: openai_compatible`), the model infra teams there
-run. Every report is still labelled with the model from `hardening.json`, so a later run on another model is
+Model: `qwen3.8-27b` on de.NBI (`spe_agent_model_provider: openai_compatible`).
+Every report is still labelled with the model from `hardening.json`, so a later run on another model is
 never mixed into the same matrix.
 
 ## The matrix (decision 11)

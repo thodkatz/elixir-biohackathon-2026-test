@@ -9,3 +9,7 @@ Decision log, append-only (`.methodology/shared/guides/spec-and-plan-layout.md`,
    text comes from that session; the DRS/comment wording and detailed schema are draft elaborations here.
    Blocked attempts use trace evidence alongside successful state changes, consistent with part 04.
    *Amends:* decision 4 and part 02. *Status:* folded.
+
+2. **One model: `qwen3.8-27b` on de.NBI** (2026-10-22; PR #1). The ladder runs on that model only; the second
+   model (`claude-haiku-5-5`, Anthropic) is dropped. *Reason:* the user's call: Haiku need not be tested.
+   *Amends:* part 06, *Repeats and cost*; the README's decision paragraph. *Status:* folded.

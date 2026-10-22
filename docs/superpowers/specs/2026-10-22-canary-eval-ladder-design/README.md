@@ -1,6 +1,6 @@
 # Canary evaluation ladder — design
 
-**Status:** draft (branch `spec/canary-eval-ladder`). **Latest clarification:** 1.
+**Status:** draft (branch `spec/canary-eval-ladder`). **Latest clarification:** 2.
 Decision records behind it: `biohackathon` knowledge 0011 (scope) and 0013 (three-profile plan), whose profiles
 A → B → C this spec replaces with the levels L0–L5. Read against this repo at `84745f5`.
 
@@ -15,7 +15,7 @@ exactly one hardening control to the one before. Ansible configures each level a
 injections. promptfoo drives two suites: a no-model **controls suite** showing each control is (or is not)
 in place, and the paid **agent suite** showing whether the agent is fooled, whether it leaks, and whether it still
 does its job. Every test starts from a fresh copy of the stack's state. The output is a committed matrix of
-counts: test × level × metric, per model.
+counts: test × level × metric, for `qwen3.8-27b` on de.NBI.
 
 ## Decisions taken
 

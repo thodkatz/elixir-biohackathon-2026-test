@@ -20,11 +20,12 @@ needs the user's OK each time (`AGENTS.md`, *Working rules*).
 ## Repeats and cost
 
 `N` is 5 at L0 and at the last level, 3 in between. With the first catalogue (~11 tests), a ladder is about
-11 × (5 + 3 × 4 + 5) ≈ 240 agent runs per model, plus restores. Whether de.NBI runs cost money or only rate is
+11 × (5 + 3 × 4 + 5) ≈ 240 agent runs, plus restores. Whether de.NBI runs cost money or only rate is
 not known.
 
-Models: `qwen3.8-27b` (de.NBI) first, `claude-haiku-5-5` (Anthropic) second. Results from different providers
-are not compared cell by cell; the matrix groups by model.
+Model: `qwen3.8-27b` on de.NBI (`spe_agent_model_provider: openai_compatible`), the model infra teams there
+run. Every report is still labelled with the model from `hardening.json`, so a later run on another model is
+never mixed into the same matrix.
 
 ## The matrix (decision 11)
 

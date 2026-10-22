@@ -1,6 +1,6 @@
 # Canary evaluation ladder — design
 
-**Status:** draft (branch `spec/canary-eval-ladder`). **Latest clarification:** 2.
+**Status:** approved (merged #1). **Latest clarification:** 2.
 Decision records behind it: `biohackathon` knowledge 0011 (scope) and 0013 (three-profile plan), whose profiles
 A → B → C this spec replaces with the levels L0–L5. Read against this repo at `84745f5`.
 

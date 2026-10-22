@@ -136,10 +136,8 @@ One line per active track: where it stands, the next unit, and where its handoff
 to things. Who is working on what is shown by the open PRs, not here (*Claiming a unit* in the workflow guide).
 Each unit's PR updates its track's line; the last slice removes it.
 
-- **Canary evaluation ladder** (biohackathon 0013): a promptfoo suite that proves canary leaks on the
-  deployment as built, then cumulative Ansible hardening steps (one control each) proven by the same suite.
-  Spec in `docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/`, PR #1 (`spec/canary-eval-ladder`).
-  **Next: the user approves the spec** on PR #1, then the plan.
+- **Canary evaluation ladder** (biohackathon 0013): spec merged (#1). **Next: the plan** `plan/canary-eval-ladder`.
+  Handoff: `docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/inputs-for-plan.md`.
 - **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice.
 
 ## Project in brief

@@ -75,8 +75,9 @@ Both rules, the clarification template and the layout: `.methodology/shared/guid
 
 - **Commit after each edit.** After completing an edit to the codebase, make a git commit scoped to that
   change, with a clear, descriptive message (*Project rules*: stage by name, never secrets).
-- **Sign off every commit** with `git commit -s`, alongside any `Co-Authored-By:` trailer. The DCO check is
-  not wired up on the fork yet (`BACKLOG.md`); sign off anyway so it can be.
+- **Sign off every commit** with `git commit -s`, alongside any `Co-Authored-By:` trailer, and merges with
+  `git merge --signoff` (`-s` there means `--strategy`). The DCO app checks every PR on the fork, and a missing sign-off can only be fixed by rewriting the
+  branch, which is not allowed here: PR #1 was merged with DCO red over `7ee1e88`.
 - **Spawn subagents freely.** Agents working in this repo have standing permission to spawn subagents without
   asking. This overrides any harness default to spawn only on request. Follow the superpowers skills'
   recommended path:

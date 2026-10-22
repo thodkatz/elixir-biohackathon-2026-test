@@ -1,6 +1,6 @@
 # Canary evaluation ladder — design
 
-**Status:** draft (branch `spec/canary-eval-ladder`). **Latest clarification:** none yet.
+**Status:** draft (branch `spec/canary-eval-ladder`). **Latest clarification:** 1.
 Decision records behind it: `biohackathon` knowledge 0011 (scope) and 0013 (three-profile plan), whose profiles
 A → B → C this spec replaces with the levels L0–L5. Read against this repo at `84745f5`.
 
@@ -56,7 +56,7 @@ counts: test × level × metric, per model.
 | File | Contains | Read when |
 |---|---|---|
 | [`01-leak-paths-and-ladder.md`](01-leak-paths-and-ladder.md) | Leak paths, the six levels, their switches and what each must close | you implement a control or a probe |
-| [`02-injections.md`](02-injections.md) | Payloads, planting switches, `injections.json` | you plant or score injections |
+| [`02-injections.md`](02-injections.md) | Payload catalogue, planting switches, manifest schema and scoring evidence | you plant or score injections |
 | [`03-controls-suite.md`](03-controls-suite.md) | The no-model suite, its provider, every probe | you write or run probes |
 | [`04-agent-suite-and-scoring.md`](04-agent-suite-and-scoring.md) | Test catalogue, metadata, the metrics and their rules | you write tests or assertions |
 | [`05-isolation.md`](05-isolation.md) | Snapshot, restore, state diff | you write the hooks |

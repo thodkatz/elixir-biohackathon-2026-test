@@ -15,3 +15,7 @@ remotes use SSH, not the token.
 Fix: give the token *Pull requests: Read and write* (and *Contents: Read*) on
 `thodkatz/elixir-biohackathon-2026-test` in GitHub's token settings. Until then, push the branch and open the
 PR from the URL `git push` prints (`https://github.com/thodkatz/elixir-biohackathon-2026-test/pull/new/<branch>`).
+
+Granted on 2026-10-22; PR writes through `gh api` work since. `gh pr edit` still fails, for an unrelated reason
+(Projects classic): use `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@file`
+(`.methodology/shared/guides/tooling-gotchas.md`).

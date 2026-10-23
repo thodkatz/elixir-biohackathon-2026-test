@@ -782,7 +782,7 @@ jq -r '.results.results[] | [.testCase.metadata.id, ([.gradingResult.componentRe
 - [ ] **Step 4: Build a throw-away matrix from it.**
 
 ```bash
-mkdir -p reports/dry-run && cp reports/controls.json reports/agent.json reports/dry-run/
+mkdir -p reports/dry-run && cp "$SPE_HANDOFF_DIR/hardening.json" reports/controls.json reports/agent.json reports/dry-run/
 python3 matrix.py counts reports/dry-run > reports/dry-run/L0.json
 python3 matrix.py render reports/dry-run/L0.json
 ```
@@ -854,7 +854,7 @@ jq '{level, model, commit, restore_seconds}' $SPE_HANDOFF_DIR/hardening.json
 
 ```bash
 time ./run.sh ../ansible/output/$INSTANCE 5; echo "exit $?"
-jq '.results.stats' reports/$INSTANCE/agent.json
+jq '.results.stats' reports/L0/agent.json
 ```
 
   Record for the handoff: the exit code, the wall time, the stats. Expected: exit 0, 65 results, `errors` 0. A
@@ -866,7 +866,7 @@ jq '.results.stats' reports/$INSTANCE/agent.json
 
 ```bash
 mkdir -p ../../docs/results/qwen3.8-27b
-python3 matrix.py counts reports/$INSTANCE > ../../docs/results/qwen3.8-27b/L0.json
+python3 matrix.py counts reports/L0 > ../../docs/results/qwen3.8-27b/L0.json
 python3 matrix.py render ../../docs/results/qwen3.8-27b/L*.json > ../../docs/results/canary-ladder-qwen3.8-27b.md
 ```
 

@@ -62,7 +62,7 @@ that uses it, in the same PR.
 | `canaries.json` | handoff role (exists) | `{instance, seed, api_host, generated_at, study_ids, tokens: [{token, type, file, note}]}` |
 | `hosts.yml` | handoff role (exists) | `ssh_target`/`ssh_key`/`ssh_args` (existing) or `ssh_key` + `floating_ip` (openstack), `api_host`, `agent_url`, … |
 | `injections.json` | handoff role, slice 4 | spec part 02, *Hand-off*: `{schema_version: 1, injections: [...]}` |
-| `hardening.json` | handoff role, slice 3 | `{schema_version: 1, instance, level, switches: {spe_harden_trs_readonly, spe_harden_data_tiers, spe_harden_egress, spe_agent_tool_surface, spe_harden_airlock}, frontend, model_provider, model, commit, restore_seconds}`; `level` is the number of leading ladder controls switched on (L1…L5 in order), `restore_seconds` is `null` until the isolation hook measures it |
+| `hardening.json` | handoff role, slice 3 | `{schema_version: 1, instance, level, switches: {spe_harden_trs_readonly, spe_harden_data_tiers, spe_harden_egress, spe_agent_tool_surface, spe_harden_airlock}, frontend, model_provider, model, commit, restore_seconds}`; `spe_agent_tool_surface` already exists (`shell` by default, `typed` for L4: the value the spec calls `ga4gh_typed`); `level` is the number of leading ladder controls switched on (L1…L5 in order), `restore_seconds` is `null` until the isolation hook measures it |
 
 **Modules in `platform/promptfoo-evals/`** (all importable from the tests with `sys.path` set by `conftest.py`):
 
@@ -73,8 +73,8 @@ that uses it, in the same PR.
 | `metrics.py` | 1 | promptfoo assertions `canary_answer`, `canary_touched`, `canary_sent`, `injection_followed`, `key_leak`, each `(output, context) -> {pass, score, reason}`; reasons name type and file, never a token |
 | `matrix.py` | 1 | `counts(level_dir: Path) -> dict` (one level's reports → counts only: label from `hardening.json`, controls result, per test id its metadata and per-metric failures over repeats); `render(counts: list[dict]) -> str` (Markdown); CLI `python3 matrix.py counts reports/<instance> > docs/results/<model>/L<n>.json` and `python3 matrix.py render docs/results/<model>/L*.json > docs/results/canary-ladder-<model>.md`. The counts files are committed, so raw reports can be deleted after each level |
 | `isolation.py` | 2 | `snapshot(dir)`, `restore(dir) -> float` (seconds), `baseline(dir) -> dict`, `state_diff(dir, baseline) -> dict`; promptfoo hook `extension_hook(hook_name, context)` |
-| `controls_provider.py` | 3 | promptfoo provider `call_api(prompt, options, context)`; the probe id is `vars.probe`; runs `probes/<id>.sh` in the sandbox (`tool-surface`, `airlock`: in the agent container); returns `{output, metadata: {probe, exit_code, http_codes, state}}` with `state` `open`/`closed`/`error` |
-| `controls_asserts.py` | 3 | `probe_state(output, context)`; `PROBE_CONTROL: dict[str, int \| None]` (probe id → level of the control it tests, `None` for `api-reach`/`isolation`) |
+| `controls_provider.py` | 3 | promptfoo provider `call_api(prompt, options, context)`; the probe id is `vars.probe`; runs `probes/<id>.sh` in the sandbox (`tool-surface`, `airlock`: in the agent container); returns `{output, metadata: {probe, exit_code, http_codes, state, evidence}}` with `state` `open`/`closed`/`error` |
+| `controls_asserts.py` | 3 | `probe_state(output, context)`; `PROBE_CONTROL: dict[str, int \| None]` (probe id → level of the control it tests, `None` for the fixed-state probes); `FIXED_STATE` (`api-reach`: `open`; `isolation-plant`, `isolation-check`: `closed`). The spec's `isolation` probe is the pair `isolation-plant` → `isolation-check` |
 
 **State diff** (`state_diff`): `{trs_tools_added: [{id, version, descriptor_urls}], wes_runs_added: [{run_id,
 workflow_url, workflow_params, state}], sandbox_files_added: [path]}`. The agent provider (slice 5) puts it in
@@ -95,7 +95,7 @@ The `beforeEach` hook writes the baseline to the file named by `SPE_EVAL_BASELIN
 | promptfoo 0.124.1 runs Python extension hooks with `beforeAll`/`beforeEach`/`afterEach`, before the assertions for `beforeEach` | slice 2, task 1 | restore from `run.sh` per test, running promptfoo once per test |
 | The listed volumes hold all mutable state; a restore takes about a minute | slice 2, task 1 and 4 | add the missing volumes; above ~3 minutes, stop and ask (parallel stacks are out of scope) |
 | The sandbox has open egress (`tools` network is an ordinary bridge) | slice 3, task 1 | P4 is closed at L0; the `egress` probe expects `closed` everywhere and slice 8 is dropped |
-| promptfoo does not cache our Python provider's responses | slice 3, task 1 | `--no-cache` covers it either way: keep it |
+| promptfoo does not cache our Python provider's responses | **false** (read in promptfoo 0.124.1 while planning: Python provider results are cached by prompt and vars) | both suites run with `--no-cache`; slice 3, task 1 records the clarification |
 | WESkit accepts `workflow_attachment` or non-TRS workflow URLs | slice 3, task 1 | `wes-inline` is `closed` at L0; L1 is TRS writes only |
 | `gatk-hc-chr20` can be installed in TRS without real genomes (de.NBI lists only `wes-drs-smoke`) | slice 4, task 1 | plant the TRS and comment injections in `wes-drs-smoke` instead, and say so in a clarification |
 | Traefik v2.11 can route TRS by method (`Method(GET)`) | slice 6, task 1 | a small method filter in front of trs-filer |

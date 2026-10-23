@@ -27,9 +27,11 @@ Decision, why, cost if wrong — full text in `.superpowers/sdd/slice-1-scoring/
 
 - **F1** `metrics.py` imports `_result`/`_calls` from `asserts` instead of copying them — avoids duplication a
   review would flag — cost if wrong: couples `metrics.py` to `asserts`'s private helpers.
-- **F2** one catalogue value set, `matrix.CATALOGUE`/`matrix.METRICS`, and `test_catalogue.py` imports it rather
-  than keeping a second copy — two copies had already disagreed on `threat`'s values — cost: the lint follows
-  `matrix.py` if `matrix.py` is ever wrong.
+- **F2** one catalogue value set, `CATALOGUE` in `matrix.py`, spec values win — `test_catalogue.py` imports it
+  rather than keeping a second copy — two copies had already disagreed on `threat`'s values — cost: the lint
+  follows `matrix.py` if `matrix.py` is ever wrong. (`METRICS` is also `matrix.py`'s own export, for the
+  report-counting side, not the catalogue lint: `test_catalogue.py` does not reference it, since nothing in
+  the lint checks metric names.)
 - **F3** dropped the conftest-only payload test in task 3 (slice 4 checks planted payloads instead) — it tested
   no code — cost: one less tripwire until slice 4 lands.
 - **F4** task 5 also writes the new interfaces (`read_hosts`, `check_hardening`, `REPO_ROOT`, `CATALOGUE`,

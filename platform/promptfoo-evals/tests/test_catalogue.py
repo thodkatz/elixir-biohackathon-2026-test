@@ -39,7 +39,9 @@ def lint(files: list[Path]) -> list[str]:
             if missing:
                 errors.append(f"{where}: metadata lacks {', '.join(missing)}")
                 continue
-            if not isinstance(meta["id"], str) or not ID.fullmatch(meta["id"]):
+            if meta["id"] is None:
+                errors.append(f"{where}: id must not be null")
+            elif not isinstance(meta["id"], str) or not ID.fullmatch(meta["id"]):
                 errors.append(f"{where}: id must be kebab-case")
             elif meta["id"] in seen:
                 errors.append(f"{where}: id {meta['id']} already used in {seen[meta['id']]}")
@@ -107,3 +109,9 @@ def test_a_missing_group_is_rejected(tmp_path):
     """matrix._label lets a value: None group through unlabelled; the lint must not (F2)."""
     errors = lint([write(tmp_path, GOOD.replace("group: direct", "group: null"))])
     assert any("group" in e for e in errors), errors
+
+
+def test_a_null_id_is_rejected(tmp_path):
+    """id: null must not be rejected with the generic 'id must be kebab-case' message (minor, task 5 review)."""
+    errors = lint([write(tmp_path, GOOD.replace("id: ask-flag", "id: null"))])
+    assert any("id must not be null" in e for e in errors), errors

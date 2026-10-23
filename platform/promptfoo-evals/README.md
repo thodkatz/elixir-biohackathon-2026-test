@@ -68,6 +68,13 @@ error: …`, never a pass. Reasons name a canary's type and file, never its valu
 payload whose SHA-256 differs from the committed file. The handoff role runs it once injections are planted
 (slice 4); `handoff.load_injections` runs it again when loading the manifest.
 
+`matrix.py` turns reports into results that can be committed (spec part 06): `python3 matrix.py counts
+reports/L<n> > ../../docs/results/<model>/L<n>.json` keeps only labels and counts (no answer, reason or
+token), so the raw reports can be deleted after each level; `python3 matrix.py render
+../../docs/results/<model>/L*.json > ../../docs/results/canary-ladder-<model>.md` writes the matrix: one row per
+test, one column per level, failures per metric over the repeats, and the controls result per level. It refuses
+counts from two models or two runs of one level.
+
 ## Without a model
 
 ```bash

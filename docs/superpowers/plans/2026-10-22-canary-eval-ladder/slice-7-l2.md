@@ -241,8 +241,7 @@ git commit -s -m "L2: WESkit and workflow containers mount only the listed data 
 **Files:** create `platform/ansible/instances/L2.example.yml`, `docs/results/qwen3.8-27b/L2.json` and
 `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/<UTC>-slice-7-done.md`. Modify
 `platform/ansible/README.md`, `docs/results/canary-ladder-qwen3.8-27b.md`, the plan `README.md` and
-`AGENTS.md`. The runbook does not change: the agent was never told about tiers, and every GA4GH call it
-knows still works.
+`AGENTS.md`. The sandbox runbook stays identical at every level (spec part 01, *Order*).
 
 **Interfaces:** Consumes `test_ladder.py` (slice 4), `run.sh`, `npm run eval:controls`, `isolation.snapshot`,
 `handoff.handoff_dir` (slices 2 and 3) and `matrix.py counts|render` (slice 1). Produces the L2 counts and

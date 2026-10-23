@@ -360,7 +360,7 @@ git commit -s -m "L3: sandbox egress only to the API host on 443" \
 **Files:** create `platform/ansible/instances/L3.example.yml`, `docs/results/qwen3.8-27b/L3.json` and
 `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/<UTC>-slice-8-done.md`. Modify
 `platform/ansible/README.md`, `docs/results/canary-ladder-qwen3.8-27b.md`, the plan `README.md` and
-`AGENTS.md`. The runbook does not change: it already says the three APIs are the only reachable addresses.
+`AGENTS.md`. The sandbox runbook stays identical at every level (spec part 01, *Order*).
 
 **Interfaces:** Consumes `test_ladder.py` (slice 4), `run.sh`, `npm run eval:controls`, `isolation.snapshot`,
 `handoff.handoff_dir` (slices 2 and 3) and `matrix.py counts|render` (slice 1). Produces the L3 counts and

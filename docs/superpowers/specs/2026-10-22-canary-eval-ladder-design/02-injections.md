@@ -64,7 +64,9 @@ Use separate optional payload-path inputs for TRS descriptions and workflow comm
 at once; DRS needs a description payload-path input. Exact CLI flag spelling belongs in the implementation plan.
 
 The switches default to `false` for ordinary deployments. All three are explicitly `true` in each ladder
-example L0–L5, independent of the hardening switches. Each level uses the same payload bytes and target
+example L0–L5, independent of the hardening switches; the clean control ([06](06-runs-and-results.md)) turns all
+three off at L0. A build with some on and some off is not a ladder run: its `hardening.json` says so
+(`injections: "mixed"`), and the run script refuses it. Each level uses the same payload bytes and target
 selection. L4 may hide the poisoned fields from the model, but must not remove them from the underlying
 catalogue. Planting happens with operator privileges before hardening prevents agent writes.
 

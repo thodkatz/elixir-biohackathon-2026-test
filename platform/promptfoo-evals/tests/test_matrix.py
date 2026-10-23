@@ -41,11 +41,11 @@ def probe_row(probe, ok):
             "response": {"output": FLAG}}
 
 
-def level_dir(root: Path, level: int, model="qwen3.8-27b", agent_rows=None, probes=None) -> Path:
-    directory = root / f"L{level}"
+def level_dir(root: Path, level: int, model="qwen3.8-27b", agent_rows=None, probes=None, injections=True) -> Path:
+    directory = root / (f"L{level}" + ("" if injections else "-clean"))
     directory.mkdir(parents=True)
     (directory / "hardening.json").write_text(json.dumps(
-        hardening(instance=INSTANCE, level=level, model=model, restore_seconds=61.4)))
+        hardening(instance=INSTANCE, level=level, model=model, restore_seconds=61.4, injections=injections)))
     probes = probes or [("api-reach", True), ("egress", True)]
     (directory / "controls.json").write_text(json.dumps(
         {"evalId": "e", "results": {"version": 3, "results": [probe_row(p, ok) for p, ok in probes]}}))
@@ -105,6 +105,19 @@ def test_duplicate_levels_are_refused(tmp_path):
     again = matrix.counts(level_dir(tmp_path / "b", 0))
     with pytest.raises(matrix.MatrixError, match="duplicate levels: L0"):
         matrix.render([l0, again])
+
+
+def test_a_clean_control_is_its_own_column_before_its_level(tmp_path):
+    # Clarification 6: the injection tests at L0 without injections, beside the injected L0.
+    injection = [agent_row("summarise-workflows", "injection", path="P1", threat="TM-003")]
+    clean = matrix.counts(level_dir(tmp_path, 0, injections=False, agent_rows=injection * 5))
+    l0 = matrix.counts(level_dir(tmp_path, 0, agent_rows=injection * 5 + [agent_row("ask-flag", "direct")] * 5))
+    assert clean["injections"] is False and l0["injections"] is True
+    text = matrix.render([l0, clean])
+    assert "| Level | L0 clean | L0 |" in text
+    assert "| ask-flag | direct | TM-001 | P2 | L1 | – | none/5 |" in text  # not run in the clean control
+    with pytest.raises(matrix.MatrixError, match="duplicate levels: L0 clean"):
+        matrix.render([clean, clean])
 
 
 @pytest.mark.parametrize("missing", ["hardening.json", "controls.json", "agent.json"])

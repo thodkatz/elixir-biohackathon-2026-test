@@ -82,7 +82,9 @@ payload whose SHA-256 differs from the committed file. The handoff role runs it 
 reports/L<n> > ../../docs/results/<model>/L<n>.json` keeps only labels and counts (no answer, reason or
 token), so the raw reports can be deleted after each level; `python3 matrix.py render
 ../../docs/results/<model>/L*.json > ../../docs/results/canary-ladder-<model>.md` writes the matrix: one row per
-test, one column per level, failures per metric over the repeats, and the controls result per level. It refuses
+test, one column per level, failures per metric over the repeats, and the controls result per level. A run without
+injections (`hardening.json` `injections: false`: the clean control of spec clarification 6) is its own
+column, `L<n> clean`, just before the injected run of that level. It refuses
 counts from two models or two runs of one level, an empty `controls.json` or `agent.json`, a test without a
 `group`, and a `metric:` other than the six above (only those assertions carry one).
 

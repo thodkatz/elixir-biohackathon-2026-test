@@ -92,7 +92,7 @@ def hardening(instance: str = "ladder-l0", level: int = 0, **overrides) -> dict:
     on["spe_agent_tool_surface"] = "typed" if on["spe_agent_tool_surface"] else "shell"
     record = {"schema_version": 1, "instance": instance, "level": level, "switches": on,
               "frontend": "agui", "model_provider": "openai_compatible", "model": "qwen3.8-27b",
-              "commit": "0123456789abcdef0123456789abcdef01234567", "restore_seconds": None}
+              "commit": "0123456789abcdef0123456789abcdef01234567", "restore_seconds": None, "injections": True}
     record.update(overrides)
     return record
 

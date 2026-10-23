@@ -8,7 +8,8 @@ Run from platform/promptfoo-evals, where run.sh leaves reports/L<n>/ and docs/re
 copies them) and keeps only labels, probe ids, test metadata and per-metric failure counts: never an
 answer, a reason, a variable or a token, so its output can be committed and the raw reports deleted.
 `render` turns the counts of one model's levels into Markdown; it refuses mixed models and duplicate
-levels.
+levels. A run without injections (hardening.json `injections: false`, spec clarification 6) is a column
+of its own, "L<n> clean", beside the injected run of the same level.
 
 promptfoo 0.124.1 `-o x.json` shape read here: {results: {results: [{testCase: {vars, metadata},
 gradingResult: {pass, componentResults: [{pass, assertion: {metric}}]}, response: {error},
@@ -146,6 +147,7 @@ def counts(level_dir: Path) -> dict:
         # The contract promises MatrixError; a caller catching only that must not see a bare ConfigError.
         raise MatrixError(str(e)) from e
     return {"schema_version": 1, "instance": record["instance"], "level": record["level"],
+            "injections": record["injections"],
             "model": f"{record['model_provider']}:{record['model']}", "commit": record["commit"],
             "restore_seconds": record.get("restore_seconds"),
             "controls": _controls(_rows(_load(directory / "controls.json"), "controls.json")),
@@ -153,7 +155,8 @@ def counts(level_dir: Path) -> dict:
 
 
 def _check(c: object, i: int) -> dict:
-    keys = ("schema_version", "instance", "level", "model", "commit", "restore_seconds", "controls", "tests")
+    keys = ("schema_version", "instance", "level", "injections", "model", "commit", "restore_seconds", "controls",
+            "tests")
     if not isinstance(c, dict) or c.get("schema_version") != 1 or any(k not in c for k in keys):
         raise MatrixError(f"counts file {i + 1}: not counts version 1 (python3 matrix.py counts ...)")
     return c
@@ -170,17 +173,22 @@ def _cell(test: dict | None) -> str:
     return ", ".join(parts) or f"none/{n}"
 
 
+def _column(c: dict) -> str:
+    return f"L{c['level']}" + ("" if c["injections"] else " clean")
+
+
 def render(counts_list: list[dict]) -> str:
-    levels = sorted((_check(c, i) for i, c in enumerate(counts_list)), key=lambda c: c["level"])
+    # A clean control run sits just before the injected run of its level.
+    levels = sorted((_check(c, i) for i, c in enumerate(counts_list)), key=lambda c: (c["level"], c["injections"]))
     if not levels:
         raise MatrixError("no counts given")
     models = sorted({c["model"] for c in levels})
     if len(models) > 1:
         raise MatrixError(f"mixed models: {', '.join(models)}")
-    numbers = [c["level"] for c in levels]
-    duplicates = sorted({n for n in numbers if numbers.count(n) > 1})
+    columns = [_column(c) for c in levels]
+    duplicates = sorted({n for n in columns if columns.count(n) > 1})
     if duplicates:
-        raise MatrixError(f"duplicate levels: {', '.join(f'L{n}' for n in duplicates)}")
+        raise MatrixError(f"duplicate levels: {', '.join(duplicates)}")
 
     def row(name: str, cells: list[str]) -> str:
         return f"| {name} | " + " | ".join(cells) + " |"
@@ -190,11 +198,11 @@ def render(counts_list: list[dict]) -> str:
                  else "disagree: " + ", ".join(c["controls"]["disagree"])) for c in levels]
     lines = [f"# Canary evaluation ladder: {models[0]}", "",
              "Failures per metric over the repeats (utility tests: passes). Counts only: no answers, no tokens.", "",
-             row("Level", [f"L{c['level']}" for c in levels]), row("---", ["---"] * len(levels)),
+             row("Level", columns), row("---", ["---"] * len(levels)),
              row("Instance", [c["instance"] for c in levels]),
              row("Commit", [f"`{c['commit'][:12]}`" for c in levels]),
              row("Restore (s)", restore), row("Controls", controls), "",
-             "| Test | Group | Threat | Path | Closed by | " + " | ".join(f"L{c['level']}" for c in levels) + " |",
+             "| Test | Group | Threat | Path | Closed by | " + " | ".join(columns) + " |",
              "|---" * (5 + len(levels)) + "|"]
     meta: dict[str, dict] = {}
     for c in levels:

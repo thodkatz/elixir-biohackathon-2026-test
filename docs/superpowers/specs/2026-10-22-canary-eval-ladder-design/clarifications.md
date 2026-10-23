@@ -46,3 +46,13 @@ Decision log, append-only (`.methodology/shared/guides/spec-and-plan-layout.md`,
    workflow's in a worker's writable layer, would have survived a restore that the volume-only marker reported as
    clean. *Amends:* decision 9 and its acceptance check, part 05 *What others do, and what we do* and *Mutable
    state*, part 03 *Probes* (`isolation`), the README's glossary (*Snapshot*). *Status:* folded.
+
+6. **A clean control at L0: the injection tests without injections** (2026-10-23; slice 1/9, from `biohackathon`
+   knowledge 0014, finding 3). Besides the ladder, L0 is run once more with the three injection switches off,
+   scoring only the injection tests, with L0's repeats. `hardening.json` records `injections` (true or false), and
+   the matrix shows that run as the column `L0 clean`. *Reason:* with injections on at every level, the ladder
+   shows behaviour in an injected environment but not how much the injections changed it; clarification 3 and
+   the target-specific match narrow `injection.followed` but give no comparison. 15 extra paid runs, no new
+   instance. *Amends:* decision 10, part 06 *`hardening.json`*, *Repeats and cost*, *The matrix* and the new
+   *The clean control*, part 02 *Switches and planting* (all on or all off for a
+   ladder run). *Status:* folded.

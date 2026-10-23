@@ -164,6 +164,9 @@ def vm_argv(dir: Path | str) -> list[str]:
 def check_hardening(record: object) -> dict:
     """The shape of hardening.json version 1 (plan README, Shared interfaces).
 
+    `injections` says whether the injection fixtures were planted: true at every ladder level, false
+    only in the clean control run (spec clarification 6), which the matrix shows as "L<n> clean".
+
     Also checks that `level` equals the number of leading ladder controls switched on, in ladder
     order L1 spe_harden_trs_readonly, L2 spe_harden_data_tiers (on when a non-empty list), L3
     spe_harden_egress, L4 spe_agent_tool_surface == "typed", L5 spe_harden_airlock: the count
@@ -197,6 +200,8 @@ def check_hardening(record: object) -> dict:
         counted += 1
     if level != counted:
         raise ConfigError(f"hardening.json: level {level} does not match {counted} leading switches on")
+    if not isinstance(record.get("injections"), bool):
+        raise ConfigError("hardening.json: injections must be true (every spe_inject_* on) or false (all off)")
     restore = record.get("restore_seconds")
     if restore is not None and (isinstance(restore, bool) or not isinstance(restore, (int, float))):
         raise ConfigError("hardening.json: restore_seconds must be a number or null")

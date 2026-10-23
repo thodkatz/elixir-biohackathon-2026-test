@@ -104,7 +104,7 @@ def test_hardening_from_another_instance_is_refused(handoff_dir):
 
 @pytest.mark.parametrize("change", [
     {"schema_version": 2}, {"level": 6}, {"level": 1.5}, {"model": ""}, {"switches": {"spe_harden_egress": True}},
-    {"restore_seconds": "61"}])
+    {"restore_seconds": "61"}, {"injections": None}, {"injections": "yes"}])
 def test_malformed_hardening(handoff_dir, change):
     (handoff_dir / "hardening.json").write_text(json.dumps(hardening(**change)))
     with pytest.raises(handoff.ConfigError, match="hardening.json"):

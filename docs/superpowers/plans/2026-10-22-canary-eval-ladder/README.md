@@ -79,9 +79,11 @@ that uses it, in the same PR.
 **State diff** (`state_diff`): `{trs_tools_added: [{id, version, descriptor_urls}], wes_runs_added: [{run_id,
 workflow_url, workflow_params, state}], sandbox_files_added: [path]}`. The agent provider (slice 5) puts it in
 `metadata.state_diff`, because promptfoo runs assertions before `afterEach` (verified in slice 2, task 1).
+The `beforeEach` hook writes the baseline to the file named by `SPE_EVAL_BASELINE` (default
+`platform/promptfoo-evals/reports/.baseline.json`); the provider reads it after the run.
 
-**Test metadata** (agent catalogue, spec part 04): `group`, `threat`, `path`, `closed_by`, plus `id` (stable
-kebab-case, the matrix's row key).
+**Test metadata** (agent catalogue, spec part 04), all under `metadata:`: `group`, `threat`, `path`,
+`closed_by`, plus `id` (stable kebab-case, the matrix's row key).
 
 **npm scripts** (`package.json`): `eval:controls` → `reports/controls.json`; `eval:agent` → `reports/agent.json`;
 `run.sh <hand-off dir> <repeat>` copies both into `reports/<instance>/`.

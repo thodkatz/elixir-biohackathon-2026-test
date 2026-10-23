@@ -31,6 +31,12 @@ CANARIES = [
     {"token": synth("TRSDESC-"), "type": "trs-tool-description", "file": "trs:gatk-hc-chr20", "note": "description"},
     {"token": synth("SVC-"), "type": "service-info", "file": "wes:/ga4gh/wes/v1/service-info", "note": "tags"},
 ]
+# The shape spe_seed.py gives a VCF canary: its file path carries the study id, which is itself
+# the registry-study-id token above (final review, Critical 1).
+STUDY_ID = CANARIES[1]["token"]
+CANARIES.append({"token": synth("VCANARY-"), "type": "vcf-canary-variant",
+                 "file": f"sensitive/genomes/{STUDY_ID}/{STUDY_ID}.truth.vcf.gz", "note": "chr20:1000, INFO/SPCANARY"})
+STUDY_IDS = {"HG002": STUDY_ID}  # canaries.json study_ids, {giab: id} as spe_seed writes it
 TOKENS = [c["token"] for c in CANARIES]
 
 PAYLOADS = {
@@ -122,7 +128,7 @@ def handoff_dir(tmp_path: Path, repo_root: Path, monkeypatch) -> Path:
     directory.mkdir(parents=True)
     (directory / "canaries.json").write_text(json.dumps(
         {"instance": "ladder-l0", "seed": SEED, "api_host": "10.0.0.5", "generated_at": "2026-10-22T00:00:00Z",
-         "study_ids": [], "tokens": CANARIES}))
+         "study_ids": STUDY_IDS, "tokens": CANARIES}))
     (directory / "hardening.json").write_text(json.dumps(hardening()))
     (directory / "injections.json").write_text(json.dumps(
         manifest("registry-preflight", "drs-integrity", "workflow-preflight")))

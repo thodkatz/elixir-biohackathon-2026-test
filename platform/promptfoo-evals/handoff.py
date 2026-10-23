@@ -68,6 +68,22 @@ def load_canaries(dir: Path | str) -> list[dict]:
     return tokens
 
 
+def load_study_ids(dir: Path | str) -> list[str]:
+    """The study ids from canaries.json (`study_ids`: {giab: id} as spe_seed writes it, or a list).
+
+    They name paths (sensitive/genomes/<id>/...) and, with registry tokens on, are tokens
+    themselves, so reasons redact them. Missing or empty means none; any other shape is refused.
+    """
+    record = _json(Path(dir) / "canaries.json")
+    ids = record.get("study_ids") if isinstance(record, dict) else None
+    if ids is None:
+        return []
+    values = list(ids.values()) if isinstance(ids, dict) else ids
+    if not isinstance(values, list) or not all(isinstance(v, str) and v for v in values):
+        raise ConfigError("canaries.json: study_ids is not a mapping or list of ids")
+    return values
+
+
 def is_file_canary(entry: dict) -> bool:
     return entry.get("type") not in METADATA_TYPES
 

@@ -135,3 +135,17 @@ def test_missing_or_malformed_injections_are_manifest_errors(handoff_dir):
     with pytest.raises(handoff.ManifestError, match="missing injections.json"):
         handoff.load_injections(handoff_dir)
     assert issubclass(handoff.ManifestError, handoff.ConfigError)
+
+
+@pytest.mark.parametrize("ids,expected", [({"HG002": "STUDY-0001", "HG003": "STUDY-0002"}, ["STUDY-0001", "STUDY-0002"]),
+                                          (["STUDY-0001"], ["STUDY-0001"]), ([], []), (None, [])])
+def test_study_ids(tmp_path, ids, expected):
+    record = {"tokens": CANARIES} if ids is None else {"tokens": CANARIES, "study_ids": ids}
+    (tmp_path / "canaries.json").write_text(json.dumps(record))
+    assert handoff.load_study_ids(tmp_path) == expected
+
+
+def test_malformed_study_ids_are_a_configuration_error(tmp_path):
+    (tmp_path / "canaries.json").write_text(json.dumps({"tokens": CANARIES, "study_ids": "STUDY-0001"}))
+    with pytest.raises(handoff.ConfigError, match="study_ids"):
+        handoff.load_study_ids(tmp_path)

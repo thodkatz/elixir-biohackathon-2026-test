@@ -1270,7 +1270,8 @@ Modify: `platform/promptfoo-evals/README.md`, `docs/superpowers/plans/2026-10-22
 (slice 3 status), `AGENTS.md` (*Current work*).
 **Interfaces:** Consumes: `controls_asserts.py check-handoff|gate`, `npm run eval:controls|eval:agent`. Produces:
 `run.sh <hand-off dir> <repeat>`: exit 2 usage or a stale/malformed hand-off, 3 controls mismatch, 4 no agent report;
-copies `hardening.json`, `controls.json`, `agent.json` into `reports/<instance>/`.
+copies `hardening.json`, `controls.json`, `agent.json` into `reports/L<level>/` (the level from `hardening.json`:
+every level of one VM shares one hand-off directory, so the instance name cannot tell the runs apart).
 **Decisions:** 10 (`test_mismatch_refuses_before_any_model_call`); Review Focus 2
 (`test_stale_hardening_refuses_before_npm`); 1 and 3 (the live run, step 5).
 
@@ -1343,7 +1344,7 @@ def test_agrees_then_runs_agent_uncached_and_copies(setup):
     run, work, _ = setup
     code, calls, _ = run(rows())
     assert code == 0 and calls == ["run eval:controls", "run eval:agent -- --repeat 3 --no-cache"]
-    assert sorted(p.name for p in (work / "reports" / "t-01").iterdir()) == [
+    assert sorted(p.name for p in (work / "reports" / "L0").iterdir()) == [
         "agent.json", "controls.json", "hardening.json"]
 
 
@@ -1371,7 +1372,7 @@ def test_bad_repeat(setup, repeat):
 #!/usr/bin/env bash
 # One ladder run for one level and model (spec part 06): the controls suite, then, only if every probe
 # agrees with hardening.json's level, the agent suite (paid: ask the user first), repeated and uncached.
-# Usage: run.sh <hand-off dir> <repeat>. Reports: reports/<instance>/{hardening,controls,agent}.json.
+# Usage: run.sh <hand-off dir> <repeat>. Reports: reports/L<level>/{hardening,controls,agent}.json.
 set -euo pipefail
 if [ $# -ne 2 ] || ! [[ $2 =~ ^[1-9][0-9]*$ ]]; then
   echo "usage: run.sh <hand-off dir> <repeat>" >&2; exit 2
@@ -1394,9 +1395,10 @@ npm run eval:agent -- --repeat "$repeat" --no-cache || status=$?
 if [ ! -s reports/agent.json ]; then
   echo "run.sh: eval:agent wrote no report (exit $status)" >&2; exit 4
 fi
-mkdir -p "reports/$instance"
-cp "$handoff/hardening.json" reports/controls.json reports/agent.json "reports/$instance/"
-echo "run.sh: reports in reports/$instance/ (agent suite exit $status)"
+level=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["level"])' "$handoff/hardening.json")
+mkdir -p "reports/L$level"
+cp "$handoff/hardening.json" reports/controls.json reports/agent.json "reports/L$level/"
+echo "run.sh: $instance, reports in reports/L$level/ (agent suite exit $status)"
 ```
 
 In `platform/promptfoo-evals/README.md` add *One ladder run*: `./run.sh ../ansible/output/<instance> <N>` (N 5

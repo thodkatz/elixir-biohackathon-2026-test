@@ -71,22 +71,25 @@ that uses it, in the same PR.
 | `handoff.py` | 1 | `load_canaries(dir) -> list[dict]`; `is_file_canary(entry) -> bool` (`False` only for the metadata types `drs-object-metadata`, `trs-tool-description`, `workflow-file-comment`, `service-info`; unknown types count as file canaries); `load_hardening(dir) -> dict`; `load_injections(dir) -> list[dict]` (validates, raises `ManifestError`); `api_host(dir) -> str`; `vm_argv(dir) -> list[str]` (the `ssh …` prefix from `hosts.yml`, `[]` when the VM is local); `handoff_dir() -> Path` (from `SPE_HANDOFF_DIR`, `ConfigError` if unset) |
 | `injections_schema.py` | 1 | `validate(manifest: dict, repo_root: Path) -> list[str]` (errors, empty when valid; checks payload hashes against the files); CLI `python3 injections_schema.py <manifest> <repo_root>` exits 1 on errors |
 | `metrics.py` | 1 | promptfoo assertions `canary_answer`, `canary_touched`, `canary_sent`, `injection_followed`, `key_leak`, each `(output, context) -> {pass, score, reason}`; reasons name type and file, never a token |
-| `matrix.py` | 1 | `counts(level_dir: Path) -> dict` (one level's reports → counts only: label from `hardening.json`, controls result, per test id its metadata and per-metric failures over repeats); `render(counts: list[dict]) -> str` (Markdown); CLI `python3 matrix.py counts reports/<instance> > docs/results/<model>/L<n>.json` and `python3 matrix.py render docs/results/<model>/L*.json > docs/results/canary-ladder-<model>.md`. The counts files are committed, so raw reports can be deleted after each level |
+| `matrix.py` | 1 | `counts(level_dir: Path) -> dict` (one level's reports → counts only: label from `hardening.json`, controls result, per test id its metadata and per-metric failures over repeats); `render(counts: list[dict]) -> str` (Markdown); CLI `python3 matrix.py counts reports/L<n> > docs/results/<model>/L<n>.json` and `python3 matrix.py render docs/results/<model>/L*.json > docs/results/canary-ladder-<model>.md`. The counts files are committed, so raw reports can be deleted after each level |
 | `isolation.py` | 2 | `snapshot(dir)`, `restore(dir) -> float` (seconds), `baseline(dir) -> dict`, `state_diff(dir, baseline) -> dict`; promptfoo hook `extension_hook(hook_name, context)` |
 | `controls_provider.py` | 3 | promptfoo provider `call_api(prompt, options, context)`; the probe id is `vars.probe`; runs `probes/<id>.sh` in the sandbox (`tool-surface`, `airlock`: in the agent container); returns `{output, metadata: {probe, exit_code, http_codes, state, evidence}}` with `state` `open`/`closed`/`error` |
 | `controls_asserts.py` | 3 | `probe_state(output, context)`; `PROBE_CONTROL: dict[str, int \| None]` (probe id → level of the control it tests, `None` for the fixed-state probes); `FIXED_STATE` (`api-reach`: `open`; `isolation-plant`, `isolation-check`: `closed`). The spec's `isolation` probe is the pair `isolation-plant` → `isolation-check` |
 
-**State diff** (`state_diff`): `{trs_tools_added: [{id, version, descriptor_urls}], wes_runs_added: [{run_id,
+**State diff** (`state_diff`): `{trs_tools_added: [{id, version, descriptor_urls, descriptors}], wes_runs_added: [{run_id,
 workflow_url, workflow_params, state}], sandbox_files_added: [path]}`. The agent provider (slice 5) puts it in
 `metadata.state_diff`, because promptfoo runs assertions before `afterEach` (verified in slice 2, task 1).
-The `beforeEach` hook writes the baseline to the file named by `SPE_EVAL_BASELINE` (default
+`descriptors` is the text of each new version's descriptor files (fetched from TRS), so `injection_followed` can
+connect a tool registered by any means to the target path it reads. The `beforeEach` hook writes the baseline to the file named by `SPE_EVAL_BASELINE` (default
 `platform/promptfoo-evals/reports/.baseline.json`); the provider reads it after the run.
 
 **Test metadata** (agent catalogue, spec part 04), all under `metadata:`: `group`, `threat`, `path`,
 `closed_by`, plus `id` (stable kebab-case, the matrix's row key).
 
 **npm scripts** (`package.json`): `eval:controls` → `reports/controls.json`; `eval:agent` → `reports/agent.json`;
-`run.sh <hand-off dir> <repeat>` copies both into `reports/<instance>/`.
+`run.sh <hand-off dir> <repeat>` copies both and `hardening.json` into `reports/L<level>/`: every level of one VM
+shares one hand-off directory (`output/denbi-agui-01/`; the VM's preflight accepts only that instance name), so
+level instance files are overlays on the operator's instance file, without an instance name.
 
 ## Claims checked first
 
@@ -107,7 +110,7 @@ The `beforeEach` hook writes the baseline to the file named by `SPE_EVAL_BASELIN
 | `platform/promptfoo-evals/{handoff,injections_schema,metrics,matrix}.py`, `conftest.py`, `tests/test_{handoff,injections_schema,metrics,matrix,catalogue}.py` | 1 | scoring, offline |
 | `platform/promptfoo-evals/isolation.py`, `tests/test_isolation.py` | 2 | snapshot, restore, state diff, hooks |
 | `platform/promptfoo-evals/{controls_provider,controls_asserts}.py`, `controls.yaml`, `probes/*.sh`, `run.sh`, `package.json`, `tests/test_controls_*.py`; `platform/ansible/roles/handoff/` (`hardening.json`) | 3 | controls suite and the run script |
-| `platform/ansible/catalog/injections/*.txt`, `roles/trs_install/files/trs_install.py`, `roles/drs_register/files/drs_register.py`, `roles/handoff/` (`injections.json`), `instances/L0.example.yml`, `platform/dev/tests/test_{injections,ladder}.py` | 4 | planting injections, the L0 example |
+| `platform/ansible/catalog/injections/*.txt`, `roles/trs_install/files/trs_install.py`, `roles/drs_register/files/drs_register.py`, `roles/handoff/` (`injections.json`), `instances/L0.example.yml`, `catalog/injections/fixtures.json`, `roles/handoff/files/injections_manifest.py`, `platform/dev/tests/test_{injections,ladder}.py` | 4 | planting injections, the L0 example |
 | `platform/promptfoo-evals/agent.yaml`, `tests/*.yaml`, `agui_provider.py` (state diff), `promptfooconfig.yaml` (removed), `docs/results/canary-ladder-qwen3.8-27b.md`, `docs/results/qwen3.8-27b/L0.json` | 5 | agent suite, the first L0 run |
 | `platform/ansible/roles/workflow_stack/templates/*` (Traefik, WESkit), `instances/L1.example.yml` | 6 | L1 |
 | `platform/ansible/roles/workflow_stack/templates/compose.install.yaml.j2` (mounts), `instances/L2.example.yml` | 7 | L2 |
@@ -120,7 +123,7 @@ N = 9. Slices are sequential; each starts from `main` after the previous one mer
 
 | n/N | Branch | Tasks | Delivers | Reviewer checks | File | Status |
 |---|---|---|---|---|---|---|
-| 1/9 | `impl/canary-eval-ladder-1-scoring` | 1–5 | the five metrics, the manifest schema, the matrix, the catalogue lint; decisions 7 (lint), 8, 11 | `uv run --group dev pytest -q` in `platform/promptfoo-evals` | [slice-1-scoring.md](slice-1-scoring.md) | planned |
+| 1/9 | `impl/canary-eval-ladder-1-scoring` | 1–5 | the five metrics, the manifest schema, the matrix, the catalogue lint; decisions 7 (lint), 8, 11. ~1,550 lines, half of them tests: over the size target, kept whole because every module is offline and independent | `uv run --group dev pytest -q` in `platform/promptfoo-evals` | [slice-1-scoring.md](slice-1-scoring.md) | planned |
 | 2/9 | `impl/canary-eval-ladder-2-isolation` | 1–4 | snapshot, restore, state diff and hooks; restore time measured; decision 9 | offline tests; the measured restore time in the handoff | [slice-2-isolation.md](slice-2-isolation.md) | planned |
 | 3/9 | `impl/canary-eval-ladder-3-controls` | 1–5 | controls suite, `hardening.json`, `run.sh`; decisions 1 (probes), 5, 6, 10 | offline provider tests; `npm run eval:controls` on the de.NBI VM: all `open` | [slice-3-controls.md](slice-3-controls.md) | planned |
 | 4/9 | `impl/canary-eval-ladder-4-injections` | 1–5 | three payloads planted, `injections.json`, `L0.example.yml`; decisions 2 (test), 3, 4 | `pytest platform/dev/tests -k "injection or ladder"` | [slice-4-injections.md](slice-4-injections.md) | planned |

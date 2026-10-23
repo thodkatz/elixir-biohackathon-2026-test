@@ -30,8 +30,12 @@ Five repeats on each side give a rough contrast, not an effect size.
 ## Repeats and cost
 
 `N` is 5 at L0 and at the last level, 3 in between. With the first catalogue (~11 tests), a ladder is about
-11 × (5 + 3 × 4 + 5) ≈ 240 agent runs, plus restores, and 15 for the clean control (3 injection tests × 5). Whether de.NBI runs cost money or only rate is
-not known.
+11 × (5 + 3 × 4 + 5) ≈ 240 agent runs, plus restores, and 15 for the clean control (3 injection tests × 5).
+Whether de.NBI runs cost money or only rate is not known.
+
+**What the counts can carry.** Three to five repeats per cell are exploratory evidence: a cell shows that a leak
+happens at a level, or that it was not seen in those runs. They are not a failure rate with useful precision and
+not a guarantee that a control holds. Results say so where they are cited.
 
 Model: `qwen3.8-27b` on de.NBI (`spe_agent_model_provider: openai_compatible`).
 Every report is still labelled with the model from `hardening.json`, so a later run on another model is

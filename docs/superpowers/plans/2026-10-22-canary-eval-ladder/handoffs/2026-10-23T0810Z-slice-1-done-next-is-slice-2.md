@@ -137,6 +137,46 @@ Rulings from the final whole-branch review and its re-review in brackets.
 The final whole-branch review found two Critical and three Important issues; all are fixed (F14–F17 above).
 The re-review of those fixes confirmed all five and raised one more Important, carried into slice 5 (above).
 
+## After the review in `biohackathon` knowledge 0014
+
+The parent repository's record 0014 reviewed the spec and plan at `652239c` and this branch at `29378f5`. All
+three findings were checked against the plan, this code and the compose templates, and accepted; the user chose
+the fuller fix for findings 2 and 3. They are spec clarifications 4–6, folded, and live in these tasks now:
+
+- **Clarification 4, attempt vs delivery** (finding 2): `metrics.canary_delivered` and the sixth `METRICS` name
+  are on this branch. The test receiver is slice 4, task 5 (new; the L0 task is now task 6, with a live receiver
+  check in its step 5); its log reaches the state diff in slice 2, task 3; the egress test and `agent.yaml` in
+  slice 5, task 2 and the dry run's expectations in task 3; the L3 unreachability check in slice 8, task 3,
+  step 5. The render helper `ansible_render.py` moves from slice 6, task 2 to slice 4, task 5, its first user.
+- **Clarification 5, recreate instead of restart** (finding 1): slice 2, task 2 (`compose_projects`, `_cycle`,
+  tests) and task 4, steps 2 and 4 (markers in the sandbox's and a worker's `/tmp`); slice 3, task 3
+  (`isolation-plant`/`isolation-check` with a `/tmp` marker).
+- **Clarification 6, the clean control** (finding 3): `hardening.json` `injections` and the `L0 clean` column are
+  on this branch (`handoff.check_hardening`, `matrix.render`); slice 3, task 4 (the role writes `injections`) and
+  task 5 (`run.sh` extra arguments, `reports/L<n>-clean/`); slice 5, task 4, step 4b (the run, behind its own OK).
+
+**Rulings** (decision, why, cost if wrong):
+
+- **R1** slice 2's own clarification is renumbered 3 → 7 in its task 1 (slice 1 took 3; 4–6 are these) — cost:
+  none.
+- **R2** `slice-1-scoring.md` stays as written (five metrics, no `injections`): it is this slice's plan, and the
+  code plus clarifications 4 and 6 say what holds now — cost: a reader of the slice-1 plan alone sees the older
+  shapes.
+- **R3** a build with some injection switches on records `injections: "mixed"` instead of failing, and
+  `check_hardening` refuses it: such a build is legitimate outside the ladder — cost: the error shows at
+  `run.sh`, not at build time.
+- **R4** the receiver is reached as `backup.spe-eval.test` through `host-gateway` (claims table: checked live in
+  slice 4, task 6); unverified until then — cost if false: map the name to the VM address instead.
+- **R5** `canary.delivered` matches decoded text (JSON, form and URL encoding); a body the agent compresses or
+  encrypts is not seen, and results must say so (spec part 04) — cost: an encoded exfiltration counts as not
+  delivered.
+- **R6** verifying slice 3's planned tests against this branch's modules found two older fixture gaps, fixed in
+  slice 3's plan: its fixtures wrote no `hosts.yml` (which `load_hardening` reads) and `test_run_sh` did not copy
+  `injections_schema.py` (which `handoff.py` imports) — cost: none.
+
+Slice 2's and slice 3's planned code was run from the plan text against this branch (`isolation.py` and its
+tests: 34 passed; `run.sh` and `controls_asserts.py` tests: 26 passed). No live or paid run was made.
+
 **Resume:**
 
 ```bash

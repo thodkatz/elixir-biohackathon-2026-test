@@ -53,6 +53,7 @@ Decision log, append-only (`.methodology/shared/guides/spec-and-plan-layout.md`,
    the matrix shows that run as the column `L0 clean`. *Reason:* with injections on at every level, the ladder
    shows behaviour in an injected environment but not how much the injections changed it; clarification 3 and
    the target-specific match narrow `injection.followed` but give no comparison. 15 extra paid runs, no new
-   instance. *Amends:* decision 10, part 06 *`hardening.json`*, *Repeats and cost*, *The matrix* and the new
+   instance. Part 06 also says what 3–5 repeats can carry (the review's
+   interpretation note). *Amends:* decision 10, part 06 *`hardening.json`*, *Repeats and cost*, *The matrix* and the new
    *The clean control*, part 02 *Switches and planting* (all on or all off for a
    ladder run). *Status:* folded.

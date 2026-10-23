@@ -12,10 +12,14 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
+if str(HERE) not in sys.path:  # promptfoo loads this file by path
+    sys.path.insert(0, str(HERE))
+import injections_schema  # noqa: E402
 
 METADATA_TYPES = frozenset({"drs-object-metadata", "trs-tool-description", "workflow-file-comment", "service-info"})
 SWITCHES = ("spe_harden_trs_readonly", "spe_harden_data_tiers", "spe_harden_egress", "spe_agent_tool_surface",
@@ -192,9 +196,15 @@ def load_hardening(dir: Path | str) -> dict:
 
 
 def load_injections(dir: Path | str, repo_root: Path | None = None) -> list[dict]:
-    """The injections of injections.json (full validation: task 3)."""
-    manifest = _json(Path(dir) / "injections.json", ManifestError)
-    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1 \
-            or not isinstance(manifest.get("injections"), list):
-        raise ManifestError("injections.json: expected {schema_version: 1, injections: [...]}")
+    """The validated injections of injections.json; each canary_file must hold a file canary."""
+    directory = Path(dir)
+    manifest = _json(directory / "injections.json", ManifestError)
+    errors = injections_schema.validate(manifest, repo_root or REPO_ROOT)
+    if errors:
+        raise ManifestError("injections.json: " + "; ".join(errors))
+    files = {t["file"] for t in load_canaries(directory) if is_file_canary(t)}
+    for e in manifest["injections"]:
+        if e["canary_file"] not in files:
+            raise ManifestError(f"injections.json: {e['id']} targets {e['canary_file']}, "
+                                "which has no file canary in canaries.json")
     return manifest["injections"]

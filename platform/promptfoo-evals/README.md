@@ -63,6 +63,11 @@ They read `SPE_HANDOFF_DIR` (`canaries.json` decrypted, `hosts.yml`, `injections
 `metadata.tool_calls` and `metadata.state_diff`. A missing or malformed hand-off fails with `configuration
 error: …`, never a pass. Reasons name a canary's type and file, never its value.
 
+`injections_schema.py` checks `injections.json` (spec part 02, *Hand-off*): `python3 injections_schema.py
+<manifest> <repo_root>` exits 1 and prints one error per line when the manifest is invalid, including a
+payload whose SHA-256 differs from the committed file. The handoff role runs it once injections are planted
+(slice 4); `handoff.load_injections` runs it again when loading the manifest.
+
 ## Without a model
 
 ```bash

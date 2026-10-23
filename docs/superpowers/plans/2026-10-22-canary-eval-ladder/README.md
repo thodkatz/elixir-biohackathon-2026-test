@@ -26,7 +26,8 @@ Every task's requirements include these.
 
 - **Tests.** Offline, before every commit, the suites a slice touches:
   `(cd platform/promptfoo-evals && uv run --group dev pytest -q)` and
-  `uv run --with pytest --with pyyaml pytest platform/dev/tests -q`. New Python under `platform/promptfoo-evals/`
+  `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q` (jinja2 renders the Ansible
+  templates in the tests slices 6–9 add). New Python under `platform/promptfoo-evals/`
   imports only the standard library; PyYAML is a `dev` dependency there, for tests only.
 - **No token ever leaves the operator side in a committed file or a report reason.** Assertions name the canary
   *type* and *file*, never the token (spec part 04, *Reports carry values*). Fixtures use synthetic seeds and
@@ -62,7 +63,7 @@ that uses it, in the same PR.
 | `canaries.json` | handoff role (exists) | `{instance, seed, api_host, generated_at, study_ids, tokens: [{token, type, file, note}]}` |
 | `hosts.yml` | handoff role (exists) | `ssh_target`/`ssh_key`/`ssh_args` (existing) or `ssh_key` + `floating_ip` (openstack), `api_host`, `agent_url`, … |
 | `injections.json` | handoff role, slice 4 | spec part 02, *Hand-off*: `{schema_version: 1, injections: [...]}` |
-| `hardening.json` | handoff role, slice 3 | `{schema_version: 1, instance, level, switches: {spe_harden_trs_readonly, spe_harden_data_tiers, spe_harden_egress, spe_agent_tool_surface, spe_harden_airlock}, frontend, model_provider, model, commit, restore_seconds}`; `spe_agent_tool_surface` already exists (`shell` by default, `typed` for L4: the value the spec calls `ga4gh_typed`); `level` is the number of leading ladder controls switched on (L1…L5 in order), `restore_seconds` is `null` until the isolation hook measures it |
+| `hardening.json` | handoff role, slice 3 | `{schema_version: 1, instance, level, switches: {spe_harden_trs_readonly, spe_harden_data_tiers, spe_harden_egress, spe_agent_tool_surface, spe_harden_airlock}, frontend, model_provider, model, commit, restore_seconds}`; switch types: booleans, except `spe_harden_data_tiers` (a list of tier names, `[]` for all tiers) and `spe_agent_tool_surface`, which already exists (`shell` by default, `typed` for L4: the value the spec calls `ga4gh_typed`); `level` is the number of leading ladder controls switched on (L1…L5 in order), `restore_seconds` is `null` until the isolation hook measures it |
 
 **Modules in `platform/promptfoo-evals/`** (all importable from the tests with `sys.path` set by `conftest.py`):
 
@@ -74,7 +75,7 @@ that uses it, in the same PR.
 | `matrix.py` | 1 | `counts(level_dir: Path) -> dict` (one level's reports → counts only: label from `hardening.json`, controls result, per test id its metadata and per-metric failures over repeats); `render(counts: list[dict]) -> str` (Markdown); CLI `python3 matrix.py counts reports/L<n> > docs/results/<model>/L<n>.json` and `python3 matrix.py render docs/results/<model>/L*.json > docs/results/canary-ladder-<model>.md`. The counts files are committed, so raw reports can be deleted after each level |
 | `isolation.py` | 2 | `snapshot(dir)`, `restore(dir) -> float` (seconds), `baseline(dir) -> dict`, `state_diff(dir, baseline) -> dict`; promptfoo hook `extension_hook(hook_name, context)` |
 | `controls_provider.py` | 3 | promptfoo provider `call_api(prompt, options, context)`; the probe id is `vars.probe`; runs `probes/<id>.sh` in the sandbox (`tool-surface`, `airlock`: in the agent container); returns `{output, metadata: {probe, exit_code, http_codes, state, evidence}}` with `state` `open`/`closed`/`error` |
-| `controls_asserts.py` | 3 | `probe_state(output, context)`; `PROBE_CONTROL: dict[str, int \| None]` (probe id → level of the control it tests, `None` for the fixed-state probes); `FIXED_STATE` (`api-reach`: `open`; `isolation-plant`, `isolation-check`: `closed`). The spec's `isolation` probe is the pair `isolation-plant` → `isolation-check` |
+| `controls_asserts.py` | 3 | `probe_state(output, context)`; `PROBE_CONTROL: dict[str, int \| None]` (probe id → level of the control it tests, `None` for the fixed-state probes); `FIXED_STATE` (`api-reach`, `isolation-plant`: `open`; `isolation-check`: `closed`). The spec's `isolation` probe is the pair `isolation-plant` → `isolation-check` |
 
 **State diff** (`state_diff`): `{trs_tools_added: [{id, version, descriptor_urls, descriptors}], wes_runs_added: [{run_id,
 workflow_url, workflow_params, state}], sandbox_files_added: [path]}`. The agent provider (slice 5) puts it in

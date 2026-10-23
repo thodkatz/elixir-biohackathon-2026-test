@@ -1049,7 +1049,7 @@ hand-off directory, `restore_times.json` and the snapshot stay uncommitted.
 and the markers gone (step 4). Claim "a restore takes about a minute" (claims table).
 
 If the VM's build predates slice 1's hand-off fields, re-provision it in place first
-(`ansible-playbook playbooks/create.yml -e @instances/denbi.yml`, `spe_provision: existing`; no paid calls with
+(`ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml`, `spe_provision: existing`; no paid calls with
 `spe_agui_smoke: false`). The SSH caution of task 1, step 4 applies to every step.
 
 - [ ] **Step 1: Snapshot**

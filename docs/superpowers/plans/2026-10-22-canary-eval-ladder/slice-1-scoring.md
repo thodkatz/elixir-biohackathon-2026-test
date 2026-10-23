@@ -150,8 +150,10 @@ def manifest(*ids: str) -> dict:
 def hardening(instance: str = "ladder-l0", level: int = 0, **overrides) -> dict:
     names = ("spe_harden_trs_readonly", "spe_harden_data_tiers", "spe_harden_egress", "spe_agent_tool_surface",
              "spe_harden_airlock")
-    record = {"schema_version": 1, "instance": instance, "level": level,
-              "switches": {name: n < level for n, name in enumerate(names)},
+    on = {name: n < level for n, name in enumerate(names)}
+    on["spe_harden_data_tiers"] = ["ref", "genomes"] if on["spe_harden_data_tiers"] else []
+    on["spe_agent_tool_surface"] = "typed" if on["spe_agent_tool_surface"] else "shell"
+    record = {"schema_version": 1, "instance": instance, "level": level, "switches": on,
               "frontend": "agui", "model_provider": "openai_compatible", "model": "qwen3.8-27b",
               "commit": "0123456789abcdef0123456789abcdef01234567", "restore_seconds": None}
     record.update(overrides)
@@ -490,9 +492,15 @@ def check_hardening(record: object) -> dict:
     if type(level) is not int or not 0 <= level <= 5:
         raise ConfigError("hardening.json: level must be an integer 0-5")
     switches = record.get("switches")
-    if not isinstance(switches, dict) or sorted(switches) != sorted(SWITCHES) \
-            or not all(isinstance(v, bool) for v in switches.values()):
-        raise ConfigError(f"hardening.json: switches must be exactly {', '.join(SWITCHES)} (booleans)")
+    if not isinstance(switches, dict) or sorted(switches) != sorted(SWITCHES):
+        raise ConfigError(f"hardening.json: switches must be exactly {', '.join(SWITCHES)}")
+    tiers, surface = switches["spe_harden_data_tiers"], switches["spe_agent_tool_surface"]
+    if not all(isinstance(switches[k], bool) for k in ("spe_harden_trs_readonly", "spe_harden_egress",
+                                                        "spe_harden_airlock")) \
+            or not isinstance(tiers, list) or not all(isinstance(t, str) and t for t in tiers) \
+            or surface not in ("shell", "typed"):
+        raise ConfigError("hardening.json: switches have the wrong types (booleans; spe_harden_data_tiers a list "
+                          "of tier names, [] for all; spe_agent_tool_surface shell or typed)")
     restore = record.get("restore_seconds")
     if restore is not None and (isinstance(restore, bool) or not isinstance(restore, (int, float))):
         raise ConfigError("hardening.json: restore_seconds must be a number or null")

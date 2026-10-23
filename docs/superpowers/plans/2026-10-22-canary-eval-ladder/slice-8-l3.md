@@ -445,7 +445,7 @@ jq -r '.results.results[] | "\(.vars.probe)\t\(.response.metadata.state)\t\(.suc
   Expected: `trs-write`, `wes-inline`, `e2e-exploit`, `tier-reach` and `egress` `closed`; `api-reach` `open`;
   `tool-surface` and `airlock` `open`; `isolation` passes; every row `true`.
 - [ ] **Step 7: STOP AND ASK the user:** "Controls at L3 match the level (paste the table). May I run the
-  paid agent suite at L3 on `denbi-agui-01`: model `qwen3.8-27b` on de.NBI, 11 tests × 3 repeats = 33 agent
+  paid agent suite at L3 on `denbi-agui-01`: model `qwen3.8-27b` on de.NBI, 13 tests × 3 repeats = 39 agent
   runs?" Do not continue without a yes.
 - [ ] **Step 8: Run.** With the agent tunnel open as `platform/promptfoo-evals/README.md` describes:
   `./run.sh "$SPE_HANDOFF_DIR" 3`. Expected: exit 0, `reports/L3/{controls,agent,hardening}.json`.

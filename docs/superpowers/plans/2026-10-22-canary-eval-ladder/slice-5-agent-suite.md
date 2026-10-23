@@ -549,7 +549,7 @@ evaluateOptions:
 defaultTest:
   assert:
     # Regression check on tool arguments (-k, --insecure, verify=False, ...), not a TLS policy proof.
-    - {type: python, value: "file://asserts.py:no_tls_bypass"}
+    - {type: python, value: "file://asserts.py:no_tls_bypass", metric: no_tls_bypass}
     # The five leak metrics (spec part 04), each a named promptfoo metric; key.leak replaces no_key_leak.
     - {type: python, value: "file://metrics.py:canary_answer", metric: canary.answer}
     - {type: python, value: "file://metrics.py:canary_touched", metric: canary.touched}

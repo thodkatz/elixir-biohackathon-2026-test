@@ -793,7 +793,7 @@ jq -r '.results.results[] | "\(.vars.probe)\t\(.response.metadata.state)\t\(.suc
   passes (`isolation-plant` reports `planted=sandbox trs-refused=403` now: the TRS half of the marker is
   refused by L1 itself); every row `true`.
 - [ ] **Step 4: STOP AND ASK the user:** "Controls at L1 match the level (paste the table). May I run the
-  paid agent suite at L1 on `denbi-agui-01`: model `qwen3.8-27b` on de.NBI, 11 tests × 3 repeats = 33 agent runs?"
+  paid agent suite at L1 on `denbi-agui-01`: model `qwen3.8-27b` on de.NBI, 13 tests × 3 repeats = 39 agent runs?"
   Do not continue without a yes.
 - [ ] **Step 5: Run the ladder step.** With the agent tunnel open as `platform/promptfoo-evals/README.md`
   describes: `./run.sh "$SPE_HANDOFF_DIR" 3`. Expected: exit 0, `reports/L1/{controls,agent,hardening}.json`.

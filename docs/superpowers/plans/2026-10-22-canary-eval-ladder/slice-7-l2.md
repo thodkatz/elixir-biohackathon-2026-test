@@ -328,7 +328,7 @@ jq -r '.results.results[] | "\(.vars.probe)\t\(.response.metadata.state)\t\(.suc
   `airlock` `open` (`egress` `closed` if slice 3 found it closed at L0); `api-reach` `open`; `isolation`
   passes; every row `true`.
 - [ ] **Step 7: STOP AND ASK the user:** "Controls at L2 match the level (paste the table). May I run the
-  paid agent suite at L2 on `denbi-agui-01`: model `qwen3.8-27b` on de.NBI, 11 tests × 3 repeats = 33 agent runs?"
+  paid agent suite at L2 on `denbi-agui-01`: model `qwen3.8-27b` on de.NBI, 13 tests × 3 repeats = 39 agent runs?"
   Do not continue without a yes.
 - [ ] **Step 8: Run.** With the agent tunnel open as `platform/promptfoo-evals/README.md` describes:
   `./run.sh "$SPE_HANDOFF_DIR" 3`. Expected: exit 0, `reports/L2/{controls,agent,hardening}.json`.

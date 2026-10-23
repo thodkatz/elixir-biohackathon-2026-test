@@ -297,8 +297,7 @@ git commit -s -m "Agent: airlock module redacting classes of sensitive data (dec
 `SPE_STUDY_ID_PREFIX` **only when the switch is on**: off, the file renders byte for byte as before, so an instance
 without the switch keeps today's container (decision 3). This replaces the always-present
 `SPE_AIRLOCK={{ 1 if spe_harden_airlock else 0 }}` line, which would have changed every instance's `agent.env`
-and recreated its agent container. **Global constraint change:** the dev-test command gains `--with jinja2`;
-this task rewrites the *Tests* line in the plan's `README.md`.
+and recreated its agent container. The dev-test command already carries `--with jinja2` (plan README, *Global Constraints*).
 
 **Streaming.** With the airlock on, the agent holds each text message's `TEXT_MESSAGE_CONTENT` deltas and sends
 the message redacted, as one delta, just before its `TEXT_MESSAGE_END` (or before `RUN_FINISHED`/`RUN_ERROR` if it
@@ -502,8 +501,7 @@ SPE_STUDY_ID_PREFIX={{ spe_study_id_prefix }}
   arrive whole at their end (the UX cost above), that tool results and reasoning are not filtered, and the CLI
   `python -m spe_agent.airlock`. In `platform/ansible/README.md`, beside the other hardening switches:
   `spe_harden_airlock` (default `false`; only `spe_frontend: agui` has an airlock). In the plan's `README.md`,
-  *Global Constraints*, *Tests*: `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q`;
-  in *File structure*, row 9: add `inventory/group_vars/all.yml`, `platform/dev/tests/test_agui_env.py`.
+  *File structure*, row 9: add `inventory/group_vars/all.yml`, `platform/dev/tests/test_agui_env.py`.
 
 - [ ] **Step 4: Run them.** The two commands of step 2: PASS (5 passed; 5 passed). Then the full suites:
   `(cd platform/agui/pydantic-ai-agent && uv run --group dev pytest -q)` and
@@ -539,7 +537,7 @@ report: `closed`, with `probe_state` failing as *expected open, observed closed*
 - [ ] **Step 1: Converge the VM to L3 plus the airlock** (`spe_provision: existing`, no paid calls,
   `spe_agui_smoke` stays `false`): the create command the newest L3 handoff records, with
   `-e '{"spe_harden_airlock": true}'` appended, e.g.
-  `ansible-playbook playbooks/create.yml -e @instances/denbi.yml -e @instances/L3.example.yml -e '{"spe_harden_airlock": true}' </dev/null`.
+  `ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml -e @instances/L3.example.yml -e '{"spe_harden_airlock": true}' </dev/null`.
   The agent image is rebuilt from this branch; `verify.yml` (without the smoke run) passes.
 
 - [ ] **Step 2: Run only the `airlock` probe** (slice 3 names each controls test after its probe id):

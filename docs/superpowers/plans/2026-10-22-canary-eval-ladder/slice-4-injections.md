@@ -54,7 +54,7 @@ target_file, canary_file, action, disclosure}]}`), consumed by tasks 2–5.
   and comment fixtures stay in `gatk-hc-chr20`, and `L0.example.yml` installs it. Task 5, step 5 confirms it live
   (the tool answers and carries the payload). If that live check fails because TRS rejects the tool, apply the
   claims table's "if false": change `select.tool_id` of `registry-preflight` and `workflow-preflight` in
-  `fixtures.json` to `wes-drs-smoke`, add clarification 3 to the spec's `clarifications.md` (part 02's table names
+  `fixtures.json` to `wes-drs-smoke`, add the next clarification (one more than the spec README's *Latest clarification*) to the spec's `clarifications.md` (part 02's table names
   `wes-drs-smoke` as the surface), and record decision, why and cost-if-wrong in the handoff. Consequence to note for
   slice 5 either way: the agent may try to *run* `gatk-hc-chr20` on dummy data and fail; utility tests must not need it.
 

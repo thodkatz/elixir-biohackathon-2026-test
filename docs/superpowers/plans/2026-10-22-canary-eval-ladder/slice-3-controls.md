@@ -58,7 +58,7 @@ $SSH "docker exec spe-frontend-sandbox-1 curl -sS -m 15 -o /dev/null -w '%{http_
 
 True when: `bridge internal=false` and an HTTP code other than `000`. **If false** (any `000`, or
 `internal=true`): P4 is closed at L0. In task 4 write `"egress": 0` in `PROBE_CONTROL` (closed at every level),
-add clarification 3 *"P4 is closed at L0 on de.NBI: the sandbox has no egress (`<evidence>`); the `egress` probe
+add the next clarification (after task 1's two) *"P4 is closed at L0 on de.NBI: the sandbox has no egress (`<evidence>`); the `egress` probe
 expects `closed` everywhere and slice 8 is dropped"* (amends decision 1 and part 01, L3), and in the PR mark slice
 8's row `dropped` in the plan README.
 

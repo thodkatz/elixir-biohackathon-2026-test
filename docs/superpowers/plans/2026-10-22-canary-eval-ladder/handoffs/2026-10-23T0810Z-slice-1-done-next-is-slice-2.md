@@ -30,7 +30,7 @@ PR #3 (`impl/canary-eval-ladder-1-scoring`). Delivered: `handoff.py`, `metrics.p
 
 ## Rulings (this slice's departures from the plan)
 
-Decision, why, cost if wrong — full text in `.superpowers/sdd/slice-1-scoring/progress.md`.
+Decision, why, cost if wrong.
 
 - **F1** `metrics.py` imports `_result`/`_calls` from `asserts` instead of copying them — avoids duplication a
   review would flag — cost if wrong: couples `metrics.py` to `asserts`'s private helpers.
@@ -99,7 +99,7 @@ Decision, why, cost if wrong — full text in `.superpowers/sdd/slice-1-scoring/
 
 ## Deferred minors
 
-Rulings from the final whole-branch review (`.superpowers/sdd/slice-1-scoring/final-review.md`) in brackets.
+Rulings from the final whole-branch review and its re-review in brackets.
 
 - `metrics.py`: `\b403\b` anywhere in a result text adds a `"(HTTP 403)"` label, not only when the 403 is the
   call's own HTTP status (task 2) — label wording only, no mis-scoring. [Can wait: slice 3, when `http_codes`
@@ -117,7 +117,8 @@ Rulings from the final whole-branch review (`.superpowers/sdd/slice-1-scoring/fi
 - Final review, Minor 2: only the five `METRICS` may carry `metric:`. [Fixed in docs: *Shared interfaces*, the
   promptfoo-evals README and *For slice 5* above.]
 - Final review, Minor 3: clarification 3 says "exposed … first", `injection_followed` does not check order.
-  [Open: needs a ruling between comparing call indices and dropping "first"; slice 4 or 5 decides.]
+  [Ruling: the spec wins, compare call indices; written into slice 5, task 2 (*Carried from slice 1*). Cost if
+  wrong: none until slice 5, since no agent runs before it.]
 - Final review, Minor 4: a payload without `[a-z0-9]` words has an empty fingerprint that matches every
   call. [Can wait to slice 4, which writes the payloads; refuse in `injections_schema` then.]
 - Final review, Minor 5: `matrix._check` is shallow (a string `level` raises `TypeError`). [Can wait: counts
@@ -125,9 +126,16 @@ Rulings from the final whole-branch review (`.superpowers/sdd/slice-1-scoring/fi
 - Final review, Minor 6: test labels in `render` come from the first level that has the test. [Can wait: the
   catalogue is fixed across one model's levels.]
 - Final review, Minor 7: stale line references in this list. [Fixed here.]
+- Re-review of the fixes, Important: with the API keys unset, `key.leak` returns "cannot check: …", which
+  `matrix.counts` counts as a leak, not an error. [Ruling: written into slice 5, task 2, where `key.leak` is
+  first wired into a suite. Cost if wrong: none before slice 5's first run.]
+- Re-review, Minor: `matrix` classifies errors per row, so a real leak on a row where another assertion raised
+  counts only as an error. [Can wait: visible as an error, never a pass; revisit if slice 5's L0 shows errors.]
+- Re-review, Minor: a model-graded reason that happens to start with `configuration error:` or `Error running
+  Python script:` would count as an error. [Can wait: no LLM graders in the plan.]
 
-The final whole-branch review found two Critical and three Important issues; all are fixed (F14–F17 above,
-report in `.superpowers/sdd/slice-1-scoring/final-fix-report.md`).
+The final whole-branch review found two Critical and three Important issues; all are fixed (F14–F17 above).
+The re-review of those fixes confirmed all five and raised one more Important, carried into slice 5 (above).
 
 **Resume:**
 

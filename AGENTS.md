@@ -136,8 +136,9 @@ One line per active track: where it stands, the next unit, and where its handoff
 to things. Who is working on what is shown by the open PRs, not here (*Claiming a unit* in the workflow guide).
 Each unit's PR updates its track's line; the last slice removes it.
 
-- **Canary evaluation ladder** (biohackathon 0013): spec (#1) and plan (#2) merged. **Next: slice 1/9**
-  `impl/canary-eval-ladder-1-scoring`. Handoff: `ls docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs | tail -1`.
+- **Canary evaluation ladder** (biohackathon 0013): slice 1 PR #3. **Next: slice 2/9**
+  `impl/canary-eval-ladder-2-isolation`. Handoff:
+  `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/2026-10-23T0810Z-slice-1-done-next-is-slice-2.md`.
 - **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice.
 
 ## Project in brief

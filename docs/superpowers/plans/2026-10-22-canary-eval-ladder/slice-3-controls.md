@@ -431,7 +431,8 @@ Test: `platform/promptfoo-evals/tests/test_controls_probes.py`.
 agent container `spe_agent.config.load_config`, `spe_agent.sandbox.{SandboxClient, operations_from_openapi,
 select_operations}`, `$SPE_AGENT_CONFIG`, `$SANDBOX_API_KEY`. Produces, **for slice 9**: the agent-side entry
 point `python -m spe_agent.airlock`: reads an answer on stdin, writes to stdout the answer as the agent would
-stream it under its configuration (`SPE_AGENT_CONFIG`; unchanged when the airlock is off), no added newline, exit 0.
+stream it under its configuration (the container's `SPE_AIRLOCK` and `SPE_STUDY_ID_PREFIX` environment, which
+`docker exec` inherits; unchanged when the airlock is off), no added newline, exit 0.
 **Decisions:** 1 (the probes of P2–P4 and the L4/L5 probes); Review Focus 3 (`test_isolation_check_marker_left_fails`):
 a restore that left the marker is a failure, never a pass.
 

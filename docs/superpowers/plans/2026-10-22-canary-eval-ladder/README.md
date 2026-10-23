@@ -112,9 +112,9 @@ level instance files are overlays on the operator's instance file, without an in
 | `platform/promptfoo-evals/{controls_provider,controls_asserts}.py`, `controls.yaml`, `probes/*.sh`, `run.sh`, `package.json`, `tests/test_controls_*.py`; `platform/ansible/roles/handoff/` (`hardening.json`) | 3 | controls suite and the run script |
 | `platform/ansible/catalog/injections/*.txt`, `roles/trs_install/files/trs_install.py`, `roles/drs_register/files/drs_register.py`, `roles/handoff/` (`injections.json`), `instances/L0.example.yml`, `catalog/injections/fixtures.json`, `roles/handoff/files/injections_manifest.py`, `platform/dev/tests/test_{injections,ladder}.py` | 4 | planting injections, the L0 example |
 | `platform/promptfoo-evals/agent.yaml`, `tests/*.yaml`, `agui_provider.py` (state diff), `promptfooconfig.yaml` (removed), `docs/results/canary-ladder-qwen3.8-27b.md`, `docs/results/qwen3.8-27b/L0.json` | 5 | agent suite, the first L0 run |
-| `platform/ansible/roles/workflow_stack/templates/*` (Traefik, WESkit), `instances/L1.example.yml` | 6 | L1 |
-| `platform/ansible/roles/workflow_stack/templates/compose.install.yaml.j2` (mounts), `instances/L2.example.yml` | 7 | L2 |
-| `platform/ansible/roles/agui/templates/docker-compose.yml.j2` (networks), `instances/L3.example.yml` | 8 | L3 |
+| `platform/ansible/roles/workflow_stack/templates/*` (Traefik: TRS read-only for the sandbox, operator writes on a localhost entrypoint; WESkit), a standard-library WES write guard, `roles/sandbox` runbook as a template, `instances/L1.example.yml`, `platform/dev/tests/ansible_render.py` and `golden/` (today's renders, for decision 3) | 6 | L1 |
+| `platform/ansible/roles/workflow_stack/templates/compose.install.yaml.j2` (WESkit and worker mounts by tier), the verify smoke input, `instances/L2.example.yml` | 7 | L2 |
+| `platform/ansible/roles/agui/templates/docker-compose.yml.j2` (a fixed sandbox address), `DOCKER-USER` firewall rules, `instances/L3.example.yml` | 8 | L3 |
 | `platform/agui/pydantic-ai-agent/` (airlock), `roles/agui/templates/agent.env.j2` | 9 | L5 airlock |
 
 ## PR slices
@@ -128,7 +128,7 @@ N = 9. Slices are sequential; each starts from `main` after the previous one mer
 | 3/9 | `impl/canary-eval-ladder-3-controls` | 1–5 | controls suite, `hardening.json`, `run.sh`; decisions 1 (probes), 5, 6, 10 | offline provider tests; `npm run eval:controls` on the de.NBI VM: all `open` | [slice-3-controls.md](slice-3-controls.md) | planned |
 | 4/9 | `impl/canary-eval-ladder-4-injections` | 1–5 | three payloads planted, `injections.json`, `L0.example.yml`; decisions 2 (test), 3, 4 | `pytest platform/dev/tests -k "injection or ladder"` | [slice-4-injections.md](slice-4-injections.md) | planned |
 | 5/9 | `impl/canary-eval-ladder-5-agent-suite` | 1–4 | `agent.yaml` and the first catalogue; the first L0 run (paid) and its matrix; decision 7 | the lint; the committed matrix at L0 | [slice-5-agent-suite.md](slice-5-agent-suite.md) | planned |
-| 6/9 | `impl/canary-eval-ladder-6-l1` | 1–4 | `spe_harden_trs_readonly`; L1 run | controls suite at L1; L1 column | [slice-6-l1.md](slice-6-l1.md) | planned |
+| 6/9 | `impl/canary-eval-ladder-6-l1` | 1–5 | `spe_harden_trs_readonly`; L1 run | controls suite at L1; L1 column | [slice-6-l1.md](slice-6-l1.md) | planned |
 | 7/9 | `impl/canary-eval-ladder-7-l2` | 1–3 | `spe_harden_data_tiers`; L2 run | controls suite at L2; L2 column | [slice-7-l2.md](slice-7-l2.md) | planned |
 | 8/9 | `impl/canary-eval-ladder-8-l3` | 1–3 | `spe_harden_egress`; L3 run | controls suite at L3; L3 column | [slice-8-l3.md](slice-8-l3.md) | planned |
 | 9/9 | `impl/canary-eval-ladder-9-airlock` | 1–3 | the L5 airlock module and switch; decision 12 | airlock unit tests; `airlock` probe `closed` with the switch on | [slice-9-airlock.md](slice-9-airlock.md) | planned |

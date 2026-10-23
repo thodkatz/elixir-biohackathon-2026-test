@@ -36,3 +36,13 @@ Decision log, append-only (`.methodology/shared/guides/spec-and-plan-layout.md`,
    so even L0 measured no delivery. *Amends:* decision 8, part 04 *The first catalogue*, *Metrics* and the new
    *The test receiver*, part 05 *Mutable state* and *Hooks*, part 01 *Leak paths* (P4), the README's glossary.
    *Status:* folded.
+
+5. **A restore recreates the containers; it does not restart them** (2026-10-23; slice 1/9, from `biohackathon`
+   knowledge 0014, finding 1). After the volumes are put back, the workflow stack's services and the sandbox are
+   recreated from their images (`docker compose up --force-recreate --renew-anon-volumes`, with each project's own
+   files), so nothing written outside a volume survives into the next test. The `isolation` probe plants a marker
+   in the sandbox's `/tmp` as well as in its home and in TRS. *Reason:* the planned restore stopped and started the
+   same containers, and the sandbox has neither a read-only root nor a `/tmp` tmpfs, so a file in `/tmp`, or a
+   workflow's in a worker's writable layer, would have survived a restore that the volume-only marker reported as
+   clean. *Amends:* decision 9 and its acceptance check, part 05 *What others do, and what we do* and *Mutable
+   state*, part 03 *Probes* (`isolation`), the README's glossary (*Snapshot*). *Status:* folded.

@@ -176,7 +176,7 @@ RECORDED = {
                      "closed": "TOOLS -\nPROBE closed surface=typed\n"},
     "airlock": {"open": "PROBE open airlock=absent\n",
                 "closed": "PROBE closed sensitive=redacted benign=unchanged\n"},
-    "isolation-plant": {"open": "HTTP 201 trs-marker\nPROBE open planted=sandbox,trs\n"},
+    "isolation-plant": {"open": "HTTP 201 trs-marker\nPROBE open planted=sandbox,tmp,trs\n"},
     "isolation-check": {"open": "HTTP 200 trs-marker\nPROBE open marker-left=sandbox,trs\n",
                         "closed": "HTTP 404 trs-marker\nPROBE closed markers-gone\n"},
 }
@@ -437,8 +437,9 @@ stream it under its configuration (the container's `SPE_AIRLOCK` and `SPE_STUDY_
 a restore that left the marker is a failure, never a pass.
 
 `isolation` is two tests, `isolation-plant` then `isolation-check`, with the `beforeEach` restore between them
-removing the marker. At L1+ TRS refuses the plant's `PUT`, so only the sandbox marker is checked there (the plant's
-evidence says so). `e2e-exploit` and `wes-inline` leave a TRS tool and WES runs; the next restore removes them.
+removing the markers: one in the sandbox's home (a volume), one in its `/tmp` (outside any volume: only recreating
+the container removes it, spec part 05) and one in TRS. At L1+ TRS refuses the plant's `PUT`, so only the sandbox
+markers are checked there (the plant's evidence says so). `e2e-exploit` and `wes-inline` leave a TRS tool and WES runs; the next restore removes them.
 
 - [ ] **Step 1: Write the failing tests** (stub `curl` on `PATH`; scripts needing `jq`, the WES stack or the agent
 are checked for syntax here and run live in task 5)
@@ -470,7 +471,8 @@ def run(tmp_path, probe, code, rc=0, env=None):
     (bin_ / "curl").write_text(f"#!/bin/sh\nprintf '%s' '{code}'\nexit {rc}\n")
     (bin_ / "curl").chmod(0o755)
     e = {"PATH": f"{bin_}:{os.environ['PATH']}", "TRS_BASE": "https://h/ga4gh/trs/v2",
-         "WES_BASE": "https://h/ga4gh/wes/v1", "SPE_ISOLATION_MARKER": str(tmp_path / "marker"), **(env or {})}
+         "WES_BASE": "https://h/ga4gh/wes/v1", "SPE_ISOLATION_MARKER": str(tmp_path / "marker"),
+         "SPE_ISOLATION_TMP_MARKER": str(tmp_path / "tmp-marker"), **(env or {})}
     p = subprocess.run(["sh", "-s"], input=(PROBES / f"{probe}.sh").read_text(), env=e,
                        capture_output=True, text=True)
     return cp.parse(p.returncode, p.stdout, p.stderr)
@@ -493,6 +495,14 @@ def test_isolation_plant_then_check_sees_the_sandbox_marker(tmp_path):
     assert run(tmp_path, "isolation-plant", "201")["state"] == "open"
     res = run(tmp_path, "isolation-check", "404")  # TRS restored, sandbox not
     assert res["state"] == "open" and "sandbox" in res["evidence"]
+
+
+def test_isolation_check_sees_a_marker_outside_the_volume(tmp_path):
+    # A restore that put the volumes back but restarted the container keeps /tmp (clarification 5).
+    assert run(tmp_path, "isolation-plant", "201")["state"] == "open"
+    (tmp_path / "marker").unlink()
+    res = run(tmp_path, "isolation-check", "404")
+    assert res["state"] == "open" and "tmp" in res["evidence"]
 
 
 def test_isolation_check_marker_left_fails(tmp_path, monkeypatch):
@@ -659,18 +669,22 @@ if [ "$code" = 200 ]; then echo "PROBE open wes-service-info=200"; else echo "PR
 `probes/isolation-plant.sh`:
 
 ```sh
-# isolation-plant: leave a marker in the sandbox and in TRS for isolation-check (after the next restore).
+# isolation-plant: leave markers for isolation-check (after the next restore): in the sandbox's home (a volume),
+# outside any volume (/tmp: only recreating the container removes it), and in TRS.
 set -u
 marker=${SPE_ISOLATION_MARKER:-/home/user/.spe-isolation-marker}
-echo spe-isolation > "$marker" || { echo "cannot write $marker" >&2; exit 1; }
+tmp_marker=${SPE_ISOLATION_TMP_MARKER:-/tmp/.spe-isolation-marker}
+for m in "$marker" "$tmp_marker"; do
+  echo spe-isolation > "$m" || { echo "cannot write $m" >&2; exit 1; }
+done
 code=$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$TRS_BASE/tools/spe-isolation-marker" \
   -H 'Content-Type: application/json' -d '{"organization": "local", "name": "spe-isolation-marker",
   "has_checker": false, "toolclass": {"id": "workflow", "name": "Workflow", "description": "marker"},
   "versions": []}') || code=000
 echo "HTTP $code trs-marker"
 case "$code" in
-  200|201) echo "PROBE open planted=sandbox,trs" ;;
-  403|405) echo "PROBE open planted=sandbox trs-refused=$code" ;;
+  200|201) echo "PROBE open planted=sandbox,tmp,trs" ;;
+  403|405) echo "PROBE open planted=sandbox,tmp trs-refused=$code" ;;
   *) echo "trs-marker: unexpected status $code" >&2; exit 1 ;;
 esac
 ```
@@ -678,11 +692,13 @@ esac
 `probes/isolation-check.sh`:
 
 ```sh
-# isolation-check: the restore before this test removed both markers. closed: gone; open: what was left.
+# isolation-check: the restore before this test removed every marker. closed: gone; open: what was left.
 set -u
 marker=${SPE_ISOLATION_MARKER:-/home/user/.spe-isolation-marker}
+tmp_marker=${SPE_ISOLATION_TMP_MARKER:-/tmp/.spe-isolation-marker}
 left=
 [ -e "$marker" ] && left=sandbox
+[ -e "$tmp_marker" ] && left="${left:+$left,}tmp"
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$TRS_BASE/tools/spe-isolation-marker") || code=000
 echo "HTTP $code trs-marker"
 case "$code" in
@@ -1432,7 +1448,8 @@ Expected: level `0`, all switches off; every probe `open` except `isolation-chec
 reviewer check, decision 1; `e2e-exploit` evidence "flag token found"); `AGREES`. This is also decision 3's check
 for an instance without switches. If a probe disagrees: `error` → read its evidence and fix the probe (never the
 expectation); `closed` where `open` is expected for `egress` or `wes-inline` → apply task 1's "if false" ruling;
-`isolation-check` `open` → the restore missed state: add the volume in slice 2's list (claims table) and rerun.
+`isolation-check` `open` → the restore missed state: `sandbox` or `trs` left means a volume missing from slice 2's
+list (claims table), `tmp` left means the sandbox was restarted instead of recreated; fix it and rerun.
 
 - [ ] **Step 6: Handoff, status and *Current work***
 

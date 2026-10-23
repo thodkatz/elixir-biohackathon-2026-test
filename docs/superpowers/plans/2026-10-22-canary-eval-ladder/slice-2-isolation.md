@@ -9,7 +9,8 @@ live de.NBI VM, and the restore time is measured there.
 **Implements** (spec [`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/`](../../specs/2026-10-22-canary-eval-ladder-design/README.md)):
 
 - [05](../../specs/2026-10-22-canary-eval-ladder-design/05-isolation.md), *What others do, and what we do*,
-  *Mutable state*, *Hooks* — decision **9**, amended by clarification 7 (task 1).
+  *Mutable state*, *Hooks* — decision **9**, amended by clarifications 5 (containers recreated, not restarted) and 7
+  (task 1).
 - [03](../../specs/2026-10-22-canary-eval-ladder-design/03-controls-suite.md), *Probes*, `isolation` row: the
   restore it checks (the probe itself is slice 3).
 - [06](../../specs/2026-10-22-canary-eval-ladder-design/06-runs-and-results.md), *`hardening.json`*: the hook
@@ -21,7 +22,7 @@ interfaces and the claims table: [plan README](README.md). Builds on slice 1: `h
 
 **Names fixed by this slice** (read from the templates at `0783708`; task 1 checks them live):
 
-| Compose project (template) | Volumes restored | Declared, not restored | Containers stopped and started |
+| Compose project (template) | Volumes restored | Declared, not restored | Containers stopped and recreated |
 |---|---|---|---|
 | `workflow-stack` (`roles/workflow_stack/templates/compose.install.yaml.j2`) | `workflow-stack_wes-mongodb`, `_redis-data`, `_weskit-data`, `_weskit-workflows`, `_trs-mongodb`, `_drs-mongodb` | `_slurm-master-var`, `_slurm-master-spool` (mounted by no service) | `workflow-stack-{database,result_broker,trs-mongodb,drs-mongodb,rest,submission_worker,monitoring_worker,monitoring_scheduler,trs-filer,drs-filer}-1`; `traefik` (stateless) and the one-shot `weskit-data-init` stay as they are |
 | `spe-frontend` (`roles/agui/templates/docker-compose.yml.j2`) | `spe-frontend_open-terminal-data` | `spe-frontend_agent-runs` (the agent's run log, part 05) | `spe-frontend-sandbox-1`; the agent keeps running |
@@ -30,6 +31,14 @@ Part 05's table names `weskit-data`, `wes-mongodb`, `redis-data`, the filers' Mo
 `open-terminal-data`; the template adds `weskit-workflows` (WESkit's workflow directory, where TRS workflows are
 cached), which is restored too. The sandbox volume is restored from the snapshot rather than recreated empty: the
 same state when the build leaves it empty, and correct if a later build plants something there.
+
+**The containers are recreated, not restarted** (spec part 05, clarification 5). `docker start` would bring back
+each container's writable layer: a file the agent left in the sandbox's `/tmp`, or a workflow in a worker's,
+would reach the next test. After the volumes are back, each project's listed services are recreated from their
+images with `docker compose up -d --force-recreate --renew-anon-volumes --no-deps --no-build --pull never`, using
+the project's own compose files and directory read from the containers' Compose labels before they stop. Nothing
+on the agent path is written into a running container by the build (the sandbox's runbook and CA are in its
+image; no role runs `docker exec` or `docker cp` on these services), so a recreated container is the built one.
 
 ### Task 1: Verify the promptfoo hooks and the volumes
 
@@ -142,12 +151,15 @@ eval "$VM docker volume ls --format '{{.Name}}'" | sort
 eval "$VM sh -s" <<'EOF'
 docker ps --format '{{.Names}}' | sort | xargs docker inspect -f \
   '{{.Name}}{{range .Mounts}} {{.Type}}:{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}:rw={{.RW}}{{end}}'
+docker ps --format '{{.Names}}' | sort | xargs docker inspect -f \
+  '{{.Name}} {{index .Config.Labels "com.docker.compose.project.working_dir"}} {{index .Config.Labels "com.docker.compose.project.config_files"}}'
 EOF
 ```
 
 Record in the handoff: the project names (`workflow-stack`, `spe-frontend` expected), the volume list, and every
 read-write mount. **True when** every `volume:…:rw=true` mount is in the table above (restored or "not restored"),
-the container names match, and the only read-write bind mount is none (Traefik's socket and the config mounts are
+the container names match, every container to recreate has a Compose working directory and config file
+(the restore reads them), and the only read-write bind mount is none (Traefik's socket and the config mounts are
 `rw=false`). **If false:** add each missing volume to `VOLUMES` (task 2) and to its `test_volumes_match_the_compose_templates`
 expectation, and record it as a ruling in the handoff; a renamed container goes into `CONTAINERS`.
 
@@ -201,9 +213,12 @@ git commit -s -m "Verify promptfoo hook order; the provider takes the state diff
 `vm_runner(dir) -> Runner`; `snapshot_key(dir) -> tuple[str, str]` (instance, `generated_at` without colons);
 `snapshot_exists(dir, run=None) -> bool`; `snapshot(dir, run=None, timeout=300.0, clock=…, sleep=…) -> None`;
 `restore(dir, run=None, timeout=300.0, clock=…, sleep=…) -> float`; `wait_healthy(run, timeout, clock, sleep)`;
+`compose_projects(run) -> {project: (working_dir, [config_file], [service])}`;
 `IsolationError` ⊃ `RestoreError`; constants `VOLUMES`, `NOT_RESTORED`, `CONTAINERS`, `SANDBOX`, `SNAPSHOT_ROOT`.
 
-**Decisions:** 9 (restore before each test): `test_restore_stops_untars_starts_then_waits`; snapshot keyed to the
+**Decisions:** 9 (restore before each test): `test_restore_stops_untars_recreates_then_waits`; nothing outside a
+volume survives (clarification 5): `test_restore_recreates_every_container_from_its_project`,
+`test_restore_refuses_a_container_without_compose_labels`; snapshot keyed to the
 build: `test_restore_refuses_without_snapshot_of_this_build`; Review Focus 3 (a renamed volume, a stack that
 does not come back): `test_restore_fails_loudly_on_a_missing_volume`, `test_volumes_match_the_compose_templates`,
 `test_restore_raises_when_stack_stays_unhealthy`, `test_restore_raises_when_apis_do_not_answer`.
@@ -245,6 +260,15 @@ def cp(code=0, out="", err=""):
 
 
 HEALTHY = "".join(f"/{c} running none\n" for c in isolation.CONTAINERS)
+DIRS = {"workflow-stack": "/home/ubuntu/workflow-stack", "spe-frontend": "/home/ubuntu/spe-frontend"}
+
+
+def _project(c):
+    return "spe-frontend" if c == isolation.SANDBOX else "workflow-stack"
+
+
+LABELS = "".join(f"/{c}|{_project(c)}|{DIRS[_project(c)]}|{DIRS[_project(c)]}/docker-compose.yml|"
+                 f"{c.removeprefix(_project(c) + '-').removesuffix('-1')}\n" for c in isolation.CONTAINERS)
 
 
 class Clock:
@@ -263,8 +287,9 @@ class FakeVM:
 
     def __init__(self, **over):
         self.calls = []
-        self.rules = {"volume inspect": cp(), EXISTS: cp(), "docker stop": cp(), "docker run": cp(),
-                      "docker start": cp(), "docker inspect": cp(out=HEALTHY), "service-info": cp(out="200 200 200 ")}
+        self.rules = {"volume inspect": cp(), EXISTS: cp(), "com.docker.compose": cp(out=LABELS),
+                      "docker stop": cp(), "docker run": cp(), "--force-recreate": cp(),
+                      "docker inspect": cp(out=HEALTHY), "service-info": cp(out="200 200 200 ")}
         self.rules.update(over)
 
     def __call__(self, argv, stdin=None):
@@ -302,7 +327,7 @@ def test_bad_or_missing_record_is_a_config_error(tmp_path, record):
         isolation.snapshot_key(tmp_path)
 
 
-def test_restore_stops_untars_starts_then_waits(hdir):
+def test_restore_stops_untars_recreates_then_waits(hdir):
     clock = Clock()
 
     def untar(argv, stdin):
@@ -311,8 +336,8 @@ def test_restore_stops_untars_starts_then_waits(hdir):
 
     vm = FakeVM(**{"docker run": untar})
     assert isolation.restore(hdir, run=vm, clock=clock, sleep=clock.sleep) == 40.0
-    order = [vm.index(m) for m in ("volume inspect", EXISTS, "docker stop", "/v/*", "docker start",
-                                   "docker inspect", "service-info")]
+    order = [vm.index(m) for m in ("volume inspect", EXISTS, "com.docker.compose", "docker stop", "/v/*",
+                                   "--force-recreate", "State.Status", "service-info")]
     assert order == sorted(order)
     untar_call = vm.calls[vm.index("/v/*")]
     for vol in isolation.VOLUMES:
@@ -339,7 +364,29 @@ def test_restore_raises_when_stack_stays_unhealthy(hdir):
     vm = FakeVM(**{"docker inspect": cp(out=HEALTHY.replace("rest-1 running", "rest-1 exited"))})
     with pytest.raises(isolation.RestoreError, match="not healthy.*rest-1"):
         isolation.restore(hdir, run=vm, timeout=10, clock=clock, sleep=clock.sleep)
-    assert vm.count("docker start") == 1
+    assert vm.count("--force-recreate") == 2
+
+
+def test_restore_recreates_every_container_from_its_project(hdir):
+    vm = FakeVM()
+    isolation.restore(hdir, run=vm)
+    ups = [c for c in vm.calls if "--force-recreate" in c]
+    assert vm.count("docker start") == 0 and len(ups) == 2
+    recreated = set()
+    for up in ups:
+        project = up[up.index("-p") + 1]
+        assert up[:2] == ["docker", "compose"] and up[up.index("--project-directory") + 1] == DIRS[project]
+        assert up[up.index("-f") + 1] == f"{DIRS[project]}/docker-compose.yml"
+        assert {"--renew-anon-volumes", "--no-deps", "--no-build"} <= set(up)
+        recreated |= {f"{project}-{s}-1" for s in up[up.index("--pull") + 2:]}
+    assert recreated == set(isolation.CONTAINERS)  # the agent and traefik are never among them
+
+
+def test_restore_refuses_a_container_without_compose_labels(hdir):
+    vm = FakeVM(**{"com.docker.compose": cp(out=LABELS.replace("|spe-frontend|", "|||"))})
+    with pytest.raises(isolation.RestoreError, match="sandbox-1: no Compose labels"):
+        isolation.restore(hdir, run=vm)
+    assert vm.count("docker stop") == 0
 
 
 def test_restore_raises_when_apis_do_not_answer(hdir):
@@ -353,14 +400,14 @@ def test_restore_starts_the_stack_even_when_untar_fails(hdir):
     vm = FakeVM(**{"docker run": cp(1, err="tar: short read")})
     with pytest.raises(isolation.RestoreError, match="putting the volumes back"):
         isolation.restore(hdir, run=vm)
-    assert vm.count("docker start") == 1
+    assert vm.count("--force-recreate") == 2
 
 
 def test_unreachable_vm_fails_at_once(hdir):
     vm = FakeVM(**{"docker inspect": cp(255, err="ssh: connect to host vm: Connection refused")})
     with pytest.raises(isolation.RestoreError, match="unreachable"):
         isolation.restore(hdir, run=vm)
-    assert vm.count("docker inspect") == 1
+    assert vm.count("State.Status") == 1
 
 
 def test_snapshot_saves_every_volume_and_marks_complete(hdir):
@@ -371,7 +418,7 @@ def test_snapshot_saves_every_volume_and_marks_complete(hdir):
         assert f"{vol}:/v/{vol}:ro" in call
     assert f"{isolation.SNAPSHOT_ROOT}:/s" in call and call[-2:] == ["eval-01", KEY]
     assert 'rm -rf "/s/$1"' in call[-4] and "COMPLETE" in call[-4]
-    assert vm.index("docker stop") < vm.index("tar -cf") < vm.index("docker start") < vm.index("service-info")
+    assert vm.index("docker stop") < vm.index("tar -cf") < vm.index("--force-recreate") < vm.index("service-info")
 
 
 @pytest.mark.parametrize("code,expected", [(0, True), (1, False), (125, None)])
@@ -455,12 +502,14 @@ NOT_RESTORED = {"workflow-stack_slurm-master-var": "declared, mounted by no serv
                 "workflow-stack_slurm-master-spool": "declared, mounted by no service",
                 "spe-frontend_agent-runs": "the agent's run log, which the agent cannot read (part 05)"}
 SANDBOX = "spe-frontend-sandbox-1"
-# Databases first: `docker start` starts them in this order.
+# Databases first; recreated per Compose project (compose_projects), which orders them by depends_on.
 CONTAINERS = tuple(f"workflow-stack-{s}-1" for s in (
     "database", "result_broker", "trs-mongodb", "drs-mongodb", "rest", "submission_worker",
     "monitoring_worker", "monitoring_scheduler", "trs-filer", "drs-filer")) + (SANDBOX,)
 SSH_MUX = ["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/spe-eval-%C", "-o", "ControlPersist=120"]
 HEALTH_FMT = "{{.Name}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}"
+LABELS_FMT = "|".join(["{{.Name}}"] + [f'{{{{index .Config.Labels "com.docker.compose.{k}"}}}}' for k in
+                                       ("project", "project.working_dir", "project.config_files", "service")])
 API_CHECK = ('for u in "$TRS_BASE/service-info" "$WES_BASE/service-info" "$DRS_BASE/service-info"; do '
              'curl -s -o /dev/null -w "%{http_code} " "$u"; done')
 SNAP_SH = ('set -eu; d="/s/$1/$2"; rm -rf "/s/$1"; mkdir -p "$d"; '
@@ -563,13 +612,37 @@ def wait_healthy(run: Runner, timeout: float = 300.0, clock=time.monotonic, slee
         sleep(poll)
 
 
+def compose_projects(run: Runner) -> dict[str, tuple[str, list[str], list[str]]]:
+    """Each container's Compose project, directory, files and service, from its labels: what recreating needs."""
+    out = _ok(run(["docker", "inspect", "-f", LABELS_FMT, *CONTAINERS]), "reading the Compose labels").stdout
+    projects: dict[str, tuple[str, list[str], list[str]]] = {}
+    seen = set()
+    for line in out.splitlines():
+        name, project, workdir, files, service = (line.strip().lstrip("/").split("|") + [""] * 5)[:5]
+        if not all((project, workdir, files, service)):
+            raise RestoreError(f"{name}: no Compose labels (project, working_dir, config_files, service): "
+                               "recreate it with docker compose first")
+        entry = projects.setdefault(project, (workdir, files.split(","), []))
+        entry[2].append(service)
+        seen.add(name)
+    missing = sorted(set(CONTAINERS) - seen)
+    if missing:
+        raise RestoreError(f"no such container: {', '.join(missing)}")
+    return projects
+
+
 def _cycle(run: Runner, argv: list[str], what: str) -> None:
-    """Stop the stack, run one container over the volumes, start the stack again whatever happened."""
+    """Stop the stack, run one container over the volumes, then recreate the stack's containers from their images
+    whatever happened: nothing written outside a volume (the sandbox's /tmp, a worker's writable layer) survives."""
+    projects = compose_projects(run)
     _ok(run(["docker", "stop", "-t", "30", *CONTAINERS]), "stopping the stack")
     try:
         _ok(run(argv), what)
     finally:
-        _ok(run(["docker", "start", *CONTAINERS]), "starting the stack")
+        for project, (workdir, files, services) in projects.items():
+            _ok(run(["docker", "compose", "--project-directory", workdir, "-p", project,
+                     *[a for f in files for a in ("-f", f)], "up", "-d", "--force-recreate", "--renew-anon-volumes",
+                     "--no-deps", "--no-build", "--pull", "never", *services]), f"recreating {project}")
 
 
 def snapshot(directory: Path, run: Runner | None = None, timeout: float = 300.0,
@@ -1090,7 +1163,8 @@ In `platform/promptfoo-evals/README.md`, add a section *Isolation* after *Runnin
 
 Every test starts from the build's state (spec part 05). `extensions: [file://isolation.py:extension_hook]` in a
 suite: `beforeAll` takes a snapshot if this build has none; `beforeEach` restores it (stop the stack, put every
-volume back, start, wait until TRS, WES and DRS answer from the sandbox; a failure aborts the eval) and writes the
+volume back, recreate the containers from their images so nothing written outside a volume survives, wait until
+TRS, WES and DRS answer from the sandbox; a failure aborts the eval) and writes the
 state baseline to `$SPE_EVAL_BASELINE` (default `reports/.baseline.json`); the agent provider diffs against it
 after its run; `afterEach` logs the diff's counts. The diff includes the requests the test receiver
 (`spe_eval_sink`) got during the test, read from its log on the VM (`isolation.SINK_LOG`), or `null` when no
@@ -1167,10 +1241,12 @@ curl -sS -o /dev/null -w "PUT %{http_code}\n" -X PUT -H "Content-Type: applicati
   --data @/tmp/m.json "$TRS_BASE/tools/spe-isolation-marker"
 curl -sS -o /dev/null -w "GET %{http_code}\n" "$TRS_BASE/tools/spe-isolation-marker"
 ls -a /home/user'
+docker exec workflow-stack-submission_worker-1 sh -c 'echo spe-isolation > /tmp/.spe-isolation-marker && echo worker-planted'
 EOF
 ```
 
-Expected: `PUT 200` (or `201`), `GET 200`, the marker listed. Also take a diff to see the live state reader work:
+Expected: `PUT 200` (or `201`), `GET 200`, the marker listed, `worker-planted`. The sandbox's `/tmp/m.json` and
+the worker's marker are outside every volume: only recreating the containers removes them (clarification 5). Also take a diff to see the live state reader work:
 `python3 -c 'import isolation, handoff; d = handoff.handoff_dir(); b = {"trs": [], "wes": [], "sandbox": []}; print({k: len(v) for k, v in isolation.state_diff(d, b).items()})'`
 — record the counts only (descriptor texts hold canaries; never print them).
 
@@ -1192,16 +1268,19 @@ times and where they go (stop, untar, start, health wait: rerun one restore with
 
 ```bash
 python3 isolation.py sh <<'EOF'
-docker exec spe-frontend-sandbox-1 sh -c 'test -e /home/user/.spe-isolation-marker && echo sandbox-marker-LEFT || echo sandbox-marker-gone
+docker exec workflow-stack-submission_worker-1 sh -c 'test -e /tmp/.spe-isolation-marker && echo worker-tmp-LEFT || echo worker-tmp-gone'
+docker exec spe-frontend-sandbox-1 sh -c 'test -e /tmp/m.json && echo sandbox-tmp-LEFT || echo sandbox-tmp-gone
+test -e /home/user/.spe-isolation-marker && echo sandbox-marker-LEFT || echo sandbox-marker-gone
 curl -sS -o /dev/null -w "GET %{http_code}\n" "$TRS_BASE/tools/spe-isolation-marker"
 curl -sS -o /dev/null -w "WES %{http_code}\n" "$WES_BASE/service-info"'
 EOF
 rm -rf reports .promptfoo
 ```
 
-Expected: `sandbox-marker-gone`, `GET 404`, `WES 200`. **If a marker is left:** the restore misses state; find
-the volume (task 1, step 4 listing), add it to `VOLUMES`, rerun tasks 2–4 tests and this check, and record the
-ruling.
+Expected: `worker-tmp-gone`, `sandbox-tmp-gone`, `sandbox-marker-gone`, `GET 404`, `WES 200`. **If a marker
+is left:** the restore misses state. A `/home/user` or TRS marker means a volume: find it (task 1, step 4 listing),
+add it to `VOLUMES`. A `/tmp` marker means a container was restarted, not recreated: check its Compose labels
+(`isolation.compose_projects`) and that the `up` ran. Rerun tasks 2–4 tests and this check, and record the ruling.
 
 - [ ] **Step 5: Handoff, status and *Current work***
 

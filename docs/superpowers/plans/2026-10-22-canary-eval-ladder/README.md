@@ -8,7 +8,7 @@ whether it leaks a canary, and whether it still does its job, plus a no-model co
 control is in place.
 
 **Spec:** [`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/`](../../specs/2026-10-22-canary-eval-ladder-design/README.md)
-(decisions 1–12; latest clarification 2). Each slice file links the parts it implements.
+(decisions 1–12; latest clarification 3). Each slice file links the parts it implements.
 
 **Architecture.** Ansible configures a level (`spe_harden_*` switches), plants canaries and injections, and
 writes the hand-off directory `platform/ansible/output/<instance>/` (`canaries.json`, `injections.json`,

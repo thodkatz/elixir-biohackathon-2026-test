@@ -35,18 +35,19 @@ that the comment injection went into `wes-drs-smoke` instead of `gatk-hc-chr20`,
 - Test: `platform/promptfoo-evals/tests/test_agui_provider.py`
 
 **Interfaces:**
-- Consumes: `handoff.handoff_dir() -> Path`; `isolation.baseline(dir) -> dict`;
+- Consumes: `handoff.handoff_dir() -> Path`; the baseline the `beforeEach` hook wrote to `$SPE_EVAL_BASELINE`
+  (default `platform/promptfoo-evals/reports/.baseline.json`; README, *State diff*);
   `isolation.state_diff(dir, baseline) -> dict` (shape: README, *State diff*).
 - Produces: `agui_provider.call_api(prompt, options, context)` unchanged in signature; with
   `options.config.state_diff: true` it returns `metadata.state_diff` (the README's state-diff dict), or `error`
-  when the baseline or the diff fails. Without the option it behaves as today.
+  when the baseline file is missing or unreadable or the diff fails. Without the option it behaves as today.
 
 **Decisions:** 8 (`injection.followed` reads `metadata.state_diff`) and 9 as amended (the diff is taken after the
-run, before the assertions): `test_state_diff_is_taken_around_the_run`, `test_diff_failure_is_an_error_never_an_empty_diff`.
+run, before the assertions): `test_state_diff_is_taken_after_the_run`, `test_diff_failure_is_an_error_never_an_empty_diff`,
+`test_missing_or_unreadable_baseline_is_an_error`.
 
-The baseline is taken by the provider itself, just before the run: after `beforeEach` restored the stack nothing
-else changes it, and this needs only `isolation.baseline`, which the shared interfaces fix (the hook's own
-baseline, if slice 2 writes one, stays for its `afterEach` log).
+The provider never takes the baseline itself: the hook took it right after the restore, and the provider reads
+that file after the run, then calls `isolation.state_diff`.
 
 - [ ] **Step 1: Write the failing tests.** Append to `tests/test_agui_provider.py`, after `test_timeout_is_an_error`:
 
@@ -56,27 +57,25 @@ baseline, if slice 2 writes one, stays for its `afterEach` log).
 DIFF = {"trs_tools_added": [], "sandbox_files_added": ["/home/user/x.nf"],
         "wes_runs_added": [{"run_id": "r1", "workflow_url": "trs://t/x/v1/NFL/main.nf",
                             "workflow_params": {}, "state": "COMPLETE"}]}
+BASE = {"trs": ["wes-drs-smoke/v1"], "wes": [], "files": []}
 
 
 @pytest.fixture
 def fake_isolation(monkeypatch, tmp_path):
-    """isolation.baseline/state_diff replaced by recorders; the hand-off dir is a temp dir."""
-    monkeypatch.setenv("SPE_HANDOFF_DIR", str(tmp_path))
-    seen = {"order": []}
-
-    def baseline(d):
-        seen["order"].append("baseline")
-        seen["dir"] = Path(d)
-        assert Agent.seen == {}, "baseline must be taken before the run"
-        return {"trs": ["wes-drs-smoke/v1"], "wes": [], "files": []}
+    """The hook's baseline file in a temp dir; isolation.state_diff replaced by a recorder."""
+    handoff_dir = tmp_path / "handoff"
+    handoff_dir.mkdir()
+    base_file = tmp_path / ".baseline.json"
+    base_file.write_text(json.dumps(BASE))
+    monkeypatch.setenv("SPE_HANDOFF_DIR", str(handoff_dir))
+    monkeypatch.setenv("SPE_EVAL_BASELINE", str(base_file))
+    seen = {"file": base_file, "handoff": handoff_dir}
 
     def state_diff(d, base):
-        seen["order"].append("diff")
-        seen["base"] = base
         assert Agent.seen, "the diff must be taken after the run"
+        seen["dir"], seen["base"] = Path(d), base
         return DIFF
 
-    monkeypatch.setattr(agui_provider.isolation, "baseline", baseline)
     monkeypatch.setattr(agui_provider.isolation, "state_diff", state_diff)
     Agent.seen = {}
     return seen
@@ -85,12 +84,34 @@ def fake_isolation(monkeypatch, tmp_path):
 ON = {"config": {"state_diff": True}}
 
 
-def test_state_diff_is_taken_around_the_run(agent, fake_isolation, tmp_path):
+def test_state_diff_is_taken_after_the_run(agent, fake_isolation):
     res = agui_provider.call_api("x", ON, {})
     assert "error" not in res and res["output"] == "Registered: wes-drs-smoke."
     assert res["metadata"]["state_diff"] == DIFF
-    assert fake_isolation["order"] == ["baseline", "diff"]
-    assert fake_isolation["dir"] == tmp_path and fake_isolation["base"]["trs"] == ["wes-drs-smoke/v1"]
+    assert fake_isolation["dir"] == fake_isolation["handoff"] and fake_isolation["base"] == BASE
+
+
+def test_the_baseline_file_defaults_to_reports(monkeypatch):
+    monkeypatch.delenv("SPE_EVAL_BASELINE", raising=False)
+    assert agui_provider._baseline_path() == Path(agui_provider.__file__).resolve().parent / "reports" / ".baseline.json"
+
+
+def test_missing_or_unreadable_baseline_is_an_error(agent, fake_isolation, monkeypatch):
+    def never(*a):
+        raise AssertionError("no diff without a baseline")
+    monkeypatch.setattr(agui_provider.isolation, "state_diff", never)
+    fake_isolation["file"].unlink()
+    res = agui_provider.call_api("x", ON, {})
+    assert res["error"].startswith("state baseline failed: FileNotFoundError")
+    assert "state_diff" not in res["metadata"] and res["output"] == "Registered: wes-drs-smoke."
+    for bad in ("{not json", "[1, 2]"):
+        fake_isolation["file"].write_text(bad)
+        assert agui_provider.call_api("x", ON, {})["error"].startswith("state baseline failed")
+
+
+def test_missing_handoff_dir_is_an_error(agent, fake_isolation, monkeypatch):
+    monkeypatch.delenv("SPE_HANDOFF_DIR")
+    assert "state diff failed" in agui_provider.call_api("x", ON, {})["error"]
 
 
 def test_diff_failure_is_an_error_never_an_empty_diff(agent, fake_isolation, monkeypatch):
@@ -107,20 +128,6 @@ def test_a_diff_that_is_not_a_dict_is_an_error(agent, fake_isolation, monkeypatc
     assert "state diff failed: TypeError" in agui_provider.call_api("x", ON, {})["error"]
 
 
-def test_baseline_failure_stops_before_the_run(agent, fake_isolation, monkeypatch):
-    def broken(d):
-        raise OSError("docker: not found")
-    monkeypatch.setattr(agui_provider.isolation, "baseline", broken)
-    res = agui_provider.call_api("x", ON, {})
-    assert res["error"].startswith("state baseline failed: OSError") and Agent.seen == {}
-
-
-def test_missing_handoff_dir_is_a_baseline_error(agent, fake_isolation, monkeypatch):
-    monkeypatch.delenv("SPE_HANDOFF_DIR")
-    res = agui_provider.call_api("x", ON, {})
-    assert res["error"].startswith("state baseline failed") and Agent.seen == {}
-
-
 def test_run_error_keeps_its_error_and_still_gets_the_diff(agent, fake_isolation):
     Agent.body = sse(*TWO_TOOLS[:10], {"type": "RUN_ERROR", "message": "request_limit of 50 exceeded"})
     res = agui_provider.call_api("x", ON, {})
@@ -130,7 +137,6 @@ def test_run_error_keeps_its_error_and_still_gets_the_diff(agent, fake_isolation
 def test_state_diff_is_off_unless_configured(agent, monkeypatch):
     def never(*a):
         raise AssertionError("isolation must not be called")
-    monkeypatch.setattr(agui_provider.isolation, "baseline", never)
     monkeypatch.setattr(agui_provider.isolation, "state_diff", never)
     res = agui_provider.call_api("x", {"config": {}}, {})
     assert "error" not in res and "state_diff" not in res["metadata"]
@@ -144,16 +150,18 @@ def test_state_diff_is_off_unless_configured(agent, monkeypatch):
   "`vars.history` ([{role, content}]) is sent before the prompt as earlier turns.":
 
 ```text
-With `config.state_diff: true` (agent.yaml) the provider takes the stack's state baseline
-just before the run and the state diff just after it (isolation.py, against the hand-off
-directory in SPE_HANDOFF_DIR) and returns it as `metadata.state_diff`, because promptfoo
-runs the assertions before `afterEach`. A failed baseline stops the test before the run;
-a failed diff is an `error`, never an empty diff.
+With `config.state_diff: true` (agent.yaml) the provider, after the run, reads the
+baseline the beforeEach hook wrote (SPE_EVAL_BASELINE, default reports/.baseline.json)
+and returns isolation.state_diff against it (hand-off directory: SPE_HANDOFF_DIR) as
+`metadata.state_diff`, because promptfoo runs the assertions before `afterEach`. A
+missing or unreadable baseline, or a failed diff, is an `error`, never an empty diff.
 ```
 
   Add after `from typing import Any`:
 
 ```python
+from pathlib import Path
+
 import handoff
 import isolation
 ```
@@ -180,26 +188,36 @@ def _failure(what: str, e: BaseException) -> str:
     return f"{what} failed: {type(e).__name__}: {str(e)[:300]}"
 
 
-def call_api(prompt: str, options: dict | None = None, context: dict | None = None) -> dict:
-    config = (options or {}).get("config") or {}
-    if not config.get("state_diff"):
-        return _run(prompt, config, context)
-    try:
-        directory = handoff.handoff_dir()
-        before = isolation.baseline(directory)
-    except Exception as e:  # any failure is a configuration error, and no run is made
-        return {"error": _failure("state baseline", e)}
-    res = _run(prompt, config, context)
-    try:
-        diff = isolation.state_diff(directory, before)
-        if not isinstance(diff, dict):
-            raise TypeError(f"state_diff returned {type(diff).__name__}, not a dict")
-    except Exception as e:  # never an empty diff: injection.followed would read it as "nothing done"
-        err = _failure("state diff", e)
+def _baseline_path() -> Path:
+    default = Path(__file__).resolve().parent / "reports" / ".baseline.json"
+    return Path(os.environ.get("SPE_EVAL_BASELINE") or default)
+
+
+def _with_state_diff(res: dict) -> dict:
+    """Never an empty diff on failure: injection.followed would read it as "nothing done"."""
+    def fail(err: str) -> dict:
         res["error"] = f"{res['error']}; {err}" if res.get("error") else err
         return res
+    try:
+        base = json.loads(_baseline_path().read_text())
+        if not isinstance(base, dict):
+            raise TypeError(f"baseline is a {type(base).__name__}, not a dict")
+    except (OSError, ValueError, TypeError) as e:
+        return fail(_failure("state baseline", e))
+    try:
+        diff = isolation.state_diff(handoff.handoff_dir(), base)
+        if not isinstance(diff, dict):
+            raise TypeError(f"state_diff returned {type(diff).__name__}, not a dict")
+    except Exception as e:  # ssh, docker, HTTP, a missing hand-off: all errors, never a pass
+        return fail(_failure("state diff", e))
     res.setdefault("metadata", {})["state_diff"] = diff
     return res
+
+
+def call_api(prompt: str, options: dict | None = None, context: dict | None = None) -> dict:
+    config = (options or {}).get("config") or {}
+    res = _run(prompt, config, context)
+    return _with_state_diff(res) if config.get("state_diff") else res
 ```
 
 - [ ] **Step 4: Run, expect PASS.** `uv run --group dev pytest -q` (whole suite: the earlier provider tests
@@ -209,10 +227,11 @@ def call_api(prompt: str, options: dict | None = None, context: dict | None = No
 
 ```bash
 git add platform/promptfoo-evals/agui_provider.py platform/promptfoo-evals/tests/test_agui_provider.py
-git commit -s -m "agui_provider: take the state diff around each run" \
-  -m "promptfoo runs assertions before afterEach, so the provider returns metadata.state_diff itself
-(config.state_diff). A failed baseline stops the test before the run; a failed diff is an
-error, never an empty diff that injection.followed would read as nothing done."
+git commit -s -m "agui_provider: return the state diff after each run" \
+  -m "promptfoo runs assertions before afterEach, so the provider reads the beforeEach hook's
+baseline (SPE_EVAL_BASELINE) after the run and returns metadata.state_diff (config.state_diff).
+A missing or unreadable baseline or a failed diff is an error, never an empty diff that
+injection.followed would read as nothing done."
 ```
 
 ### Task 2: `agent.yaml`, the catalogue and its utility checks
@@ -520,7 +539,7 @@ providers:
   - id: file://agui_provider.py
     label: spe-agent
     config:
-      timeout: 720000      # promptfoo's Python worker timeout, ms: the run plus the baseline and the diff
+      timeout: 720000      # promptfoo's Python worker timeout, ms: the run plus the state diff
       run_timeout_s: 600   # the provider's own deadline for one agent run, in seconds
       state_diff: true     # metadata.state_diff for injection.followed (agui_provider.py)
 extensions:

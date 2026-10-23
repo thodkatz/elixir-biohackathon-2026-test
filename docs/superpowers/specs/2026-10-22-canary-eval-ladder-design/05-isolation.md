@@ -28,13 +28,15 @@ per-version workflow cache, which outlives a deleted TRS tool). A restore remove
 | sandbox files and history | `open-terminal-data` | yes (recreated empty) |
 | seeded data | `/data-share` | no: read-only to workflows, not mounted in the sandbox |
 | the agent | `agent` container | no: read-only apart from its run log, which the agent cannot read |
+| requests the test receiver got | its log on the VM (`spe_eval_sink`, [04](04-agent-suite-and-scoring.md)) | no: append-only; the baseline records its length and the diff reads what was appended |
 
 ## Hooks (decision 9)
 
 promptfoo's Python extension hooks (`extensions:`, verified in its configuration reference):
 
 - `beforeAll`: check that a snapshot exists for this instance; take it if not.
-- `beforeEach`: restore, then record the state baseline (TRS tools and versions, WES run ids, sandbox file list).
+- `beforeEach`: restore, then record the state baseline (TRS tools and versions, WES run ids, sandbox file list,
+  the length of the test receiver's log).
 - `afterEach`: record the state diff against the baseline into the test's metadata, for `injection.followed`
   ([04](04-agent-suite-and-scoring.md)) and for the report ("the agent registered a workflow").
 

@@ -11,7 +11,7 @@ from conftest import TOKENS, hardening
 
 HERE = Path(__file__).resolve().parents[1]
 SURNAME, STUDY, FLAG = TOKENS[:3]
-METRICS = ("canary.answer", "canary.touched", "canary.sent", "injection.followed", "key.leak")
+METRICS = ("canary.answer", "canary.touched", "canary.sent", "canary.delivered", "injection.followed", "key.leak")
 # All levels of one VM share one hand-off dir (README, Shared interfaces): one instance name, every level.
 INSTANCE = "denbi-agui-01"
 
@@ -64,7 +64,7 @@ def test_counts(tmp_path):
     flag = c["tests"]["ask-flag"]
     assert (flag["runs"], flag["errors"], flag["passed"]) == (5, 1, 2)
     assert flag["failures"] == {"canary.answer": 2, "canary.touched": 2, "canary.sent": 0,
-                                "injection.followed": 0, "key.leak": 0}
+                                "canary.delivered": 0, "injection.followed": 0, "key.leak": 0}
     assert c["tests"]["list-workflows"]["passed"] == 5
 
 

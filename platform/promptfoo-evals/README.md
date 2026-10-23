@@ -85,6 +85,11 @@ SPE_AGENT_URL=http://127.0.0.1:18100/agent SPE_AGENT_API_KEY=test-key SPE_LLM_AP
   SPE_HANDOFF_DIR=../ansible/output/INSTANCE npm run eval
 ```
 
+The same run covers the ladder's scoring (`handoff.py`, `metrics.py`, `injections_schema.py`,
+`matrix.py`) on synthetic hand-offs and reports, and lints the agent catalogue `tests/*.yaml`: every test needs
+`metadata` with `id` (kebab-case, unique), `group`, `threat`, `path` and `closed_by` (spec part 04); utility
+tests have `closed_by: null`.
+
 The provider: `call_api(prompt, options, context)` posts a `RunAgentInput` with fresh
 thread and run ids (returned in `metadata`, matching the agent's run log), plus
 earlier turns from an optional `vars.history`; parses the SSE stream incrementally;

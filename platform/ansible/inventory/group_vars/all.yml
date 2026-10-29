@@ -197,5 +197,5 @@ spe_agent_include_sandbox_prompt: true
 spe_agent_max_output_bytes: 16384
 spe_agent_request_limit: 50          # per run, not an aggregate budget
 spe_agent_tool_calls_limit: 100
-spe_agent_total_tokens_limit: 400000
+spe_agent_total_tokens_limit: null   # a number caps a run's summed tokens; null: no cap, as in Open WebUI
 spe_agent_api_key: "{{ (spe_seed | string ~ ':agent-api') | hash('sha256') }}"

@@ -9,11 +9,12 @@ nothing to merge; the diff touches nothing upstream changed.
 
 **Not done / next task.** Address the local review round, then merge #7 and go on:
 
-1. Review round (user's choice: **codex and agy as local reviewers, opencode if one is out of quota**). Ran in
-   session 1: codex on correctness, agy on methodology. If their findings are not yet posted on #7 as one
-   comment (one numbered item each), rerun them: prompts are in this file's sibling session's scratchpad, or
-   rewrite them from `development-workflow.md`, *Review and merge*, step 2 (focus: correctness; methodology).
-   `codex exec -s read-only -C <worktree> -o <out> - < prompt`; `agy -p "<prompt>" --mode plan`.
+1. Review round: **done and posted** on #7 (comment `6493852838`): codex (correctness) 13 findings, agy
+   (methodology) as `M1.`…, verbatim. The user's reviewer choice for later rounds: **codex and agy, opencode
+   if one is out of quota** (`codex exec -s read-only -C <worktree> -o <out> - < prompt`;
+   `agy -p "<prompt>" --mode plan`). Notable: codex 1–3 (volume ownership, two runs on one session,
+   delete during a run) and agy M1 (the new volume breaks the canary ladder's slice-2 volume contract:
+   update that plan per *Contract changes land too*).
 2. Fix the findings, reply on #7 in one comment, one line per finding.
 3. Fold in session 1's own finding (below) into decision 4 and §2/§3.
 4. Mark #7 ready and **merge it yourself** (squash, `--signoff` not needed for squash via gh; DCO must pass).

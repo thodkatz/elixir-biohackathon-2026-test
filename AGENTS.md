@@ -172,6 +172,8 @@ Each unit's PR updates its track's line; the last slice removes it.
 
 - **Canary evaluation ladder** (biohackathon 0013): spec (#1) and plan (#2) merged. **Next: slice 1/9**
   `impl/canary-eval-ladder-1-scoring`. Handoff: `ls docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs | tail -1`.
+- **AG-UI chat sessions**: spec on PR #7 (`docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md`).
+  **Next: plan** `plan/agui-chat-sessions` once the spec is approved; its *Inputs for the plan* names the slices.
 - **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice.
 
 ## Project in brief

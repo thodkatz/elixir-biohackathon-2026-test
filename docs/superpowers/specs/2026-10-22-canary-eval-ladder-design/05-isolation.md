@@ -28,6 +28,7 @@ per-version workflow cache, which outlives a deleted TRS tool). A restore remove
 | sandbox files and history | `open-terminal-data` | yes (recreated empty) |
 | seeded data | `/data-share` | no: read-only to workflows, not mounted in the sandbox |
 | the agent | `agent` container | no: read-only apart from its run log, which the agent cannot read |
+| chat sessions of the AG-UI chat | `chat-sessions` (mounted by `chat-ui` only) | no: evaluations call the agent directly, never `chat-ui` |
 
 ## Hooks (decision 9)
 

@@ -127,11 +127,11 @@ Both rules, the clarification template and the layout: `.methodology/shared/guid
 Where this repo deviates from a shared guide, one line each: "In this repo, X instead of `<guide>`, *Section*,
 because Z." This file wins over the guides in `.methodology/shared/guides/`.
 
-- In this repo, **the user is the reviewer and merges every PR** instead of `development-workflow.md`,
-  *Review and merge*, and *Development workflow* above (one review round, then merge it yourself), because no
-  CI reviewer runs on the fork yet (`BACKLOG.md`). Hand off after opening the PR; the next unit starts once it is
-  merged. So the loop has two human gates, the spec's approval and each PR's merge, not the one *Working
-  Conventions* names.
+- In this repo, **the user merges every PR** instead of `development-workflow.md`, *Review and merge*, and
+  *Development workflow* above (merge it yourself after the review round), because the fork has no CI checks
+  yet (`BACKLOG.md`), so a human gate stays on each merge. The agent still runs the local review round
+  (*Reviewers*) and addresses its findings, then hands off; the next unit starts once the PR is merged. So the
+  loop has two human gates, the spec's approval and each PR's merge, not the one *Working Conventions* names.
 - In this repo, **a spec is approved when the user says so on its PR** (review or comment) instead of the
   `approved` label (`development-workflow.md`, *Review and merge*; *Working Conventions* and *Development
   workflow* above), because the fork has no labels or `pr-checks` yet (`BACKLOG.md`).
@@ -288,13 +288,15 @@ In this repo:
 
 - **Every PR targets our fork**: `gh pr create --repo thodkatz/elixir-biohackathon-2026-test --base main`.
   Without `--repo`, `gh` may pick upstream.
-- **The user approves specs and reviews and merges every PR** (*Overrides*). Address every comment in its own
-  thread. Clean up the worktree and branch after the merge, then move the pin in `biohackathon` (*Worktrees and
-  deploying*).
+- **The review round is local** (*Reviewers*); **the user approves specs and merges every PR** (*Overrides*).
+  Address the round's findings and any comment the user leaves, each in its own thread. Clean up the worktree and
+  branch after the merge, then move the pin in `biohackathon` (*Worktrees and deploying*).
 
 ## Reviewers
 
-No CI review rotation yet: the user reviews (*Overrides*, `BACKLOG.md`).
+- **`local`**: reviewer subagents in the working session (`development-workflow.md`, *Review and merge*, *Local
+  review*: at least the correctness and methodology focuses), findings posted on the PR as one comment; no CI
+  reviewer yet (`BACKLOG.md`). The user can still review any PR, and merges every one (*Overrides*).
 
 ## Project knowledge
 

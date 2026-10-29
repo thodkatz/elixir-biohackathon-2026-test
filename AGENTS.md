@@ -119,8 +119,8 @@ Both rules, the clarification template and the layout: `.methodology/shared/guid
 <!-- /methodology: working-conventions -->
 
 - **Merges are signed off too**: `git merge --signoff` (`-s` there means `--strategy`). The DCO app checks every
-  PR on the fork, so sign off from the first commit: a missing sign-off is fixed only by rewriting the branch
-  (*Overrides*), and PR #1 was merged with DCO red over `7ee1e88`.
+  PR on the fork, so sign off from the first commit: a missing sign-off could only be fixed by rewriting the
+  branch, which is not done here (*Overrides*), and PR #1 was merged with DCO red over `7ee1e88`.
 
 ## Overrides
 
@@ -133,11 +133,15 @@ because Z." This file wins over the guides in `.methodology/shared/guides/`.
   merged. So the loop has two human gates, the spec's approval and each PR's merge, not the one *Working
   Conventions* names.
 - In this repo, **a spec is approved when the user says so on its PR** (review or comment) instead of the
-  `approved` label (*Working Conventions*, *Development workflow*), because the fork has no labels or
-  `pr-checks` yet (`BACKLOG.md`).
-- In this repo, **a branch missing sign-offs is not rebased and force-pushed** instead of *Working
-  Conventions*' fix, because pushed branches are not rewritten here (PR #1 was merged with DCO red rather than rewritten): sign
-  off from the first commit; a commit pushed without one stays, and the user decides at merge.
+  `approved` label (`development-workflow.md`, *Review and merge*; *Working Conventions* and *Development
+  workflow* above), because the fork has no labels or `pr-checks` yet (`BACKLOG.md`).
+- In this repo, **the checks before a merge are the DCO app, the unit's test commands run locally (*Running
+  things*) and `sync-agents.py --check`** instead of `forge-github.md`, *Before a merge* (tests, lint, DCO and
+  `pr-checks.yml` in CI), because the fork has no workflows yet (`BACKLOG.md`). The PR body says what ran.
+- In this repo, **a branch missing sign-offs is not rebased and force-pushed** instead of the fix in *Working
+  Conventions* above, because pushed branches are not rewritten here (PR #1 was merged with DCO red rather
+  than rewritten): sign off from the first commit; a commit pushed without one stays, and the user decides at
+  merge.
 
 ## Contributing upstream
 

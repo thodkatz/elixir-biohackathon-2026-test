@@ -59,7 +59,9 @@ class ToolsCfg(_Strict):
 class LimitsCfg(_Strict):
     request_limit: PositiveInt = 50
     tool_calls_limit: PositiveInt = 100
-    total_tokens_limit: PositiveInt = 400_000
+    # Off by default: it sums every request's tokens in a run, and each request resends the whole
+    # conversation, so a long chat hits it while Open WebUI, which has no such cap, does not.
+    total_tokens_limit: PositiveInt | None = None
 
     def usage_limits(self) -> UsageLimits:
         return UsageLimits(request_limit=self.request_limit, tool_calls_limit=self.tool_calls_limit,

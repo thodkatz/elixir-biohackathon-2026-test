@@ -202,9 +202,12 @@ updated with the finding.
 ### Limits
 
 Per AG-UI run, Pydantic AI `UsageLimits`: `limits.request_limit` (model
-requests, default 50), `limits.tool_calls_limit` (default 100) and
-`limits.total_tokens_limit` (default 400000, added during implementation from
-the spend concern). Hitting a limit ends the run with an AG-UI `RUN_ERROR`
+requests, default 50) and `limits.tool_calls_limit` (default 100).
+`limits.total_tokens_limit` is optional and unset by default (no cap). It was
+added during implementation from the spend concern with a default of 400000,
+then turned off by default (2026-10-29): it sums every request's tokens in a
+run, each request resends the whole conversation, so long chats failed where
+Open WebUI, which has no such cap, did not. Hitting a limit ends the run with an AG-UI `RUN_ERROR`
 carrying a clear message, and the chat shows it. These are per-run caps, not
 aggregate spend enforcement: the provider account's spend limit is the
 aggregate cap, and portal or per-user budgets remain deferred.
@@ -231,7 +234,7 @@ tools:
   sandbox_url: http://sandbox:8000
   sandbox_operations: all   # or a list of operationIds
   max_output_bytes: 16384
-limits: { request_limit: 50, tool_calls_limit: 100, total_tokens_limit: 400000 }
+limits: { request_limit: 50, tool_calls_limit: 100 }   # total_tokens_limit: optional, no cap when unset
 ```
 
 Keys (LLM, agent, sandbox) come from `agent.env`, never from `agent.yaml`.
@@ -351,7 +354,7 @@ spe_agent_sandbox_operations: all
 spe_agent_max_output_bytes: 16384
 spe_agent_request_limit: 50
 spe_agent_tool_calls_limit: 100
-spe_agent_total_tokens_limit: 400000
+spe_agent_total_tokens_limit: null   # or a number: a per-run token cap
 spe_agent_api_key: "{{ (spe_seed | string ~ ':agent-api') | hash('sha256') }}"
 spe_agui_source_dir: "{{ playbook_dir }}/../.."   # repo root on the controller
 ```

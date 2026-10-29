@@ -244,7 +244,8 @@ replaces one frontend with the other (its volumes, `open-webui-data` included, s
 - **agent** — `POST /agent` (AG-UI) and `GET /healthz` on `127.0.0.1:8100`. The
   only holder of the LLM key; requires `Authorization: Bearer <spe_agent_api_key>`.
   Tools are generated from the sandbox's OpenAPI as Open WebUI does. Per-run
-  limits: 50 model requests, 100 tool calls, 400000 tokens. Run log in volume
+  limits: 50 model requests, 100 tool calls; a token cap only when
+  `spe_agent_total_tokens_limit` is set (default null, no cap). Run log in volume
   `agent-runs` (player input and canaries: private).
 - **sandbox** — the open-terminal image from role `sandbox`; publishes nothing.
 

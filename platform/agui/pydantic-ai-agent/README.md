@@ -60,9 +60,12 @@ stripped (`manage_system_prompt='server'`); the agent's prompt is reinjected.
 `RunAgentInput.messages`, including earlier tool calls and results); nothing is
 shared between requests. The AG-UI thread id is sent to the sandbox as
 `X-Session-Id`, as Open WebUI sends its chat id. Per run, `UsageLimits` caps model
-requests (`limits.request_limit`, 50), tool calls (`tool_calls_limit`, 100) and total
-tokens (`total_tokens_limit`, 400000). These are per-run caps, not a spend budget:
-the provider account's spend limit is the aggregate cap.
+requests (`limits.request_limit`, 50) and tool calls (`tool_calls_limit`, 100). These
+are per-run caps, not a spend budget: the provider account's spend limit is the
+aggregate cap. `total_tokens_limit` can also cap a run's tokens, but is unset (no cap)
+by default: it sums the tokens of every model request in the run, and each request
+resends the whole conversation, so a long chat hit 400000 where Open WebUI, which has
+no such cap, went on.
 
 A run ends with exactly one terminal event: `RUN_FINISHED`, or `RUN_ERROR` for a
 provider error, an exceeded limit or any other failure. The error message has the

@@ -36,10 +36,10 @@
         sandbox_url: http://sandbox:8000
         sandbox_operations: "{{ spe_agent_sandbox_operations }}"
         max_output_bytes: "{{ spe_agent_max_output_bytes | int }}"
-      limits:
-        request_limit: "{{ spe_agent_request_limit | int }}"
-        tool_calls_limit: "{{ spe_agent_tool_calls_limit | int }}"
-        total_tokens_limit: "{{ spe_agent_total_tokens_limit | int }}"
+      limits: >-
+        {{ {'request_limit': spe_agent_request_limit | int, 'tool_calls_limit': spe_agent_tool_calls_limit | int}
+           | combine({'total_tokens_limit': spe_agent_total_tokens_limit | int}
+                     if spe_agent_total_tokens_limit is not none else {}) }}
 
 - name: Hash of what the agent reads from bind mounts
   ansible.builtin.set_fact:

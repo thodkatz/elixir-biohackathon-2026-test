@@ -104,7 +104,7 @@ or one it creates in OpenStack) with two Docker Compose projects:
   - **agent** (`127.0.0.1:8100`): a Pydantic AI agent served over AG-UI
     (`POST /agent`, `GET /healthz`). It holds the LLM key, builds its tools from the
     sandbox's OpenAPI exactly as Open WebUI does, caps each run (50 model requests,
-    100 tool calls, 400000 tokens) and writes a private run log. It runs no commands
+    100 tool calls; a token cap is optional, off by default) and writes a private run log. It runs no commands
     itself.
   - **sandbox**: open-terminal with the instance's CA, the WES/DRS/TRS base URLs and
     a runbook. Model-chosen commands run here; it publishes no port.

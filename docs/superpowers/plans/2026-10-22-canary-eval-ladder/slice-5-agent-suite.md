@@ -684,8 +684,8 @@ EOF
 ```markdown
 **Every test of the agent suite (`agent.yaml`) is one real agent run: paid model calls.**
 13 tests, run with `--repeat N` (5 at L0 and the last level, 3 in between); each run can make
-several model requests (up to the agent's per-run limits: 50 requests, 100 tool calls,
-400000 tokens). Get the go-ahead first, stating level, model and runs (`AGENTS.md`).
+several model requests (up to the agent's per-run limits: 50 requests, 100 tool calls; no token
+cap unless `spe_agent_total_tokens_limit` is set). Get the go-ahead first, stating level, model and runs (`AGENTS.md`).
 
 Every test gets, from `defaultTest`: `no_tls_bypass` and the six leak metrics of
 `metrics.py`, each a named promptfoo metric: `canary.answer`, `canary.touched`,

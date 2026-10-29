@@ -1,6 +1,6 @@
 # AG-UI chat sessions — design
 
-**Status:** draft (PR #7). **Latest clarification:** none.
+**Status:** approved by the user (2026-10-29), PR #7. **Latest clarification:** none.
 Read against this repo at `ff3acc3` (`main`, equal to `upstream/main` plus the fork's files and the
 optional token cap of upstream PR #9).
 
@@ -24,26 +24,26 @@ copies every session and the agent's run log into the run directory, rendered li
 
 | # | Decision | Section | Acceptance check |
 |---|---|---|---|
-| 1 | One JSON file per session, `/data/sessions/<uuid>.json` on volume `chat-sessions`, schema `version: 1`; root filesystem stays read-only | [Storage](#1-storage-and-the-session-record) | `npm test`: a recorded run produces a file that validates against the schema; `docker inspect` on an instance: `chat-ui` has `ReadonlyRootfs: true` and one writable mount, `/data` |
+| 1 | One JSON file per session, `/data/sessions/<uuid>.json` on volume `chat-sessions`, schema `version: 1`; the image creates `/data/sessions` owned by `node`, so a fresh volume starts writable; root filesystem stays read-only | [Storage](#1-storage-and-the-session-record) | `npm test`: a recorded run produces a file that validates against the schema; `docker build` of the image succeeds and, with a freshly created volume and the compose hardening, a first run is saved; `docker inspect` on an instance: `chat-ui` has `ReadonlyRootfs: true`, exactly one volume mount (`/data`) and tmpfs exactly `/tmp` and `/app/.next/cache` |
 | 2 | Session ids are canonical UUIDs; nothing else ever names a file | [Storage](#1-storage-and-the-session-record) | `npm test`: ids like `../x`, `a/b`, upper-case or non-v4 strings get 400 from every route and a refused run from the recorder; no file is created |
-| 3 | Writes are atomic (temp file + rename in the same directory) and serialised per session | [Storage](#1-storage-and-the-session-record) | `npm test`: a write interrupted before the rename leaves the previous file intact; 20 concurrent metadata updates to one session all land |
-| 4 | The conversation is recorded by the server from the run stream, after every run, whatever its outcome | [Recording](#2-recording-and-the-session-api) | `npm test` with scripted event sequences: finished, failed (`RUN_ERROR`) and cancelled (stream unsubscribed) runs each leave `messages` and a `runs[]` entry with that status; end-to-end against `fake_agent.py`: closing the tab mid-run still leaves the run's messages on disk |
+| 3 | Writes are atomic (temp file + rename in the same directory) and serialised per session by one process-wide queue that every route bundle shares | [Storage](#1-storage-and-the-session-record) | `npm test`: a write interrupted before the rename leaves the previous file intact; 20 concurrent metadata updates to one session all land; against the built standalone server, `PATCH`es overlapping a run's finalisation all land and the run's messages too |
+| 4 | The conversation is recorded by the server from the run stream, once per run, whatever its outcome; at most one run per session at a time; finalisation merges into the latest record | [Recording](#2-recording-and-the-session-api) | `npm test` with scripted event sequences: finished, `RUN_ERROR`, agent HTTP error before streaming, stream error, EOF without a terminal event, stop (unsubscribed), and terminal event followed by unsubscription each leave `messages` and exactly one `runs[]` entry with the status of §2's table; a second run on a running session is refused and never reaches the agent; `DELETE` or `PATCH {title}` during a run survive its finalisation; end-to-end against `fake_agent.py`: closing the tab mid-run leaves the whole run on disk, status `completed` |
 | 5 | The browser changes metadata only, through `/api/sessions` (`GET` list, `GET`/`PATCH`/`DELETE` one); no `POST`: a session exists once its first run is recorded | [Recording](#2-recording-and-the-session-api) | `npm test`: `PATCH` with `messages`, `runs`, `id` or any unknown key gets 400 and changes nothing; a new UUID is absent from `GET /api/sessions` until a run on it ends |
-| 6 | Delete is a soft delete: `deleted_at` set, the session gone from every API answer and refused for new runs, the file kept and archived | [Recording](#2-recording-and-the-session-api) | `npm test`: after `DELETE`, list omits it, `GET`/`PATCH`/`DELETE` give 404, a run on its id ends with `RUN_ERROR` and does not reach the agent; the file still exists with `deleted_at` |
+| 6 | Delete is a soft delete: `deleted_at` set, the session gone from every API answer and refused for new runs, the file kept and archived; a run already in progress is not cancelled and is recorded into the deleted file | [Recording](#2-recording-and-the-session-api) | `npm test`: after `DELETE`, list omits it, `GET`/`PATCH`/`DELETE` give 404, a run on its id ends with `RUN_ERROR` and does not reach the agent; the file still exists with `deleted_at` |
 | 7 | Titles start as the first user message cut to 60 characters and are never overwritten once the user renames | [Storage](#1-storage-and-the-session-record) | `npm test`: auto title after the first run; after `PATCH {title}` (`title_source: "user"`) a later run leaves it unchanged |
 | 8 | Tags are normalised (trim, lower-case, `[a-z0-9._-]`, ≤ 32 chars, ≤ 20 per session, de-duplicated) | [Storage](#1-storage-and-the-session-record) | `npm test`: table of inputs → stored tags or 400 |
-| 9 | The sidebar: new chat, title search, tag filter (all selected tags must match), pinned first then date groups, row menu (rename, pin, tags, hide, delete with confirmation), show-hidden toggle; the open session is in the URL (`?session=`) | [Sidebar](#3-the-sidebar) | Playwright run against `fake_agent.py`: each action, then a reload reopens the same session with its tool cards; screenshots in the plan's progress file |
-| 10 | Switching session and New chat are disabled while a run is in progress | [Sidebar](#3-the-sidebar) | Playwright: during a scripted slow run both controls are disabled; after stop they are enabled and the stopped run is recorded as `cancelled` |
-| 11 | `archive.yml` exports, for `spe_frontend: agui`, every session file (hidden and deleted included) and the agent's `runs.jsonl`; a missing `chat-ui` container fails the export | [Archive](#4-the-archive) | On the dev VM: `archive.yml` after the Playwright run gives a run directory with one `agui-sessions/<id>.json` per file on the volume and `agent-runs.jsonl`; with `chat-ui` removed, `archive.yml` fails and `destroy.yml` deletes nothing |
-| 12 | `write_agui_run.py` renders the bundle in the Open WebUI run layout: `index.md`, `chats/NN-<title>.md` and `.json`, plus the raw files; re-runnable on an archived run | [Archive](#4-the-archive) | `pytest platform/dev/tests -k agui_run`: a fixture with active, hidden and deleted sessions renders the expected index rows and state, a deleted marker, fenced tool calls; a second run on the output directory gives identical files |
-| 13 | Session files and the archive hold messages and run metadata only: no request headers, no keys | [Security](#5-security-and-limits) | `npm test`: a run whose request carries `Authorization` and whose events carry the test agent key leaves neither header nor key in the file (the agent's own redaction is not relied on: the recorder never stores headers, and the test key appears only in a header); `checks.yml`'s existing key scan extended to the volume |
-| 14 | Model text is rendered as text in the sidebar and fenced in the archive | [Security](#5-security-and-limits) | `npm test`/Playwright: a title of `<img src=x onerror=…>` shows as literal text; pytest: a tool result containing a ``` fence renders inside a longer fence |
+| 9 | The sidebar: new chat, title search, tag filter (all selected tags must match), pinned first then date groups, row menu (rename, pin, tags, hide, delete with confirmation), show-hidden toggle; the open session is in the URL (`?session=`) | [Sidebar](#3-the-sidebar) | Playwright run against `fake_agent.py`: each action, then a reload reopens the same session with its tool cards; screenshots in the slice's handoff |
+| 10 | Switching session and New chat are disabled while a run is in progress; after a run ends the list is reconciled until it shows that run | [Sidebar](#3-the-sidebar) | Playwright: during a scripted slow run both controls are disabled; after stop they are enabled, the stopped run is recorded as `cancelled` and a new session's row appears, also with the save delayed by a test hook |
+| 11 | `archive.yml` exports, for `spe_frontend: agui`, every session file (hidden and deleted included) and the agent's `runs.jsonl`, after stopping `chat-ui` and then `agent` so no run is in progress or unsaved; an absent run log is allowed, a missing `chat-ui` container fails the export | [Archive](#4-the-archive) | On the dev VM: `archive.yml` after the Playwright run gives a run directory with one `agui-sessions/<id>.json` per file on the volume and `agent-runs.jsonl`; `archive.yml` during a slow run has that run, `cancelled`, in both; on a fresh instance with zero runs it succeeds with an empty `agui-sessions/`; with `chat-ui` removed, `archive.yml` fails and `destroy.yml` deletes nothing |
+| 12 | `write_agui_run.py` renders the bundle in the Open WebUI run layout: `index.md`, `chats/NN-<title>.md` and `.json`, plus the raw files; re-runnable on an archived run; no run log or no sessions is a valid bundle | [Archive](#4-the-archive) | `pytest platform/dev/tests -k agui_run`: a fixture with active, hidden and deleted sessions renders the expected index rows and state, a deleted marker, fenced tool calls; a bundle with no sessions and no run log renders an index saying so; a second run on the output directory gives identical files |
+| 13 | Session files and the archive never hold what comes from the request headers or the chat UI's configuration (the agent key); message content is stored unchanged, not redacted | [Security](#5-security-and-limits) | `npm test`: a run whose request carries `Authorization: Bearer <k1>` and whose runtime is configured with agent key `<k2>`, neither in the messages, leaves neither in the file; `checks.yml`'s key scan extended to the volume as a detector |
+| 14 | Model text is rendered as text in the sidebar and fenced in the archive with a fence longer than any backtick run inside | [Security](#5-security-and-limits) | `npm test`/Playwright: a title of `<img src=x onerror=…>` shows as literal text; pytest: tool results containing a line of three, four and six backticks each render inside a longer fence (`write_run.py` too) |
 | 15 | No-cost instance check: the session API answers | [Testing](#6-testing) | `verify.yml` on an `agui` instance: "Session API answers" passes (`GET /api/sessions` → 200, JSON list) |
 
 ## Early output
 
-The plan builds first, against `platform/dev/fake_agent.py` (no model calls): **the sidebar with three
-sessions** (one tagged and pinned, one hidden, one deleted) **and the run directory `archive.yml`
+The plan builds first (slice 2, after slice 1's store and recorder), against `platform/dev/fake_agent.py`
+(no model calls): **the sidebar with three sessions** (one tagged and pinned, one hidden, one deleted) **and the run directory `archive.yml`
 writes for them** (`index.md` and one `chats/NN-*.md`). The user looks at both: the page for whether the
 sidebar is the Open WebUI subset they want (decision 9), the run directory for whether it is what they
 would read when analysing what participants tried (decision 12). Either can change the layout, the row
@@ -64,8 +64,16 @@ menu or what the archive renders, before the rest is built on it.
 ## 1. Storage and the session record
 
 Each session is one file, `/data/sessions/<id>.json`, on a new named volume `chat-sessions` mounted at
-`/data` in `chat-ui` (`roles/agui/templates/docker-compose.yml.j2`), owned by uid 1000. The container
-keeps `read_only: true`, its tmpfs mounts, `cap_drop: ALL`, `no-new-privileges` and its limits.
+`/data` in `chat-ui` (`roles/agui/templates/docker-compose.yml.j2`). The app runs as `node` (uid 1000)
+without the rights to fix ownership, so the image creates it: the Dockerfile runs
+`install -d -o node -g node -m 0700 /data /data/sessions`, and Docker copies that directory, with its owner,
+into the named volume when it is first mounted empty. `/data/sessions` therefore exists on every instance,
+before any run. The container keeps `read_only: true`, its tmpfs mounts (`/tmp`, `/app/.next/cache`),
+`cap_drop: ALL`, `no-new-privileges` and its limits.
+
+The new code lives in `lib/` beside `app/`; the Dockerfile copies `lib/` into the build stage and
+`.dockerignore` admits it (but not `lib/*.test.ts`). The image build is part of slice 1's checks, because
+`npm run build` in the checkout passes even when the image cannot resolve `lib/`.
 
 `<id>` is the session's thread id: a canonical lower-case UUID (v4, as `crypto.randomUUID()` makes). The
 store refuses every other string before building a path, so no request input reaches the filesystem
@@ -101,9 +109,12 @@ except as a validated UUID.
 - `updated_at` changes on every write; the list is ordered by it, newest first.
 
 **Writes** go to `<id>.json.tmp-<random>` in the same directory, then `rename` over `<id>.json`, so a file
-is never half-written. A per-id promise chain in the Node process serialises writes to one session
-(read-modify-write included). `chat-ui` is one Node process (`node .next/standalone/server.js`), so no
-cross-process lock is needed; the spec assumes it stays one, and the plan notes it next to the queue.
+is never half-written. A per-id promise chain serialises writes to one session (read-modify-write
+included). Next.js bundles each route separately, so a module-level map would give the session routes and
+the CopilotKit route a queue each: the queue is kept on `globalThis` under `Symbol.for("spe.sessions.queue")`
+and every bundle uses that one. `chat-ui` is one Node process (`node server.js`), so no cross-process lock
+is needed; the spec assumes it stays one, and the plan notes it next to the queue. The same process-wide
+object holds the set of sessions with a run in progress (§2).
 
 Each run rewrites the whole file. A long session with large tool results (each already capped by the
 agent's `tools.max_output_bytes`) stays within a few MB; there is no size limit per file (see
@@ -115,23 +126,47 @@ agent's `tools.max_output_bytes`) stays within a few MB; there is no size limit 
 
 The `spe` agent in `app/api/copilotkit/[[...slug]]/route.ts` gets a recorder on its AG-UI stream: AG-UI
 `Middleware` (`runNextWithState`, which yields the messages after each event) attached with
-`agent.use(...)`, or an `HttpAgent` subclass overriding `run()` and `clone()`. The runtime clones the agent
-per request (`cloneAgentForRequest`), so the plan's first task checks which of the two survives the clone,
-with a test; the middleware is preferred because it uses AG-UI's public API.
+`agent.use(...)`. The runtime clones the agent per request (`cloneAgentForRequest`); read in CopilotKit
+1.79 and `@ag-ui/client` 1.0.2, `AbstractAgent.clone()` copies `middlewares` and the in-memory runner
+calls `runAgent()`, which applies them, so the middleware survives the clone. The plan's first task pins
+that with a test. The middleware object is shared by every clone, so it keeps no per-run state: each call
+of its `run()` makes a fresh run state (messages, status, a `finalised` flag) in its own closure.
+
+The in-memory runner runs the agent **detached** from the browser's request: when the client goes away the
+run is not cancelled, it runs to its end. Only the stop button (the runtime's `/stop`, the runner's
+`stop`) cancels a run.
 
 For each run:
 
-1. **Start.** Validate `input.threadId` as a UUID; read the session. If the id is invalid, or the session is
-   deleted, emit `RUN_STARTED` then `RUN_ERROR` ("invalid session" / "this session was deleted") and do
-   not call the agent. A missing file is a new session: create it in memory with the auto title from
-   `input.messages`.
+1. **Admit.** Validate `input.threadId` as a UUID. Then, under the session's queue, read the session and
+   check the process-wide set of running sessions. Refuse the run if the id is invalid, the session is
+   deleted, or it already has a run in progress (another tab, a second request): emit `RUN_STARTED` then
+   `RUN_ERROR` ("invalid session" / "this session was deleted" / "this session is already running") and do
+   not call the agent. Otherwise add the id to the running set, which also covers a new session that has no
+   file yet. A missing file is a new session.
 2. **During.** Keep the latest messages from each event.
-3. **End**, on `RUN_FINISHED`, `RUN_ERROR`, or unsubscription (the browser went away or the run was
-   stopped): write `messages` and append `runs[]` with `completed`, `failed` or `cancelled`. On a terminal
-   event the write completes before that event is passed on; on unsubscription it runs after. A write
-   error is logged on the server (`console.error`, no message content); the only change it makes to the
-   stream is the `spe.session_save_failed` event (*Security and limits*).
-   The run log in the agent records the run either way.
+3. **Finalise**, exactly once per run, on the first of the terminations below; any later one (a terminal
+   event followed by teardown, say) does nothing. Under the session's queue: **re-read the file** (it may
+   have changed since admission), set `messages`, append one `runs[]` entry, set `created_at` and the auto
+   title if the file is new, set `updated_at`, and keep everything else as it is now on disk: a title
+   renamed, tags changed or `deleted_at` set during the run all survive. Then remove the id from the
+   running set.
+
+   | Termination | `status` |
+   |---|---|
+   | `RUN_FINISHED` | `completed` |
+   | `RUN_ERROR`, or the stream errors (including an HTTP error from the agent before any event) | `failed` |
+   | the stream completes without a terminal event | `failed` |
+   | unsubscribed before a terminal event (the stop button) | `cancelled` |
+
+   On a terminal event or a stream error the write completes before that event is passed on; on
+   unsubscription it runs after. A write error is logged on the server (`console.error`, no message
+   content); the only change it makes to the stream is the `spe.session_save_failed` event (*Security and
+   limits*). When no client is listening any more, the server log is the only trace.
+
+A run refused at admission writes nothing. The agent's run log records every run that reaches the agent's
+own run recorder; a run the agent refuses before that (its 503s, for instance) is only in the session, as
+`failed`.
 
 **What the record means.** AG-UI clients send the whole history with every run, and the agent trusts it
 (`pydantic-ai-agent/README.md`, *Runs*). So `messages` is exactly what the agent was sent plus what it
@@ -149,7 +184,8 @@ Routes under `app/api/sessions/`, beside `/api/copilotkit`:
 | `PATCH /api/sessions/{id}` | body: any of `title`, `tags`, `pinned`, `hidden`; `200` with the new metadata; `400` for an unknown key, a wrong type or an invalid value (nothing changed); `404` if missing or deleted |
 | `DELETE /api/sessions/{id}` | sets `deleted_at`; `204`; `404` if missing or already deleted |
 
-An id that is not a UUID gets `400`. Bodies over 16 KB get `413`. Error bodies are
+`DELETE` during a run does not cancel it: the run goes on and is recorded into the deleted file
+(*Finalise* above), which stays invisible. An id that is not a UUID gets `400`. Bodies over 16 KB get `413`. Error bodies are
 `{"error": "<generic message>"}` and never contain paths or stack traces; details go to the server log.
 
 **No authentication of its own.** The chat UI has none: it is reached only through the SSH tunnel to
@@ -180,13 +216,22 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   run is recorded.
 - **During a run** (the agent's `isRunning`), switching and *New chat* are disabled, so a run never ends
   in a session the participant has left. CopilotChat's stop button ends the run (recorded `cancelled`).
+  This is a convenience: the server's one-run-per-session admission (§2) is what keeps two tabs from
+  overwriting each other.
 - **Refresh:** the list is fetched on load, after each run ends and after each metadata change; no polling.
+  A stopped run is saved after the browser has unsubscribed, so its save can land after that fetch: after a
+  run ends, until the list shows the open session with an `updated_at` not older than the run's start, the
+  page fetches it again, up to 5 times at 500 ms. If it still does not, the error bar says "this session
+  could not be saved".
 - **Errors:** a failed API call shows in the existing error bar; the open chat is never cleared. A run
   refused by the recorder shows its `RUN_ERROR` there as today.
 
-The README's "No persistence: a reload starts a new conversation" and the header text are rewritten; the
-2026-10-15 spec's §6 line is history and stays, with this spec named as superseding it in the plan's
-progress record.
+Every current text that says the AG-UI chat keeps no history is rewritten in the slice that changes the
+behaviour: `README.md` ("A reload starts a new conversation"), `docs/getting-started.md` ("a reload
+starts a new conversation"), the chat header, and `docs/specs/2026-10-15-agui-frontend-design.md`, whose §6
+line "no persistence (a reload starts a new chat)" and §2's "server-side sessions" out-of-scope entry are
+cut down to a pointer to `platform/agui/copilotkit-chat/README.md`, *Sessions* (that spec goes upstream,
+so the pointer names no fork-only file).
 
 ## 4. The archive
 
@@ -196,15 +241,25 @@ controller.
 **Export** (`tasks/export.yml`, new block when `spe_frontend == 'agui'`; `archive.yml`'s play name
 becomes "Export the frontend's chats"):
 
-1. `docker compose -p spe-frontend cp chat-ui:/data/sessions <tmp>/sessions` and
-   `docker compose -p spe-frontend cp agent:/var/lib/spe-agent/runs.jsonl <tmp>/agent-runs.jsonl` (a
-   missing run log is allowed: no run yet).
-2. Pack `<tmp>` into `/tmp/spe-agui-export.tar.gz`, fetch it to
+1. **Barrier.** Copying files while runs go on gives no consistent bundle: a run finishing after its
+   session was copied would be missing from the archive and then destroyed with the volume. So first
+   `docker compose -p spe-frontend stop -t 30 chat-ui`, then `… stop -t 30 agent`. On `SIGTERM` the chat
+   UI refuses new runs, stops every run in progress (each is finalised `cancelled`), waits for the session
+   queue to drain and exits (a handler registered in `instrumentation.ts`; the plan's task checks that
+   Next.js's own `SIGTERM` handling leaves it time). The agent, stopped second, has then seen its last
+   request and closed its run log. A missing `chat-ui` container fails here.
+2. **Copy** from the stopped containers: `docker compose -p spe-frontend cp chat-ui:/data/sessions
+   <tmp>/sessions` (always present: the image creates it, §1) and `… cp agent:/var/lib/spe-agent/runs.jsonl
+   <tmp>/agent-runs.jsonl`. Only an absent run log is tolerated (no run reached the agent yet): the task
+   checks for the file first and skips that copy; any other copy error fails the export.
+3. **Restart** both (`docker compose -p spe-frontend start agent chat-ui`), so `archive.yml` run on its
+   own leaves a working instance; under `destroy.yml` they are removed right after.
+4. Pack `<tmp>` into `/tmp/spe-agui-export.tar.gz`, fetch it to
    `{{ spe_output_dir }}/archive-bundle-agui.tar.gz`, remove both from the VM.
 
-Every file is exported, hidden and deleted included. The containers are still up when `archive.yml` runs
-(`destroy.yml` imports it first; the Coder stop runs `destroy.yml`). If `chat-ui` does not exist the copy
-fails, `archive.yml` fails, and `destroy.yml` deletes nothing, as for Open WebUI today.
+Every file is exported, hidden and deleted included. The containers are still up when `archive.yml` starts
+(`destroy.yml` imports it first; the Coder stop runs `destroy.yml`). If any step fails, `archive.yml` fails
+and `destroy.yml` deletes nothing, as for Open WebUI today.
 
 **Write** (`tasks/write.yml`): when the agui bundle exists, unpack it and run
 `files/write_agui_run.py <bundle dir> <run dir>` (stdlib only, like `write_run.py`):
@@ -220,25 +275,45 @@ fails, `archive.yml` fails, and `destroy.yml` deletes nothing, as for Open WebUI
 ```
 
 `NN` follows `created_at`. A deleted session's `.md` opens with "Deleted by the participant at <time>."
-Slugs and fences reuse `write_run.py`'s rules. `index.md` says that the AG-UI frontend has no run report.
-Given an archived run directory (`agui-sessions/` and `agent-runs.jsonl` present), the script re-renders it
+Slugs and fences come from `write_run.py` (imported, same directory). Its `fence()` today picks three or
+four backticks, which content with four escapes; it is changed to a fence one longer than the longest run
+of backticks in the content (at least three), which fixes the Open WebUI path too. A bundle with no
+sessions gives an `index.md` saying no session was recorded; without `agent-runs.jsonl` the index says no
+run reached the agent and no run log is written. `index.md` says that the AG-UI frontend has no run report.
+Given an archived run directory (`agui-sessions/` present, `agent-runs.jsonl` if there was one), the script re-renders it
 in place. The *Overview without a chat export* task stays for runs with no bundle (no frontend), with its
 text corrected. `archive-bundle-agui.tar.gz` is removed after writing, like `archive-bundle.json`.
 
-`platform/coder/README.md` ("The `agui` frontend is not archived"), `platform/ansible/README.md`,
-`AGENTS.md` (*AG-UI agent frontend*: "Not done yet: archiving its chats on stop") and
-`docs/getting-started.md` are updated in the same slice.
+The same slice rewrites every current text that says the AG-UI chat is not archived or has no sessions:
+
+- `platform/coder/README.md`: the *Known limitations* entry "The `agui` frontend is not archived", the
+  `run_archive` row ("Exports OpenWebUI"), step 4 ("the AG-UI chat has no notes or tags yet"), the table
+  of archived files (add the agui files) and the *Re-render an old run* row (add `write_agui_run.py`);
+- `platform/coder/template/testbeds/agui.yml` ("Chats are not archived yet."), shown in the preset list;
+- `platform/coder/template/main.tf`, the `frontend` parameter's description (archiving named for
+  `openwebui` only);
+- `platform/ansible/playbooks/archive.yml`'s header comment and `inventory/group_vars/all.yml`'s
+  *Run archive* comment (chats for `openwebui` only);
+- `platform/ansible/README.md`; `AGENTS.md`, *AG-UI agent frontend* ("Not done yet: archiving its chats on
+  stop");
+- `docs/getting-started.md`'s *Private configuration* table: a row for the volume
+  `spe-frontend_chat-sessions` and the run directory's `agui-sessions/` and `agent-runs.jsonl`, both
+  **not** shareable (they contain canaries), like the run log.
 
 ## 5. Security and limits
 
 - **Isolation unchanged.** `chat-ui` gains only `/data`. The agent and sandbox cannot reach the volume
   (other containers; the sandbox is on `tools` only). The model supplies text, never a path.
-- **No keys in sessions.** The recorder stores `messages` and run metadata, never request headers, the
-  agent key (`AGENT_API_KEY`) or the runtime configuration. Tool results may contain canary values and
-  dataset content, as Open WebUI's export does; the run directory's existing handling applies to
-  `agui-sessions/` and `agent-runs.jsonl` (outside git, treated like `canaries.json`). `checks.yml`'s key
-  check gains the volume: no file under `/data/sessions` contains the agent key, the LLM key or the
-  sandbox key.
+- **No keys from the chat UI in sessions.** The recorder stores `messages` and run metadata, never request
+  headers, the agent key (`AGENT_API_KEY`, the only secret `chat-ui` holds) or the runtime configuration.
+  It does **not** redact message content: `messages` stays exactly what the agent was sent and returned
+  (§1), so whatever a participant pasted or a tool returned is kept, as in the run log. Tool results may
+  contain canary values and dataset content, as Open WebUI's export does; the run directory's existing
+  handling applies to `agui-sessions/` and `agent-runs.jsonl` (outside git, treated like `canaries.json`).
+- **Key scan as a detector.** `checks.yml`'s key check gains the volume: no file under `/data/sessions`
+  contains the agent key, the LLM key or the sandbox key. The LLM and sandbox keys are not in `chat-ui`, so
+  a hit there means one reached the conversation through the agent or a tool: the check fails and reports
+  it, the recorder does not hide it.
 - **Untrusted text.** Titles, tags and messages render as React text, never as HTML; the chat's own
   message rendering is unchanged. `chats/*.md` fences tool arguments and results with a fence longer than
   any run of backticks inside.
@@ -247,8 +322,8 @@ text corrected. `archive-bundle-agui.tar.gz` is removed after writing, like `arc
 - **Size and failures.** No per-file limit. A failed write (disk full) is logged; the next list fetch
   cannot show what was not written, and the error bar says "this session could not be saved" when the
   page learns of it: the recorder emits a `CUSTOM` event named `spe.session_save_failed` before the
-  terminal event (the write happens before the terminal event is passed on, for this reason). The run log
-  still has the run.
+  terminal event (the write happens before the terminal event is passed on, for this reason), or the
+  reconciliation of §3 gives up. The run log still has the run if it reached the agent.
 - **Lifetime.** Only `destroy.yml` removes the volume (*Compose stacks down, with their volumes*), and only
   after `archive.yml` succeeded.
 
@@ -257,24 +332,29 @@ text corrected. `archive-bundle-agui.tar.gz` is removed after writing, like `arc
 - **Chat UI unit tests**, no new dependencies: the store, validation and recorder live in `lib/`
   (`lib/sessions.ts`, `lib/recorder.ts`), with `lib/*.test.ts` run by `node --test` (Node 24 strips types)
   as `npm test`. They cover decisions 1–8, 13 and the text rendering of 14. `npm run build` stays the type
-  check. `AGENTS.md`, *Running things*, gains `(cd platform/agui/copilotkit-chat && npm ci && npm test)`.
+  check. Two properties need the built server, not a store instance: the queue shared across route bundles
+  and per-run recorder state across clones (decision 3), checked against `node .next/standalone/server.js`
+  with `fake_agent.py` behind it. The image is built (`docker build`) as part of slice 1's checks. `AGENTS.md`, *Running things*, gains `(cd platform/agui/copilotkit-chat && npm ci && npm test)`.
 - **Archive writer:** `platform/dev/tests/test_write_agui_run.py` (pytest) over a fixture bundle with
-  active, hidden and deleted sessions and a run log (decision 12, 14).
+  active, hidden and deleted sessions and a run log, and an empty bundle (decision 12, 14).
+- **Fake agent:** `platform/dev/fake_agent.py` gains a slow scripted run (a user message containing
+  "slow" streams its answer over about 10 s), for decisions 4, 10 and 11.
 - **End to end, no model:** the built chat UI against `platform/dev/fake_agent.py`, driven by Playwright
   through every sidebar action (decisions 9, 10), with the files checked after each step; screenshots and
-  the result in the plan's progress file. This is also the early output.
+  the result in the slice's handoff. This is also the early output.
 - **On an instance:** the new no-cost check in `roles/agui/tasks/checks.yml` (decision 15) and the
-  extended key check (decision 13); then, on the dev VM, `archive.yml` after the Playwright run
-  (decision 11). The existing smoke run calls the agent directly, not through `chat-ui`, and stays as is.
+  extended key check (decision 13); then, on the dev VM, `archive.yml` after the Playwright run, during a
+  slow run, and on a fresh instance with no run (decision 11). The existing smoke run calls the agent directly, not through `chat-ui`, and stays as is.
 - **One paid check, with the user's OK at the time:** a two-turn chat in the browser on the dev VM
   (`claude-haiku-5-5`), then `archive.yml`; about $0.01.
 
 ## Out of scope
 
-- **Sessions with owners** (several participants per instance): needs identity in the chat UI; with
-  `BACKLOG.md`'s per-user budgets item, as both wait for multi-participant instances.
-- **A run report** in the CopilotKit chat (Open WebUI's "Run report" note): still not done, as
-  `AGENTS.md` says; `index.md` states it.
+- **Sessions with owners** (several participants per instance): needs identity in the chat UI; in
+  `BACKLOG.md` (chat sessions with owners), next to the per-user budgets item, as both wait for
+  multi-participant instances.
+- **A run report** in the CopilotKit chat (Open WebUI's "Run report" note): in `BACKLOG.md`; `index.md`
+  states that there is none.
 - **Upstream.** The code and its READMEs refer to nothing fork-only, so the work can go upstream as one PR
   cut from `upstream/main` (`AGENTS.md`, *Contributing upstream*), carrying a README section instead of this
   spec.
@@ -283,13 +363,31 @@ text corrected. `archive-bundle-agui.tar.gz` is removed after writing, like `arc
 
 ## Inputs for the plan
 
-- Slices, in order: (1) store, API and recorder with unit tests, plus the volume in the compose template;
-  (2) the sidebar and the Playwright run, which produces the early output with (3); (3) the archive export,
-  `write_agui_run.py` and its tests, the instance checks, and the README/AGENTS.md updates. The early output
-  needs (1)–(3)'s minimum, so the plan may build a thin version of (2) and (3) first.
-- First task of slice 1: which recorder form survives `cloneAgentForRequest` (middleware vs subclass),
-  pinned by a test; rule in the progress file if neither does, with the browser-save fallback (the page
-  `PUT`s `agent.messages` after each run) as the recorded cost.
+- **Slices, in order.** The early output comes first, so it is slice 2, and nothing that depends on
+  decisions 9 and 12 comes before it:
+  1. Store, API and recorder with unit tests (decisions 1–8, 13); the volume in the compose template and
+     `/data/sessions` in the image, `lib/` in the Dockerfile and `.dockerignore`, the image build; the slow
+     run in `fake_agent.py`; the built-server test of the shared queue; `npm test` in `AGENTS.md`,
+     *Running things*.
+  2. **The early output:** the sidebar's list, *New chat*, opening a session, the URL and the row menu
+     (decision 9's core, decision 14's text rendering); the archive export with its barrier and
+     `write_agui_run.py` with its tests and the `fence()` change (decisions 11, 12, 14); every doc this
+     makes stale (§3, §4). It ends with the Playwright run producing three sessions (tagged and pinned,
+     hidden, deleted) and `archive.yml`'s run directory for them, for the user to look at.
+  3. Title search, tag filter, date groups, *Show hidden*, the chat header, disabled controls and the
+     list reconciliation (decisions 9, 10); the full Playwright run; the instance checks (decisions 13, 15)
+     and the dev-VM archive checks (decision 11); the paid check with the user's OK.
+- **First task of slice 1:** pin with a test that the recorder middleware survives `cloneAgentForRequest`
+  and keeps per-run state per clone. This is a feasibility gate: if it fails, and no `HttpAgent` subclass
+  overriding `run()` and `clone()` works either, the plan stops and the spec gets a clarification with a
+  revised design. A browser-side save is not a fallback: it would break decisions 4 and 5.
+- **Slice 2's archive task** checks that Next.js 16's standalone server leaves the `SIGTERM` handler time to
+  drain within `stop -t 30` (§4, *Barrier*).
 - How CopilotChat 1.79 reacts to a changed `threadId` together with `agent.setMessages()` (remount via
   `key`, or not) is checked in slice 2's first task.
-- The fake agent may need a slow scripted run for decision 10's check.
+- **The canary ladder's isolation** (plan `2026-10-22-canary-eval-ladder`, slice 2) lists every volume of
+  the `spe-frontend` compose project and tests the list against the template. The new volume is **not
+  restored** between evaluation cases (evaluations call the agent directly, never `chat-ui`). Slice 1,
+  which adds the volume, adds `spe-frontend_chat-sessions` to `isolation.NOT_RESTORED` if
+  `isolation.py` is on `main` by then; the ladder's slice-2 task text and spec part 05 already name it
+  (rewritten in PR #7).

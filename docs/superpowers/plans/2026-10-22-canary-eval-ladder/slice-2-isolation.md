@@ -24,7 +24,7 @@ interfaces and the claims table: [plan README](README.md). Builds on slice 1: `h
 | Compose project (template) | Volumes restored | Declared, not restored | Containers stopped and started |
 |---|---|---|---|
 | `workflow-stack` (`roles/workflow_stack/templates/compose.install.yaml.j2`) | `workflow-stack_wes-mongodb`, `_redis-data`, `_weskit-data`, `_weskit-workflows`, `_trs-mongodb`, `_drs-mongodb` | `_slurm-master-var`, `_slurm-master-spool` (mounted by no service) | `workflow-stack-{database,result_broker,trs-mongodb,drs-mongodb,rest,submission_worker,monitoring_worker,monitoring_scheduler,trs-filer,drs-filer}-1`; `traefik` (stateless) and the one-shot `weskit-data-init` stay as they are |
-| `spe-frontend` (`roles/agui/templates/docker-compose.yml.j2`) | `spe-frontend_open-terminal-data` | `spe-frontend_agent-runs` (the agent's run log, part 05) | `spe-frontend-sandbox-1`; the agent keeps running |
+| `spe-frontend` (`roles/agui/templates/docker-compose.yml.j2`) | `spe-frontend_open-terminal-data` | `spe-frontend_agent-runs` (the agent's run log, part 05); `spe-frontend_chat-sessions` (the chat UI's sessions, part 05) once the template declares it | `spe-frontend-sandbox-1`; the agent keeps running |
 
 Part 05's table names `weskit-data`, `wes-mongodb`, `redis-data`, the filers' MongoDB volumes and
 `open-terminal-data`; the template adds `weskit-workflows` (WESkit's workflow directory, where TRS workflows are
@@ -597,6 +597,10 @@ def restore(directory: Path, run: Runner | None = None, timeout: float = 300.0,
     wait_healthy(run, timeout, clock, sleep)
     return clock() - start
 ```
+
+If the template on `main` declares the volume `chat-sessions` (the AG-UI chat's sessions, added by the AG-UI
+chat sessions track), `NOT_RESTORED` also holds `"spe-frontend_chat-sessions": "the chat UI's sessions;
+evaluations call the agent directly, never chat-ui (part 05)"`, so the template test above passes.
 
 - [ ] **Step 4: Run, expect PASS**
 

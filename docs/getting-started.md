@@ -204,5 +204,7 @@ images and `platform/ansible/output/<instance>/` are kept. Then:
 - Never pass a key on a command line or put it in a prompt, test variable or config
   file in the repository; use the environment or a 0600 file.
 - Model-backed runs cost money (commercial APIs) or shared capacity (de.NBI); the agent
-  caps each run at 50 model requests, 100 tool calls and 400000 tokens.
+  caps each run at 50 model requests and 100 tool calls. A per-run token cap
+  (`spe_agent_total_tokens_limit`) is off by default, as Open WebUI has none; set a
+  number to turn it on.
 - One instance per VM; do not replace another stack to make the preflight pass.

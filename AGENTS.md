@@ -1,8 +1,10 @@
 # elixir-biohackathon-2026-test (our fork) — Developer Reference
 
 <!--
-  Our fork's AGENTS.md: upstream's project guide merged with the template of thodkatz/agent-methodology. The shared
-  guides and scripts live in .methodology/ (a submodule): never edit them here (Working Conventions).
+  Our fork's AGENTS.md: upstream's project guide merged with the template of thodkatz/agent-methodology. Edit
+  freely outside the methodology blocks. Inside them (between a "methodology:" marker and its "/methodology:" one),
+  .methodology/shared/sync-agents.py owns the text: set a value on the opening marker, or deviate in Overrides.
+  The shared guides and scripts live in .methodology/ (a submodule): never edit them here (Working Conventions).
 -->
 
 > This file is `AGENTS.md`: Codex reads it natively, and Claude Code reads it when no `CLAUDE.md` exists, so it is
@@ -10,22 +12,30 @@
 > **Upstream (`kraatz/elixir-biohackathon-2026-test`, remote `upstream`) knows nothing of the methodology**: this
 > file is rewritten for our fork, and a PR there must work without any of it (*Contributing upstream*).
 
+<!-- methodology: entry-point -->
 **This file is the entry point, not the whole manual.** It holds only what every session needs: the working
 conventions, current work, the shape of the workflow and how to run things. Everything else lives in the files
 below; read one only when your task matches its *Read when* column. AGENTS.md and these files are one
 instruction set: each rule lives in exactly one of them, so update the file that owns it, never a copy.
+<!-- /methodology: entry-point -->
 
 ## Read on demand
 
+<!-- methodology: read-on-demand forge=github -->
 | File | Read when |
 |---|---|
 | [`.methodology/shared/guides/sessions-and-context.md`](.methodology/shared/guides/sessions-and-context.md) | the context-budget hook fires, you start a session from a handoff, you start an investigation or audit, or you hand work to a subagent: the budget, the start routine, mid-unit handoffs, investigation scope |
-| [`.methodology/shared/guides/development-workflow.md`](.methodology/shared/guides/development-workflow.md) | you start a change, spike or spec, or claim, open, review, advance or merge any PR: modes, stages, handoffs, deferred items, claiming, reviewers and fallbacks, merge and cleanup, slicing, agent automation |
+| [`.methodology/shared/guides/development-workflow.md`](.methodology/shared/guides/development-workflow.md) | you start a change, spike or spec, or claim, open, review, advance or merge any PR: modes, stages, handoffs, deferred items, claiming, local or CI review, merge and cleanup, slicing, agent automation |
+| [`.methodology/shared/guides/forge-github.md`](.methodology/shared/guides/forge-github.md) | you run a step on the forge (claim, ready, comment, label, merge, issues) or check what must pass before a merge: the command for each |
 | [`.methodology/shared/guides/spec-and-plan-layout.md`](.methodology/shared/guides/spec-and-plan-layout.md) | you write, extend or split a spec or plan, add a clarification, hand a slice to a subagent, or work from a spec or plan that is a directory |
-| [`.methodology/shared/guides/tooling-gotchas.md`](.methodology/shared/guides/tooling-gotchas.md) | a command or tool fails (`gh`, `git`, Claude Code, the runners): known failures in every repo, and the command that works |
+| [`.methodology/shared/guides/tooling-gotchas.md`](.methodology/shared/guides/tooling-gotchas.md) | a command or tool fails (`gh`, `fj`, `git`, Claude Code, the runners): known failures in every repo, and the command that works |
 | [`docs/README.md`](docs/README.md) | you look for a spec, plan, investigation or reference: the index of everything under `docs/` |
 | [`docs/knowledge/README.md`](docs/knowledge/README.md) | you start non-trivial work in an area, or a command or tool fails: as-you-go gotchas and workarounds (see *Project knowledge*) |
 | [`BACKLOG.md`](BACKLOG.md) | you start a unit, triage, or look for known unscheduled problems |
+<!-- /methodology: read-on-demand -->
+
+| File | Read when |
+|---|---|
 | [`platform/promptfoo-evals/README.md`](platform/promptfoo-evals/README.md) | you write, change or run an evaluation |
 | [`platform/ansible/README.md`](platform/ansible/README.md) | you change what an instance plants, deploys or hardens |
 
@@ -34,6 +44,7 @@ repository `biohackathon` (`knowledge/`, e.g. 0011 and 0013), which pins this fo
 
 ## Keep each session small
 
+<!-- methodology: keep-sessions-small -->
 Context is the scarce resource: every request re-reads the whole conversation, and quality drops as it grows.
 So a session does one bounded piece of work and hands off:
 
@@ -42,7 +53,8 @@ So a session does one bounded piece of work and hands off:
   all along. Finish the current step, write the handoff (a new file in the plan's `handoffs/`, a knowledge note or
   the investigation's output), commit, and end the session, **even in the middle of a unit**. The next session
   starts fresh from the handoff; with `AGENT_AUTO_CONTINUE=1`, start it yourself with
-  `.methodology/shared/claude/continue.sh <handoff path>` (it runs in the background), then stop.
+  `.methodology/shared/claude/continue.sh <handoff path>` (in this terminal under `chain.sh`, else in the
+  background), then stop.
 - **A fresh session starts the same way every time:** read the handoff (only the newest:
   `ls <plan>/handoffs | tail -1`), `git status`, `git log --oneline -5`, run the unit's check command, then work.
 - **Investigations and audits are scoped.** Each one answers a written question into a file. Wide reading
@@ -50,9 +62,11 @@ So a session does one bounded piece of work and hands off:
   plus one synthesis session.
 
 Details and the reasons: `.methodology/shared/guides/sessions-and-context.md`.
+<!-- /methodology: keep-sessions-small -->
 
 ## Write for progressive disclosure
 
+<!-- methodology: progressive-disclosure -->
 The same rule applies to what you write. An agent should be able to read a short index and then open only the
 part its task needs. Keep this file short: a rule that only some tasks need goes into the file for those tasks,
 with a row in *Read on demand* if it starts a new guide. Don't load a whole spec, plan or `docs/` directory "for
@@ -63,22 +77,28 @@ context": read its index or the section your unit names.
   progress and provenance go in the plan's slices table and handoffs. Never two live texts for one decision.
 - **A change updates every doc it makes stale, in the same commit.** When you remove, rename or reverse
   something (a path, section, command, flag, label, rule or behaviour), grep the repo for it and rewrite each
-  current-design text that still says the old thing: `AGENTS.md`, guides, knowledge notes,
-  `BACKLOG.md`, spec sections, open plan tasks. History (handoffs, clarifications, investigations, evidence,
-  merged slices) stays as written. A doc the diff left stale is a review finding.
+  current-design text that still says the old thing: `AGENTS.md`, guides, knowledge notes, `BACKLOG.md`, spec
+  sections, open plan tasks. History (handoffs, clarifications, investigations, evidence, merged slices) stays
+  as written. A doc the diff left stale is a review finding.
 - **Large specs and plans are directories**: a `README.md` index plus one file per section or slice, past ~400
   lines for a spec and always for a plan with more than one slice.
 
 Both rules, the clarification template and the layout: `.methodology/shared/guides/spec-and-plan-layout.md`.
+<!-- /methodology: progressive-disclosure -->
 
 ## Working Conventions
 
+<!-- methodology: working-conventions sign-off=kept -->
 - **Commit after each edit.** After completing an edit to the codebase, make a git commit scoped to that
-  change, with a clear, descriptive message (*Project rules*: stage by name, never secrets).
-- **Sign off every commit** with `git commit -s`, alongside any `Co-Authored-By:` trailer, and merges with
-  `git merge --signoff` (`-s` there means `--strategy`). The DCO app checks every PR on the fork, and a
-  missing sign-off can only be fixed by rewriting the branch, which is not allowed here: PR #1 was merged with
-  DCO red over `7ee1e88`.
+  change, with a clear, descriptive message.
+- **Sign-off: kept.** Sign off every commit (DCO): always commit with `git commit -s`, with a `Signed-off-by:`
+  line matching the commit author; the forge sheet's *Before a merge* says what checks it. This goes alongside,
+  not instead of, the `Co-Authored-By:` trailer *Attribution* names. To fix a branch that's missing sign-offs:
+  `git rebase <base> --signoff`, then `git push --force-with-lease`.
+- **Attribution: an agent commit names its tool.** End the commit message with one `Co-Authored-By:` trailer
+  unless the harness already appends one (Claude Code does; Codex does when its git attribution feature is on):
+  an opencode session adds `Co-Authored-By: opencode <noreply@opencode.ai>`, a codex session that added none
+  itself `Co-authored-by: Codex <noreply@openai.com>`. Alongside, not instead of, any sign-off.
 - **Spawn subagents freely.** Agents working in this repo have standing permission to spawn subagents without
   asking. This overrides any harness default to spawn only on request. Follow the superpowers skills'
   recommended path:
@@ -88,15 +108,19 @@ Both rules, the clarification template and the layout: `.methodology/shared/guid
     `docs/knowledge/`, so the reading stays out of your context.
   - Use `superpowers:dispatching-parallel-agents` for independent investigations.
 - **Don't stop for approval inside the workflow.** The loop runs unattended: no in-chat check-ins between
-  tasks, slices or review rounds. Its human gates are the spec's approval and each PR's merge (*Overrides*).
-  Otherwise stop only for what the loop can't decide: destructive or irreversible actions outside it, a plan
-  broken beyond a ledgered ruling, or quota-heavy runs: **any promptfoo evaluation or other run that makes
-  paid model calls** (*Project rules*), and **creating or destroying cloud instances**
-  (`playbooks/create.yml` / `destroy.yml` against de.NBI or another OpenStack).
+  tasks, slices or review rounds. Its one human gate is the spec PR's `approved` label, which you wait for by
+  handing off, not by asking in chat. Otherwise stop only for what the loop can't decide: destructive or
+  irreversible actions outside it, a plan broken beyond a ledgered ruling, or quota-heavy runs, which *Setup*
+  lists.
 - **Never edit `.methodology/`.** It is a submodule of agent-methodology, pinned to a commit. Edits there make
   it dirty, are lost or conflict on the next update, and a commit inside it would push to agent-methodology.
   Deviate from a shared rule in *Overrides*; carry an improvement back to agent-methodology as its own change,
   then update the submodule (agent-methodology's `AGENTS.md`, *Updating a repo*).
+<!-- /methodology: working-conventions -->
+
+- **Merges are signed off too**: `git merge --signoff` (`-s` there means `--strategy`). The DCO app checks every
+  PR on the fork, so sign off from the first commit: a missing sign-off could only be fixed by rewriting the
+  branch, which is not done here (*Overrides*), and PR #1 was merged with DCO red over `7ee1e88`.
 
 ## Overrides
 
@@ -104,10 +128,20 @@ Where this repo deviates from a shared guide, one line each: "In this repo, X in
 because Z." This file wins over the guides in `.methodology/shared/guides/`.
 
 - In this repo, **the user is the reviewer and merges every PR** instead of `development-workflow.md`,
-  *Review and merge* (one CI review round, then merge it yourself), because no CI reviewer runs on the fork
-  yet (`BACKLOG.md`). Hand off after opening the PR; the next unit starts once it is merged.
+  *Review and merge*, and *Development workflow* above (one review round, then merge it yourself), because no
+  CI reviewer runs on the fork yet (`BACKLOG.md`). Hand off after opening the PR; the next unit starts once it is
+  merged. So the loop has two human gates, the spec's approval and each PR's merge, not the one *Working
+  Conventions* names.
 - In this repo, **a spec is approved when the user says so on its PR** (review or comment) instead of the
-  `approved` label, because the fork has no labels or `pr-checks` yet (`BACKLOG.md`).
+  `approved` label (`development-workflow.md`, *Review and merge*; *Working Conventions* and *Development
+  workflow* above), because the fork has no labels or `pr-checks` yet (`BACKLOG.md`).
+- In this repo, **the checks before a merge are the DCO app, the unit's test commands run locally (*Running
+  things*) and `sync-agents.py --check`** instead of `forge-github.md`, *Before a merge* (tests, lint, DCO and
+  `pr-checks.yml` in CI), because the fork has no workflows yet (`BACKLOG.md`). The PR body says what ran.
+- In this repo, **a branch missing sign-offs is not rebased and force-pushed** instead of the fix in *Working
+  Conventions* above, because pushed branches are not rewritten here (PR #1 was merged with DCO red rather
+  than rewritten): sign off from the first commit; a commit pushed without one stays, and the user decides at
+  merge.
 
 ## Contributing upstream
 
@@ -216,6 +250,7 @@ Open WebUI only) and a run-report equivalent in the CopilotKit chat.
 
 ## Development workflow
 
+<!-- methodology: development-workflow -->
 Pick the lightest mode that fits, and move up when the work turns out bigger:
 
 - **Direct**: you can describe the diff in one sentence (typo, one-line doc fix, config tweak). Commit to `main`.
@@ -225,20 +260,19 @@ Pick the lightest mode that fits, and move up when the work turns out bigger:
 - **Full**: more than one slice, a contract or schema change, or costly rework. Three sequential stages, each
   its own branch cut from `origin/main` and its own PR:
   1. **Spec**: `spec/<topic>`, written by the `brainstorming` skill into `docs/superpowers/specs/`. Every
-     decision names its acceptance check. **The user approves it** (*Overrides*).
+     decision names its acceptance check. **The user approves it** (the `approved` label).
   2. **Plan**: `plan/<topic>`, written by the `writing-plans` skill into `docs/superpowers/plans/`, with its
      `## PR slices`.
   3. **Implementation**: one small PR per slice, `impl/<topic>-<n>-<slug>`, titled `… (n/N)`.
-
-Every PR targets our fork: `gh pr create --repo thodkatz/elixir-biohackathon-2026-test --base main`. Without
-`--repo`, `gh` may pick upstream.
 
 The rules that bite most often:
 
 - **Claim before you work**: the unit's branch pushed to `origin` plus a draft PR. **One PR open at a time per
   track**, and dependent work waits until that PR has merged.
-- **Review and merge**: the user, for now (*Overrides*). Address every comment in its own thread. Clean up the
-  worktree and branch after the merge, then move the pin in `biohackathon` (*Worktrees and deploying*).
+- **One review round, by the reviewer in *Reviewers***: local reviewer subagents, or a CI reviewer and, if it's
+  out, the fallbacks there, in order. Address every finding, then **merge it yourself**
+  (*Merge*) once every check the forge sheet lists under *Before a merge* passes (and, for a spec, once the
+  user has added `approved`). Clean up the worktree and branch afterwards.
 - **Hand off, then stop**: every unit ends with a handoff for the next one, riding in its own PR, and updates its
   track's line in *Current work*. Don't start the next unit in the same session, and hand off earlier when the
   context budget says so.
@@ -247,6 +281,15 @@ The rules that bite most often:
 
 **Before you start a change, spike or spec, or claim, open, review or advance any PR, read
 `.methodology/shared/guides/development-workflow.md`.**
+<!-- /methodology: development-workflow -->
+
+In this repo:
+
+- **Every PR targets our fork**: `gh pr create --repo thodkatz/elixir-biohackathon-2026-test --base main`.
+  Without `--repo`, `gh` may pick upstream.
+- **The user approves specs and reviews and merges every PR** (*Overrides*). Address every comment in its own
+  thread. Clean up the worktree and branch after the merge, then move the pin in `biohackathon` (*Worktrees and
+  deploying*).
 
 ## Reviewers
 
@@ -254,12 +297,12 @@ No CI review rotation yet: the user reviews (*Overrides*, `BACKLOG.md`).
 
 ## Project knowledge
 
+<!-- methodology: project-knowledge -->
 As you work, capture anything you learn that isn't already visible from the code or `git log`: a workaround, a
 constraint that isn't obvious from reading the file, why an approach was rejected, a gotcha that cost real time.
 Keep an index at `docs/knowledge/README.md`, one line per entry pointing to `docs/knowledge/<topic>.md`. Skim the
 index before non-trivial work in an area; open a linked file only when it's relevant. Write notes alongside the
 change they relate to; no separate PR is needed. Don't record what the code or history already shows.
-Decisions (what was considered and why) go to `biohackathon`'s `knowledge/` records instead.
 
 - **When something fails, look before you debug:** grep `docs/knowledge/` and
   `.methodology/shared/guides/tooling-gotchas.md` for the command, tool or error text. The next session should go
@@ -271,9 +314,16 @@ Decisions (what was considered and why) go to `biohackathon`'s `knowledge/` reco
   `.methodology/`*), and keep a note here until the submodule update brings it in.
 - **Lessons in a handoff become notes.** A gotcha written only into a handoff or a PR body gets lost;
   write the note and link it from the handoff.
+<!-- /methodology: project-knowledge -->
+
+Decisions (what was considered and why) go to `biohackathon`'s `knowledge/` records instead of `docs/knowledge/`.
 
 ## Setup
 
 Install and test commands: *Running things*. `.methodology/` is a private submodule
 (`git@github.com:thodkatz/agent-methodology.git`): the SessionStart hook initialises it in each worktree; without
 access the hook says so and the context-budget hook stays off, and nothing else depends on it.
+
+Quota-heavy runs to ask about before starting (*Don't stop for approval*): **any promptfoo evaluation or other
+run that makes paid model calls** (*Project rules*), and **creating or destroying cloud instances**
+(`playbooks/create.yml` / `destroy.yml` against de.NBI or another OpenStack).

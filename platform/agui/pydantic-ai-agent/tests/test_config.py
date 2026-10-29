@@ -24,7 +24,12 @@ def test_valid_config_loads_with_defaults(tmp_path):
     assert cfg.tools.sandbox_operations == "all"
     assert cfg.tools.max_output_bytes == 16384
     lim = cfg.limits.usage_limits()
-    assert (lim.request_limit, lim.tool_calls_limit, lim.total_tokens_limit) == (50, 100, 400000)
+    assert (lim.request_limit, lim.tool_calls_limit, lim.total_tokens_limit) == (50, 100, None)
+
+
+def test_total_tokens_limit_can_be_set(tmp_path):
+    cfg = load_config(write(tmp_path, {**VALID, "limits": {"total_tokens_limit": 400000}}))
+    assert cfg.limits.usage_limits().total_tokens_limit == 400000
 
 
 def test_unknown_key_is_an_error(tmp_path):

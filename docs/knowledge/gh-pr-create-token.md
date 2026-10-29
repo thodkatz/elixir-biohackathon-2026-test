@@ -19,3 +19,8 @@ PR from the URL `git push` prints (`https://github.com/thodkatz/elixir-biohackat
 Granted on 2026-10-22; PR writes through `gh api` work since. `gh pr edit` still fails, for an unrelated reason
 (Projects classic): use `gh api -X PATCH repos/<owner>/<repo>/pulls/<n> -F body=@file`
 (`.methodology/shared/guides/tooling-gotchas.md`).
+
+**Upstream PRs are opened by hand.** The token covers our fork only, so
+`gh pr create --repo kraatz/elixir-biohackathon-2026-test` fails with the same error (seen 2026-10-29). Push the
+branch to `origin` and open the compare page with the base set to upstream explicitly:
+`https://github.com/kraatz/elixir-biohackathon-2026-test/compare/main...thodkatz:elixir-biohackathon-2026-test:<branch>?expand=1`.

@@ -31,6 +31,7 @@ Every task's requirements include these.
 - **No new runtime dependencies** (spec §6). `rxjs` is already installed (7.8.1, a dependency of
   `@ag-ui/client`); slice 1 lists it in `package.json` at exactly that version, because `lib/recorder.ts`
   imports it directly. No test framework: `node --test` with Node 24's type stripping.
+- **`npm test` is `node --test 'lib/*.test.ts'`**: `node --test lib/` fails on Node 24.
 - **TypeScript that type stripping accepts:** in `lib/`, relative imports carry the `.ts` extension
   (`tsconfig.json` gets `"allowImportingTsExtensions": true`), types are imported with `import type`, and no
   enums, namespaces or constructor parameter properties.
@@ -91,14 +92,32 @@ export function defaultStore(): SessionStore;  // dir from SPE_SESSIONS_DIR, def
 **`lib/recorder.ts`** (slice 1, task 3): `export class SessionRecorder extends Middleware` with
 `constructor(store: () => SessionStore, now?: () => Date)` and `run(input: RunAgentInput, next: AbstractAgent):
 Observable<BaseEvent>`; `export const SAVE_FAILED = "spe.session_save_failed"`. A running session's
-`RunHandle.cancel()` ends that run as `cancelled` (slice 2's shutdown uses it).
+`RunHandle.cancel()` ends that run as `cancelled`, emitting `RUN_ERROR` `code: "cancelled"` (slice 2's
+shutdown uses it). The save-failed event is a `CUSTOM` event named `SAVE_FAILED` with `value: { session: id }`.
+A run leaves `shared().running` when its write is queued (only if its own handle is still there), not after the
+write. `SPE_SESSIONS_TEST_SAVE_DELAY_MS` is read inside `recordRun`, under the queue.
+
+**`lib/test-agent.ts`** (slice 1, test-only, not in the image): `startTestAgent(delayMs?: number):
+Promise<TestAgent>`, `TestAgent = { url: string; requests: { headers, body }[]; close(): Promise<void> }`, an
+in-test AG-UI SSE server.
 
 **`lib/api.ts`** (slice 1, task 4): `listSessions(store)`, `getSession(store, id)`,
 `patchSession(store, id, request)`, `deleteSession(store, id)`, each `Promise<Response>`.
 
+**Slice 2's browser-side names** (slice 2, tasks 1–2; signatures in
+[slice-2-sidebar.md](slice-2-sidebar.md), *Additions to the README's shared interfaces*): `lib/session-id.ts`
+(`isSessionId` moves here, without Node imports; `lib/sessions.ts` re-exports it), `lib/session-url.ts`
+(`sessionFromSearch`, `searchWith`), `lib/client.ts` (`Fetch`, `ApiError`, `fetchSessions`, `fetchSession`,
+`updateSession`, `removeSession`, `listOrder`, `renamePatch`, `withTag`, `withoutTag`), and `app/sidebar.tsx`
+`Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChanged, onDeleted, onError })` with the CSS classes
+`.spe-sidebar`, `.spe-row`, `.spe-row-active`, `.spe-row-open`, `.spe-row-title`, `.spe-chip`, `.spe-pin`,
+`.spe-row-menu`, `.spe-menu`, `.spe-error`.
+
 **`lib/shutdown.ts`** (slice 2, task 3): `export function installShutdown(): void`, called from
 `instrumentation.ts`'s `register()`; on `SIGTERM` sets `shared().closing`, cancels every running handle, waits
-for the queue to drain, then exits.
+until `running` is empty and then until `queue` is, then exits. Also `DRAIN_TIMEOUT_MS = 25_000`, `drain(state, timeoutMs, pollMs?)` and
+`shutdown(state, exit, timeoutMs?)`. The image sets `NEXT_MANUAL_SIG_HANDLE=true`, since Next.js's own `SIGTERM`
+handler exits before the drain (proposed clarification 2).
 
 **Files on the instance:** volume `chat-sessions` (compose project `spe-frontend`, so
 `spe-frontend_chat-sessions`) at `/data` in `chat-ui`; sessions at `/data/sessions/<id>.json`. Archive bundle:
@@ -110,7 +129,7 @@ for the queue to drain, then exits.
 | Path | Slice | What |
 |---|---|---|
 | `copilotkit-chat/lib/sessions.ts`, `lib/sessions.test.ts` | 1 | store, validation, queue |
-| `copilotkit-chat/lib/recorder.ts`, `lib/recorder.test.ts`, `lib/clone.test.ts` | 1 | recorder middleware; the clone gate |
+| `copilotkit-chat/lib/recorder.ts`, `lib/recorder.test.ts`, `lib/clone.test.ts`, `lib/test-agent.ts` | 1 | recorder middleware; the clone gate |
 | `copilotkit-chat/lib/api.ts`, `lib/api.test.ts`, `app/api/sessions/route.ts`, `app/api/sessions/[id]/route.ts` | 1 | session API |
 | `copilotkit-chat/app/api/copilotkit/[[...slug]]/route.ts` | 1 | `agent.use(new SessionRecorder(defaultStore))` |
 | `copilotkit-chat/package.json`, `tsconfig.json`, `Dockerfile`, `.dockerignore`, `README.md` | 1 | `npm test`, `rxjs`, `lib/` in the image, `/data/sessions` |
@@ -118,10 +137,11 @@ for the queue to drain, then exits.
 | `ansible/roles/agui/templates/docker-compose.yml.j2` | 1 | volume `chat-sessions` at `/data` |
 | `platform/dev/fake_agent.py` | 1 | the slow run ("slow": about 10 s) |
 | `copilotkit-chat/app/page.tsx`, `app/sidebar.tsx`, `app/globals.css` | 2, 3 | sidebar, URL, row menu; then search, tags, groups, header |
-| `copilotkit-chat/instrumentation.ts`, `lib/shutdown.ts` | 2 | the `SIGTERM` drain (§4, *Barrier*) |
+| `copilotkit-chat/lib/session-id.ts`, `lib/session-url.ts`, `lib/client.ts` (+ tests) | 2 | browser side: id check, URL, session API client |
+| `copilotkit-chat/instrumentation.ts`, `lib/shutdown.ts`, `scripts/check-shutdown.mjs` | 2 | the `SIGTERM` drain (§4, *Barrier*) |
 | `ansible/roles/run_archive/tasks/export.yml`, `tasks/write.yml`, `files/write_agui_run.py`, `files/write_run.py` | 2 | agui export and writer; `fence()` |
 | `platform/dev/tests/test_write_agui_run.py` | 2 | writer tests |
-| `platform/dev/e2e/sessions.mjs` | 2, 3 | Playwright run against `fake_agent.py` |
+| `platform/dev/e2e/sessions.py` | 2, 3 | Playwright (Python, the only Playwright on the dev VM) run against `fake_agent.py` |
 | `ansible/roles/agui/tasks/checks.yml` | 3 | "Session API answers"; key scan over the volume |
 | docs (§3 and §4 lists) | 2, 3 | each in the slice that changes the behaviour |
 
@@ -162,6 +182,8 @@ Each is added by the slice that verifies it, with status `folded`, and §2's tex
    `@ag-ui/client` 1.0.2: the runner's `stop` calls `HttpAgent.abortRun()`, which aborts the fetch, and the
    HTTP transform turns the `AbortError` into a `RUN_ERROR` event `{code: "abort"}` instead of ending the
    stream. §2's table gains that row; unsubscription stays `cancelled`. Slice 1, task 1 pins it with a test.
+2. **Next.js's own `SIGTERM` handler exits before the drain**, so the image sets `NEXT_MANUAL_SIG_HANDLE=true`
+   and `instrumentation.ts` installs the only handler. §4's *Barrier* gains that. Slice 2, task 3.
 
 ## Handoffs
 

@@ -5,9 +5,10 @@
 
 Run `npm ci && npm run build` in platform/agui/copilotkit-chat first. The script starts
 platform/dev/fake_agent.py (with uv, in platform/agui/pydantic-ai-agent) and the standalone chat UI
-with its own sessions directory, walks the sidebar (list, open, New chat, ?session=) and
-checks the session files after each step. Needs Python Playwright with Chromium (`pip install playwright` and
-`playwright install chromium`). Exits nonzero on the first failed check.
+with its own sessions directory, walks the sidebar (list, open, New chat, ?session=, row menu) and
+checks the session files after each step. It ends with three sessions: one tagged and pinned, one hidden, one
+deleted, and checks that a run whose tab is closed is still saved whole. Needs Python Playwright with Chromium
+(`pip install playwright` and `playwright install chromium`). Exits nonzero on the first failed check.
 """
 from __future__ import annotations
 
@@ -153,6 +154,111 @@ def check_list(r: Run) -> dict[str, str]:
     return {"first": first, "second": second, "third": third}
 
 
+def check_menu(r: Run, ids: dict[str, str]) -> None:
+    page = r.page
+    page.goto(f"{BASE}/?session={ids['first']}")
+    expect(page.get_by_text("Turn 2: the command ran.")).to_be_visible(timeout=10_000)
+
+    r.row("List the home directory").locator(".spe-row-menu").click()
+    r.shot("row-menu")
+    page.get_by_role("menuitem", name="Rename").click()
+    page.get_by_label("Session title").fill("Discarded title")
+    page.get_by_label("Session title").press("Escape")
+    expect(r.row("List the home directory")).to_have_count(1)
+    assert r.files()[ids["first"]]["title"] == "List the home directory"
+    r.menu("List the home directory", "Rename")
+    page.get_by_label("Session title").fill("List the home directory (exfil try)")
+    page.get_by_label("Session title").press("Enter")
+    expect(r.row("List the home directory (exfil try)")).to_have_count(1, timeout=5_000)
+    rec = r.files()[ids["first"]]
+    assert rec["title"] == "List the home directory (exfil try)" and rec["title_source"] == "user"
+    r.ok("rename: Esc cancels, Enter saves (title_source user)")
+
+    title = "List the home directory (exfil try)"
+    r.menu(title, "Tags")
+    for tag in ("Exfil", "dns", "scratch"):
+        page.get_by_label("Add a tag").fill(tag)
+        page.get_by_label("Add a tag").press("Enter")
+        expect(r.row(title).locator(".spe-row-open .spe-chip", has_text=tag.lower())).to_have_count(1, timeout=5_000)
+    r.shot("tags")
+    r.row(title).get_by_role("button", name="Remove tag scratch").click()
+    expect(r.row(title).locator(".spe-row-open .spe-chip")).to_have_count(2, timeout=5_000)
+    page.get_by_label("Add a tag").press("Escape")
+    assert r.files()[ids["first"]]["tags"] == ["exfil", "dns"]
+    r.ok("tags: added (lower-cased), one removed with its x")
+
+    r.menu("Read the dataset", "Pin")
+    r.menu("Read the dataset", "Unpin")
+    r.menu(title, "Pin")
+    expect(r.rows().first.locator(".spe-row-title")).to_contain_text(title, timeout=5_000)
+    expect(r.row(title).locator(".spe-pin")).to_have_count(1)
+    assert r.files()[ids["first"]]["pinned"] is True and r.files()[ids["second"]]["pinned"] is False
+    r.ok("pin and unpin: the pinned row comes first")
+
+    r.menu("Read the dataset", "Hide")
+    expect(r.row("Read the dataset")).to_have_count(0, timeout=5_000)
+    assert r.files()[ids["second"]]["hidden"] is True
+    page.goto(f"{BASE}/?session={ids['second']}")
+    expect(page.get_by_text("Turn 1: the command ran.")).to_be_visible(timeout=10_000)
+    assert r.url_session() == ids["second"]
+    r.ok("hide: gone from the list, still openable by its URL")
+
+    page.get_by_role("button", name="New chat").click()
+    r.menu("<img src=x", "Rename")
+    page.get_by_label("Session title").fill("Try the canary")
+    page.get_by_label("Session title").press("Enter")
+    expect(r.row("Try the canary")).to_have_count(1, timeout=5_000)
+    r.menu("Try the canary", "Delete")
+    r.shot("delete-confirmation")
+    page.get_by_role("alertdialog").get_by_role("button", name="Cancel").click()
+    expect(r.row("Try the canary")).to_have_count(1)
+    assert r.files()[ids["third"]]["deleted_at"] is None
+    r.menu("Try the canary", "Delete")
+    page.get_by_role("alertdialog").get_by_role("button", name="Delete").click()
+    expect(r.row("Try the canary")).to_have_count(0, timeout=5_000)
+    assert r.files()[ids["third"]]["deleted_at"]
+    page.goto(f"{BASE}/?session={ids['third']}")
+    expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)
+    assert r.url_session() is None and page.locator(".spe-error").count() == 0
+    r.ok("delete: Cancel keeps it; Delete removes the row, keeps the file; its URL opens a new session")
+
+    page.goto(f"{BASE}/?session={ids['first']}")
+    expect(page.get_by_text("Turn 2: the command ran.")).to_be_visible(timeout=10_000)
+    expect(page.locator(".spe-tool")).to_have_count(2)
+    r.shot("final-reopened")
+    states = sorted((f["title"], f["pinned"], f["hidden"], bool(f["deleted_at"])) for f in r.files().values())
+    assert states == [("List the home directory (exfil try)", True, False, False),
+                      ("Read the dataset", False, True, False),
+                      ("Try the canary", False, False, True)], states
+    r.ok("final: three sessions, tagged and pinned / hidden / deleted; reload shows both tool cards")
+
+
+def check_close_tab(r: Run, ids: dict[str, str]) -> None:
+    """A run goes on when its tab is closed: the server records all of it, completed.
+
+    Uses the hidden session, so the three sessions above keep their state and the first one its two runs.
+    """
+    # Not `r.page.context.new_page()`: Python Playwright's sync API refuses a second page on a
+    # context created by `browser.new_page()` ("Please use browser.new_context()"); a fresh
+    # context gives an independent tab just as well here (docs/knowledge/playwright-new-page.md).
+    page = r.page.context.browser.new_context().new_page()
+    page.goto(f"{BASE}/?session={ids['second']}")
+    expect(page.get_by_text("Turn 1: the command ran.")).to_be_visible(timeout=10_000)
+    box = page.get_by_test_id("copilot-chat-textarea")
+    box.fill("Read it again, slow please")
+    box.press("Enter")
+    expect(page.get_by_text("Slow step 1 of 10.")).to_be_visible(timeout=20_000)
+    page.close()
+    assert len(r.files()[ids["second"]]["runs"]) == 1, "the slow run was saved before it could have ended"
+    rec = r.wait_runs(ids["second"], 2, seconds=15)
+    assert rec["runs"][-1]["status"] == "completed", rec["runs"]
+    answer = [m for m in rec["messages"] if m["role"] == "assistant" and isinstance(m.get("content"), str)][-1]
+    assert "Slow step 10 of 10." in answer["content"], answer["content"]
+    assert "Turn 2: the command ran." in answer["content"], answer["content"]
+    assert rec["hidden"] is True and rec["title"] == "Read the dataset", rec
+    r.ok("closing the tab mid-run: the whole run is on disk, completed")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--shots", type=Path, help="write numbered screenshots here")
@@ -179,7 +285,9 @@ def main() -> None:
             browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
             page = browser.new_page(viewport={"width": 1280, "height": 800})
             r = Run(page, data, args.shots)
-            check_list(r)
+            ids = check_list(r)
+            check_menu(r, ids)
+            check_close_tab(r, ids)
             browser.close()
         print(f"sessions: {data}")
     finally:

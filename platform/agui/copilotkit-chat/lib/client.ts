@@ -61,3 +61,19 @@ export function listOrder(list: SessionMeta[]): SessionMeta[] {
     .filter((s) => !s.hidden)
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated_at.localeCompare(a.updated_at));
 }
+
+// The row menu's edits, as the PATCH bodies they send. The server normalises and validates tags
+// (lib/sessions.ts, normaliseTags); here only blanks and duplicates are dropped.
+export function renamePatch(input: string, current: string): MetaPatch | null {
+  const title = input.trim();
+  return title && title !== current ? { title } : null;
+}
+
+export function withTag(tags: string[], input: string): MetaPatch | null {
+  const tag = input.trim().toLowerCase();
+  return tag && !tags.includes(tag) ? { tags: [...tags, tag] } : null;
+}
+
+export function withoutTag(tags: string[], tag: string): MetaPatch {
+  return { tags: tags.filter((t) => t !== tag) };
+}

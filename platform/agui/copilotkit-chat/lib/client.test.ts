@@ -50,3 +50,14 @@ test("listOrder: hidden out, pinned first, then newest first", () => {
   ]);
   assert.deepEqual(rows.map((r) => r.id), ["pin", "new", "old"]);
 });
+
+test("row menu patches: rename, add and remove a tag", async () => {
+  const { renamePatch, withTag, withoutTag } = await import("./client.ts");
+  assert.deepEqual(renamePatch("  New name ", "Old"), { title: "New name" });
+  assert.equal(renamePatch("   ", "Old"), null);
+  assert.equal(renamePatch("Old", "Old"), null);
+  assert.deepEqual(withTag(["dns"], " Exfil "), { tags: ["dns", "exfil"] });
+  assert.equal(withTag(["dns"], "DNS"), null);
+  assert.equal(withTag(["dns"], "  "), null);
+  assert.deepEqual(withoutTag(["dns", "exfil"], "dns"), { tags: ["exfil"] });
+});

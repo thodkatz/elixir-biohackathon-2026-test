@@ -120,12 +120,19 @@ export class SessionRecorder extends Middleware {
         if (!(await finalise(status))) pass(saveFailed());
         last();
       };
+      // Queues fn after every earlier step of this run. A step that throws is logged (without
+      // its message, which may quote the conversation) and the chain goes on.
+      const step = (fn: () => void | Promise<void>) => {
+        chain = chain.then(fn).catch(() => {
+          console.error(`sessions: a step of run ${input.runId} of ${id} threw`);
+        });
+      };
       const handle: RunHandle = {
         // A run that has seen its terminal event ends with that event, not as cancelled.
         cancel: () => {
           if (finalised || terminal !== null) return;
           disconnect();
-          chain = chain.then(() =>
+          step(() =>
             end("cancelled", () => {
               pass({ type: EventType.RUN_ERROR, message: "the run was stopped", code: "cancelled" } as BaseEvent);
               out.complete();
@@ -154,19 +161,24 @@ export class SessionRecorder extends Middleware {
             // Synchronously, so a teardown right after a terminal event still records it.
             if (!finalised && terminal === null) messages = latest;
             terminal ??= statusOf(event);
-            chain = chain.then(async () => {
+            step(async () => {
               const status = statusOf(event);
               if (finalised || status === null) return pass(event);
               await end(status, () => pass(event));
             });
           },
           error: (error: unknown) => {
-            chain = chain.then(() => end("failed", () => out.error(error)));
+            step(() => end("failed", () => out.error(error)));
           },
           complete: () => {
-            chain = chain.then(() => end("failed", () => out.complete()));
+            step(() => end("failed", () => out.complete()));
           },
         });
+      }).catch((error: unknown) => {
+        // Admission or starting the agent threw: fail the run, so the session leaves the running set.
+        console.error(`sessions: starting run ${input.runId} of ${id} failed`);
+        disconnect();
+        step(() => end("failed", () => { if (!out.closed) out.error(error); }));
       });
 
       // Unsubscribed before a terminal event: cancelled, saved after the client has gone.

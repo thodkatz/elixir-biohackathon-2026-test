@@ -426,3 +426,33 @@ test("cancel() after a terminal event, before or during its save: no RUN_ERROR, 
     delete process.env.SPE_SESSIONS_TEST_SAVE_DELAY_MS;
   }
 });
+
+test("an agent that throws on run() fails the run and leaves the session free for the next one", async () => {
+  const { store, server, recorder, agent } = await setup();
+  class Throwing extends HttpAgent {
+    run(): never {
+      throw new Error("agent bug with secret canary text");
+    }
+  }
+  const logged = mock.method(console, "error", () => {});
+  try {
+    const id = randomUUID();
+    let out: Outcome;
+    try {
+      out = await drive(recorder, input(id, "secret canary text"), new Throwing({ url: server.url }));
+    } finally {
+      logged.mock.restore();
+    }
+    assert.ok(out.error instanceof Error, "the run's stream errors");
+    await settled(id);
+    assert.equal(shared().running.has(id), false);
+    assert.ok(logged.mock.callCount() >= 1);
+    assert.doesNotMatch(JSON.stringify(logged.mock.calls.map((c) => c.arguments)), /secret canary text/);
+    const next = await drive(recorder, input(id, "after the bug"), agent());
+    assert.equal(types(next).at(-1), EventType.RUN_FINISHED);
+    const record = (await store.read(id)) as SessionRecord;
+    assert.deepEqual(record.runs.map((r) => r.status), ["failed", "completed"]);
+  } finally {
+    await server.close();
+  }
+});

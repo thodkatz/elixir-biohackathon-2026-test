@@ -121,8 +121,9 @@ export class SessionRecorder extends Middleware {
         last();
       };
       const handle: RunHandle = {
+        // A run that has seen its terminal event ends with that event, not as cancelled.
         cancel: () => {
-          if (finalised) return;
+          if (finalised || terminal !== null) return;
           disconnect();
           chain = chain.then(() =>
             end("cancelled", () => {

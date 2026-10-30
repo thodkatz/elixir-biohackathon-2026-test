@@ -9,6 +9,8 @@ import { randomUUID } from "node:crypto";
 import { EventType, HttpAgent } from "@ag-ui/client";
 import type { BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
 import { CopilotRuntime, createCopilotRuntimeHandler } from "@copilotkit/runtime/v2";
+import { Observable } from "rxjs";
+import type { Subscriber } from "rxjs";
 import { REFUSAL_MESSAGES, SAVE_FAILED, SessionRecorder } from "./recorder.ts";
 import { SessionStore, shared } from "./sessions.ts";
 import type { RunEntry, SessionRecord } from "./sessions.ts";
@@ -383,5 +385,44 @@ test("a run started right after a stopped one is admitted and recorded after it"
     assert.equal(shared().running.has(id), false);
   } finally {
     await server.close();
+  }
+});
+
+// A recorder whose agent stream is scripted: `script` gets the subscriber, and the run's id, and
+// emits on it synchronously, so a test can act between a terminal event reaching the recorder
+// and the write queued after it (over HTTP that gap is a few microtasks wide).
+class Scripted extends SessionRecorder {
+  script: (sub: Subscriber<{ event: BaseEvent; messages: Message[]; state: unknown }>, id: string) => void = () => {};
+  runNextWithState(runInput: RunAgentInput): ReturnType<SessionRecorder["runNextWithState"]> {
+    return new Observable((sub) => this.script(sub, runInput.threadId)) as ReturnType<SessionRecorder["runNextWithState"]>;
+  }
+}
+
+test("cancel() after a terminal event, before or during its save: no RUN_ERROR, the terminal's status", async () => {
+  const store = new SessionStore(await fs.mkdtemp(path.join(os.tmpdir(), "recorder-")));
+  const recorder = new Scripted(() => store);
+  process.env.SPE_SESSIONS_TEST_SAVE_DELAY_MS = "100";
+  try {
+    const runInput = input(randomUUID(), "finish then cancel");
+    const id = runInput.threadId;
+    const ids = { threadId: id, runId: runInput.runId };
+    recorder.script = (sub) => {
+      const messages = runInput.messages;
+      sub.next({ event: { type: EventType.RUN_STARTED, ...ids } as BaseEvent, messages, state: {} });
+      sub.next({ event: { type: EventType.RUN_FINISHED, ...ids } as BaseEvent, messages, state: {} });
+      const handle = shared().running.get(id);
+      handle?.cancel(); // before the write is queued
+      setTimeout(() => {
+        handle?.cancel(); // while the delayed save runs
+        sub.complete();
+      }, 30);
+    };
+    const out = await drive(recorder, runInput, new HttpAgent({ url: "http://127.0.0.1:9/unused" }));
+    assert.deepEqual(types(out), [EventType.RUN_STARTED, EventType.RUN_FINISHED]);
+    await settled(id);
+    const [, run] = await onlyRun(store, id);
+    assert.equal(run.status, "completed");
+  } finally {
+    delete process.env.SPE_SESSIONS_TEST_SAVE_DELAY_MS;
   }
 });

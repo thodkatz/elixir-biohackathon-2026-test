@@ -220,7 +220,11 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   This is a convenience: the server's one-run-per-session admission (§2) is what keeps two tabs from
   overwriting each other.
 - **Refresh:** the list is fetched on load, after each run ends and after each metadata change; no polling.
-  A stopped run is saved after the browser has unsubscribed, so its save can land after that fetch: after a
+  A run that ends with a terminal event, the stop button's included (clarification 1: it aborts the
+  agent's request, and the recorder records `RUN_ERROR` `code: "abort"`), is saved before that event
+  reaches the browser, so the fetch after it finds the run, or the `spe.session_save_failed` event has
+  already said it was not saved. Only a run the server sees unsubscribed (the tab closed or reloaded, or
+  the stream dropped on the way) is saved after the client has gone, and so can land after that fetch: after a
   run ends, until the list shows the open session with an `updated_at` not older than the run's start, the
   page fetches it again, up to 5 times at 500 ms. If it still does not, the error bar says "this session
   could not be saved".

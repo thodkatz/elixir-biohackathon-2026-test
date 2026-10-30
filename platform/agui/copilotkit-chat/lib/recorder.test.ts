@@ -31,6 +31,13 @@ async function closedByClient(server: TestAgent, index = 0): Promise<boolean> {
   return server.requests[index]?.closed === true;
 }
 
+// Waits until the agent has received n requests; fails the test after 5 s instead of hanging.
+async function requestsReach(server: TestAgent, n: number): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (server.requests.length < n && Date.now() < deadline) await new Promise((r) => setTimeout(r, 5));
+  assert.ok(server.requests.length >= n, `the agent got ${server.requests.length} of ${n} requests within 5 s`);
+}
+
 function input(threadId: string, text: string, history: Message[] = []): RunAgentInput {
   return {
     threadId, runId: randomUUID(), state: {}, tools: [], context: [], forwardedProps: {},
@@ -223,7 +230,7 @@ test("a second run on a running session is refused and never reaches the agent",
   try {
     const id = randomUUID();
     const first = drive(recorder, input(id, "slow first"), agent());
-    while (server.requests.length === 0) await new Promise((r) => setTimeout(r, 5));
+    await requestsReach(server, 1);
     const second = await drive(recorder, input(id, "second"), agent());
     assert.deepEqual(types(second), [EventType.RUN_STARTED, EventType.RUN_ERROR]);
     assert.equal((second.events[1] as { message?: string }).message, "this session is already running");
@@ -244,7 +251,7 @@ test("PATCH and DELETE during a run survive its finalisation", async () => {
     await drive(recorder, first, agent());
     const history = ((await store.read(id)) as SessionRecord).messages;
     const running = drive(recorder, input(id, "second question", history), agent());
-    while (server.requests.length < 2) await new Promise((r) => setTimeout(r, 5));
+    await requestsReach(server, 2);
     await store.patch(id, { title: "Renamed", tags: ["dns"] }, new Date());
     await store.softDelete(id, new Date());
     await running;
@@ -295,7 +302,7 @@ test("RunHandle.cancel() ends a running session's run as cancelled and closes th
   try {
     const id = randomUUID();
     const outcome = drive(recorder, input(id, "hang for shutdown"), agent());
-    while (server.requests.length === 0) await new Promise((r) => setTimeout(r, 5));
+    await requestsReach(server, 1);
     shared().running.get(id)?.cancel();
     const out = await outcome;
     const last = out.events.at(-1) as { type: string; code?: string };
@@ -452,6 +459,17 @@ test("an agent that throws on run() fails the run and leaves the session free fo
     assert.equal(types(next).at(-1), EventType.RUN_FINISHED);
     const record = (await store.read(id)) as SessionRecord;
     assert.deepEqual(record.runs.map((r) => r.status), ["failed", "completed"]);
+  } finally {
+    await server.close();
+  }
+});
+
+test("the test agent answers a body that is not JSON with 400", async () => {
+  const server = await startTestAgent();
+  try {
+    const response = await fetch(server.url, { method: "POST", body: "{not json" });
+    assert.equal(response.status, 400);
+    assert.equal(server.requests.length, 0);
   } finally {
     await server.close();
   }

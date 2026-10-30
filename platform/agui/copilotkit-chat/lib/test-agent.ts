@@ -4,6 +4,7 @@
 //   contains "error": RUN_STARTED then RUN_ERROR
 //   contains "eof": RUN_STARTED and a text message, then the stream ends without a terminal event
 //   contains "crash": RUN_STARTED and one text chunk, then the connection is destroyed
+//   a body that is not JSON: HTTP 400, not kept in `requests`
 //   anything else: a text message echoing it, then RUN_FINISHED (after `delayMs`, default 0)
 // Each request is kept in `requests`; `closed` turns true when its connection closes.
 import { createServer } from "node:http";
@@ -22,7 +23,13 @@ export async function startTestAgent(delayMs = 0): Promise<TestAgent> {
     let raw = "";
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", async () => {
-      const body = JSON.parse(raw);
+      let body;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        res.writeHead(400, { "content-type": "application/json" }).end('{"detail":"the body is not JSON"}');
+        return;
+      }
       const entry = { headers: req.headers, body, closed: false };
       res.on("close", () => (entry.closed = true));
       requests.push(entry);

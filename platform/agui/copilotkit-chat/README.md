@@ -44,7 +44,9 @@ volume like the agent's run log.
 npm ci && npm run build                       # type-checks too
 # against the scripted agent (no LLM): in ../pydantic-ai-agent
 #   uv run --group dev python ../../dev/fake_agent.py --port 18100 --key TEST_KEY
-AGENT_URL=http://127.0.0.1:18100/agent AGENT_API_KEY=TEST_KEY PORT=3000 node .next/standalone/server.js
+# SPE_SESSIONS_DIR (default /data/sessions) must be an existing, writable directory, or every save fails
+SPE_SESSIONS_DIR=$(mktemp -d) AGENT_URL=http://127.0.0.1:18100/agent AGENT_API_KEY=TEST_KEY PORT=3000 \
+  node .next/standalone/server.js
 #   (copy .next/static to .next/standalone/.next/static first; the Dockerfile does)
 docker build -t spe-chat-ui .                 # node:24-slim, user node, port 3000
 npm test                                      # lib/*.test.ts with node --test (no model, no network)

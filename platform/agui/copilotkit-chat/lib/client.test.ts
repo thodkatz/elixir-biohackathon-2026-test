@@ -1,0 +1,52 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { ApiError, fetchSession, fetchSessions, listOrder, removeSession, updateSession } from "./client.ts";
+import type { Fetch } from "./client.ts";
+import type { SessionMeta } from "./sessions.ts";
+
+const ID = "6f1c0d2e-1a2b-4c3d-8e4f-0a1b2c3d4e5f";
+
+function fake(status: number, body: unknown, seen: { url?: string; init?: RequestInit } = {}): Fetch {
+  return async (url, init) => {
+    seen.url = url;
+    seen.init = init;
+    return status === 204 ? new Response(null, { status }) : Response.json(body, { status });
+  };
+}
+
+function meta(id: string, updated_at: string, extra: Partial<SessionMeta> = {}): SessionMeta {
+  return { id, title: id, tags: [], pinned: false, hidden: false, created_at: updated_at, updated_at, ...extra };
+}
+
+test("fetchSession: 404 is null, 500 an ApiError with the generic message", async () => {
+  assert.equal(await fetchSession(ID, fake(404, { error: "not found" })), null);
+  await assert.rejects(fetchSession(ID, fake(500, { error: "internal error" })),
+    (e: unknown) => e instanceof ApiError && e.status === 500 && e.message === "Opening the session failed (500): internal error");
+});
+
+test("updateSession sends a JSON PATCH and returns the new metadata", async () => {
+  const seen: { url?: string; init?: RequestInit } = {};
+  const out = await updateSession(ID, { pinned: true }, fake(200, meta(ID, "t", { pinned: true }), seen));
+  assert.equal(seen.url, `/api/sessions/${ID}`);
+  assert.equal(seen.init?.method, "PATCH");
+  assert.equal(seen.init?.body, '{"pinned":true}');
+  assert.equal(out.pinned, true);
+  await assert.rejects(updateSession(ID, { tags: ["Bad Tag!"] }, fake(400, { error: "invalid tags" })),
+    /Saving the change failed \(400\): invalid tags/);
+});
+
+test("removeSession: 204 resolves, 404 rejects; fetchSessions returns the list", async () => {
+  await removeSession(ID, fake(204, null));
+  await assert.rejects(removeSession(ID, fake(404, { error: "not found" })), ApiError);
+  assert.deepEqual(await fetchSessions(fake(200, [meta(ID, "t")])), [meta(ID, "t")]);
+});
+
+test("listOrder: hidden out, pinned first, then newest first", () => {
+  const rows = listOrder([
+    meta("old", "2026-10-29T08:00:00.000Z"),
+    meta("hid", "2026-10-29T12:00:00.000Z", { hidden: true }),
+    meta("new", "2026-10-29T11:00:00.000Z"),
+    meta("pin", "2026-10-28T09:00:00.000Z", { pinned: true }),
+  ]);
+  assert.deepEqual(rows.map((r) => r.id), ["pin", "new", "old"]);
+});

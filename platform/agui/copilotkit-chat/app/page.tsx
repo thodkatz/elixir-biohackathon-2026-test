@@ -1,9 +1,21 @@
 "use client";
-// Full-screen chat with agent `spe`. Each tool call is a collapsible card: name, status,
-// arguments and the first lines of the result. Everything is rendered as text, never HTML.
-// No persistence: a reload starts a new conversation.
-import { CopilotChat, CopilotKitProvider, useDefaultRenderTool } from "@copilotkit/react-core/v2";
-import { useState } from "react";
+// Chat with agent `spe`, and a sidebar of sessions. Each tool call is a collapsible card: name,
+// status, arguments and the first lines of the result. Everything is rendered as text, never HTML.
+// Sessions are recorded on the server (lib/recorder.ts); this page only reads them and changes
+// their metadata. The open session is in the URL (`?session=<id>`), so a reload reopens it.
+import type { Message } from "@ag-ui/client";
+import {
+  CopilotChat,
+  CopilotChatConfigurationProvider,
+  CopilotKitProvider,
+  useAgent,
+  useDefaultRenderTool,
+} from "@copilotkit/react-core/v2";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { fetchSession, fetchSessions, listOrder } from "../lib/client.ts";
+import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
+import type { SessionMeta } from "../lib/sessions.ts";
+import { Sidebar } from "./sidebar";
 
 const MAX_RESULT_LINES = 40;
 const MAX_RESULT_CHARS = 4000;
@@ -64,26 +76,137 @@ function ToolCard({ name, parameters, status, result }: ToolProps) {
   );
 }
 
+function messageOf(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : "The request failed.";
+}
+
+// Puts `id` into the URL (or drops the parameter), without a navigation or a history entry.
+function showInUrl(id: string | null): void {
+  const { pathname, search, hash } = window.location;
+  window.history.replaceState(null, "", `${pathname}${searchWith(search, id)}${hash}`);
+}
+
 function Chat() {
   const [error, setError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionMeta[]>([]);
+  const [active, setActive] = useState<string | null>(null);
+  const activeRef = useRef<string | null>(null);
+  const { agent, isReady } = useAgent({ agentId: "spe" });
   useDefaultRenderTool({ render: (props) => <ToolCard {...props} /> });
+
+  // The history goes onto the agent first, then CopilotChat remounts on the new thread
+  // (key={id}): a freshly mounted chat on a non-explicit thread keeps the agent's messages,
+  // and makes no connect request that would clear them (README, Sessions).
+  const select = useCallback((id: string, messages: Message[]) => {
+    agent.setMessages(messages);
+    activeRef.current = id;
+    setActive(id);
+  }, [agent]);
+
+  const refresh = useCallback(async (): Promise<SessionMeta[] | null> => {
+    try {
+      const list = await fetchSessions();
+      setSessions(list);
+      return list;
+    } catch (e) {
+      setError(messageOf(e));
+      return null;
+    }
+  }, []);
+
+  // New chat: a fresh thread id and an empty history; it joins the list once its first run is recorded.
+  const startNew = useCallback(() => {
+    select(crypto.randomUUID(), []);
+    showInUrl(null);
+  }, [select]);
+
+  const open = useCallback(async (id: string) => {
+    try {
+      const session = await fetchSession(id);
+      if (!session) {
+        // Deleted, or never recorded: a new session, without an error bar.
+        startNew();
+        void refresh();
+        return;
+      }
+      select(id, session.messages);
+      showInUrl(id);
+    } catch (e) {
+      setError(messageOf(e));
+      // On first load (no session opened yet) this was a failed attempt to open the
+      // id named in the URL: fall back to a new session, and make sure the URL no
+      // longer names a session the page did not open.
+      if (activeRef.current === null) {
+        startNew();
+        showInUrl(null);
+      }
+    }
+  }, [refresh, select, startNew]);
+
+  // First load, once the runtime's agent is there (messages set on the provisional one are lost).
+  useEffect(() => {
+    if (!isReady || activeRef.current !== null) return;
+    void refresh();
+    const id = sessionFromSearch(window.location.search);
+    if (id) void open(id);
+    else startNew(); // no parameter, or a malformed one: dropped
+  }, [isReady, open, refresh, startNew]);
+
+  // After each run (finished, failed or stopped) the list again; once the open session is in
+  // it (its first run recorded), the URL names it.
+  useEffect(() => {
+    if (!isReady) return;
+    const ended = () => {
+      void refresh().then((list) => {
+        const id = activeRef.current;
+        if (list && id && list.some((s) => s.id === id)) showInUrl(id);
+      });
+    };
+    const subscription = agent.subscribe({ onRunFinalized: ended, onRunFailed: ended });
+    return () => subscription.unsubscribe();
+  }, [agent, isReady, refresh]);
+
+  const onDeleted = useCallback((id: string) => {
+    if (id === activeRef.current) startNew();
+    void refresh();
+  }, [refresh, startNew]);
+
   return (
-    <div className="spe-page">
-      <div className="spe-header">SPE agent — every tool call is shown; a reload starts a new conversation.</div>
-      {error && (
-        <div className="spe-error" role="alert">
-          {error}
-          <button type="button" onClick={() => setError(null)}>dismiss</button>
-        </div>
-      )}
-      <CopilotChat
-        agentId="spe"
-        className="spe-chat"
-        onError={(event) => {
-          // The prop's type also admits a DOM error event; only CopilotKit's carries `error`.
-          if ("error" in event && event.error instanceof Error) setError(event.error.message || "The agent run failed.");
-        }}
+    <div className="spe-layout">
+      <Sidebar
+        sessions={listOrder(sessions)}
+        knownTags={[...new Set(sessions.flatMap((s) => s.tags))].sort()}
+        activeId={active}
+        onNew={startNew}
+        onOpen={(id) => void open(id)}
+        onChanged={() => void refresh()}
+        onDeleted={onDeleted}
+        onError={setError}
       />
+      <div className="spe-page">
+        <div className="spe-header">SPE agent — every tool call is shown; your sessions are in the sidebar.</div>
+        {error && (
+          <div className="spe-error" role="alert">
+            {error}
+            <button type="button" onClick={() => setError(null)}>dismiss</button>
+          </div>
+        )}
+        {active === null ? (
+          <div className="spe-loading">Loading…</div>
+        ) : (
+          <CopilotChatConfigurationProvider agentId="spe" threadId={active} hasExplicitThreadId={false}>
+            <CopilotChat
+              key={active}
+              agentId="spe"
+              className="spe-chat"
+              onError={(event) => {
+                // The prop's type also admits a DOM error event; only CopilotKit's carries `error`.
+                if ("error" in event && event.error instanceof Error) setError(event.error.message || "The agent run failed.");
+              }}
+            />
+          </CopilotChatConfigurationProvider>
+        )}
+      </div>
     </div>
   );
 }

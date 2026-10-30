@@ -45,7 +45,8 @@ Every task's requirements include these.
   paid check of slice 3 (about $0.01, `claude-haiku-5-5` on the dev VM).
 - **The dev VM's instance** is redeployed in place with `create.yml` from the main checkout and
   `-e spe_agui_source_dir=<worktree>` (`AGENTS.md`, *Worktrees and deploying*). No cloud instance is
-  created or destroyed. `destroy.yml` is not run.
+  created or destroyed. `destroy.yml` is not run, except in slice 3, task 4, step 7, and only if the user agrees
+  at that step.
 - **Upstream-clean:** code, READMEs and Ansible comments name nothing fork-only (spec, *Out of scope*).
 - **Rulings:** a departure from this plan is recorded in the slice's handoff, as *decision, why, cost if wrong*.
 
@@ -95,10 +96,15 @@ Observable<BaseEvent>`; `export const SAVE_FAILED = "spe.session_save_failed"`. 
 `RunHandle.cancel()` ends that run as `cancelled`, emitting `RUN_ERROR` `code: "cancelled"` (slice 2's
 shutdown uses it). The save-failed event is a `CUSTOM` event named `SAVE_FAILED` with `value: { session: id }`.
 A run leaves `shared().running` when its write is queued (only if its own handle is still there), not after the
-write. `SPE_SESSIONS_TEST_SAVE_DELAY_MS` is read inside `recordRun`, under the queue.
+write. `SPE_SESSIONS_TEST_SAVE_DELAY_MS` is read inside `recordRun`, under the queue. `cancel()` and an early
+unsubscribe also abort the request to the agent, so a cancelled run does not keep running there: the `next` a
+middleware gets is a wrapper without `abortRun()`, so the recorder has a `readonly fetch` (signature in slice 1), and the
+route builds the `HttpAgent` with `fetch: recorder.fetch`. `export const REFUSAL_MESSAGES: readonly string[]`
+holds the five refusal messages; slice 3's browser code mirrors them and its test compares against this export.
 
 **`lib/test-agent.ts`** (slice 1, test-only, not in the image): `startTestAgent(delayMs?: number):
-Promise<TestAgent>`, `TestAgent = { url: string; requests: { headers, body }[]; close(): Promise<void> }`, an
+Promise<TestAgent>`, `TestAgent = { url: string; requests: { headers, body, closed }[]; close(): Promise<void> }` (`closed`: the
+client closed the connection), an
 in-test AG-UI SSE server.
 
 **`lib/api.ts`** (slice 1, task 4): `listSessions(store)`, `getSession(store, id)`,
@@ -124,6 +130,11 @@ handler exits before the drain (proposed clarification 2).
 `/tmp/spe-agui-export.tar.gz` on the VM → `{{ spe_output_dir }}/archive-bundle-agui.tar.gz`, holding
 `sessions/` and, if present, `agent-runs.jsonl`.
 
+**`lib/reconcile.ts`** (slice 3, task 2): `SAVE_FAILED_EVENT` (equal to slice 1's `SAVE_FAILED`) and
+`isSaveFailed(event, id)`, so the page shows the save-failed error as soon as the event arrives. The e2e
+(`platform/dev/e2e/sessions.py`) runs, in order, slice 2's `check_list`, `check_menu`, `check_close_tab` (a tab
+closed mid-run still records `completed`) and slice 3's checks, among them `check_save_failed`.
+
 ## File structure
 
 | Path | Slice | What |
@@ -131,7 +142,7 @@ handler exits before the drain (proposed clarification 2).
 | `copilotkit-chat/lib/sessions.ts`, `lib/sessions.test.ts` | 1 | store, validation, queue |
 | `copilotkit-chat/lib/recorder.ts`, `lib/recorder.test.ts`, `lib/clone.test.ts`, `lib/test-agent.ts` | 1 | recorder middleware; the clone gate |
 | `copilotkit-chat/lib/api.ts`, `lib/api.test.ts`, `app/api/sessions/route.ts`, `app/api/sessions/[id]/route.ts` | 1 | session API |
-| `copilotkit-chat/app/api/copilotkit/[[...slug]]/route.ts` | 1 | `agent.use(new SessionRecorder(defaultStore))` |
+| `copilotkit-chat/app/api/copilotkit/[[...slug]]/route.ts` | 1 | `agent.use(recorder)` on an `HttpAgent` built with `fetch: recorder.fetch` |
 | `copilotkit-chat/package.json`, `tsconfig.json`, `Dockerfile`, `.dockerignore`, `README.md` | 1 | `npm test`, `rxjs`, `lib/` in the image, `/data/sessions` |
 | `copilotkit-chat/scripts/check-built-server.mjs` | 1 | the built-server checks (decision 3, the clone) |
 | `ansible/roles/agui/templates/docker-compose.yml.j2` | 1 | volume `chat-sessions` at `/data` |
@@ -139,13 +150,14 @@ handler exits before the drain (proposed clarification 2).
 | `copilotkit-chat/app/page.tsx`, `app/sidebar.tsx`, `app/globals.css` | 2, 3 | sidebar, URL, row menu; then search, tags, groups, header |
 | `copilotkit-chat/lib/session-id.ts`, `lib/session-url.ts`, `lib/client.ts` (+ tests) | 2 | browser side: id check, URL, session API client |
 | `copilotkit-chat/instrumentation.ts`, `lib/shutdown.ts`, `scripts/check-shutdown.mjs` | 2 | the `SIGTERM` drain (§4, *Barrier*) |
-| `ansible/roles/run_archive/tasks/export.yml`, `tasks/write.yml`, `files/write_agui_run.py`, `files/write_run.py` | 2 | agui export and writer; `fence()` |
+| `ansible/roles/run_archive/tasks/export.yml`, `tasks/write.yml`, `files/write_agui_run.py`, `files/write_run.py`, `ansible/playbooks/archive.yml` | 2 | agui export and writer; `fence()` |
 | `platform/dev/tests/test_write_agui_run.py` | 2 | writer tests |
 | `platform/dev/e2e/sessions.py` | 2, 3 | Playwright (Python, the only Playwright on the dev VM) run against `fake_agent.py` |
 | `copilotkit-chat/lib/sidebar-view.ts`, `lib/reconcile.ts` (+ tests), `app/session-filters.tsx`, `app/chat-header.tsx`, `app/use-run-reconcile.ts` | 3 | view helpers, reconciliation, filters, header |
 | `platform/dev/fake_agent.py` (`--run-log`), `platform/dev/fake-agent.compose.yml` | 3 | the fake agent on the dev VM for the archive checks, no model calls |
-| `ansible/roles/agui/tasks/checks.yml` | 3 | "Session API answers"; key scan over the volume |
+| `ansible/roles/agui/tasks/checks.yml` | 3 | "Session API answers"; chat-ui hardening (`docker inspect`); key scan over the volume |
 | docs (§3 and §4 lists) | 2, 3 | each in the slice that changes the behaviour |
+| `docs/superpowers/plans/2026-10-29-agui-chat-sessions/evidence/slice-N/` | 2, 3 | screenshots of the slice's Playwright run; history, never updated after the slice merges |
 
 ## PR slices
 
@@ -155,12 +167,16 @@ N = 3. Sequential: slice n+1 starts from `main` after slice n merged. The user m
 | n/N | Branch | Tasks | Delivers | Est. LOC | Reviewer checks | File | Status |
 |---|---|---|---|---|---|---|---|
 | 1/3 | `impl/agui-chat-sessions-1-store` | 5 | store, recorder, session API, volume, image, slow fake run; no visible change | ~950 | `npm test`; `node scripts/check-built-server.mjs`; `docker build` | [slice-1-store.md](slice-1-store.md) | planned |
-| 2/3 | `impl/agui-chat-sessions-2-sidebar` | 5 | **early output**: sidebar list, open, New chat, URL, row menu; archive export and writer; docs | ~1,000 | Playwright run (three sessions) with screenshots; `archive.yml` run directory; pytest | [slice-2-sidebar.md](slice-2-sidebar.md) | planned |
-| 3/3 | `impl/agui-chat-sessions-3-complete` | 5 | search, tag filter, groups, *Show hidden*, header, disabled controls, reconciliation; instance checks; dev-VM archive checks; paid check | ~700 | full Playwright run; `verify.yml`; three `archive.yml` runs | [slice-3-complete.md](slice-3-complete.md) | planned |
+| 2/3 | `impl/agui-chat-sessions-2-sidebar` | 5 | **early output**: sidebar list, open, New chat, URL, row menu; archive export and writer; docs | ~1,070 | Playwright run (three sessions) with screenshots; `archive.yml` run directory; pytest | [slice-2-sidebar.md](slice-2-sidebar.md) | planned |
+| 3/3 | `impl/agui-chat-sessions-3-complete` | 5 | search, tag filter, groups, *Show hidden*, header, disabled controls, reconciliation; instance checks; dev-VM archive checks; paid check | ~700 | full Playwright run; `verify.yml`; four `archive.yml` runs | [slice-3-complete.md](slice-3-complete.md) | planned |
 
 The early output (spec, *Early output*) is slice 2: it needs slice 1's store and recorder, and nothing that
 depends on decisions 9 and 12 comes before it. Its PR body carries the screenshots and the run directory's
 `index.md` and one `chats/NN-*.md`, and asks the user to look; slice 3 does not wait for that look.
+
+Slice 2 is about 1,070 code lines, a little over the ~1,000 target, and stays one unit: the early output is
+the sidebar *and* an archived run, so splitting the archive off would leave the early output split over two PRs
+with the user's look waiting for both. A reviewer looks first at `lib/shutdown.ts` and `tasks/export.yml`.
 
 ## Review Focus
 
@@ -185,7 +201,10 @@ Each is added by the slice that verifies it, with status `folded`, and §2's tex
    HTTP transform turns the `AbortError` into a `RUN_ERROR` event `{code: "abort"}` instead of ending the
    stream. §2's table gains that row; unsubscription stays `cancelled`. Slice 1, task 1 pins it with a test.
 2. **Next.js's own `SIGTERM` handler exits before the drain**, so the image sets `NEXT_MANUAL_SIG_HANDLE=true`
-   and `instrumentation.ts` installs the only handler. §4's *Barrier* gains that. Slice 2, task 3.
+   and `instrumentation.ts` installs the only handler. §4 *Export*, step 1 (*Barrier*) gains that. Slice 2, task 3.
+3. **An absent run log is recognised from `docker compose cp`'s own error** (`Could not find the file`), not by a
+   check before the copy. §4 *Export*, step 2 and decision 11's acceptance check are rewritten to match. Slice 2,
+   task 4.
 
 ## Handoffs
 

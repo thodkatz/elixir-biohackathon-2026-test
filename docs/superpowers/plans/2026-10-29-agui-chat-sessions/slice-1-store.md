@@ -21,7 +21,8 @@ messages, runs, id…`, `a new session is absent from the list…`), **6** (task
 runs…`, task 4 `DELETE: 204…`), **7** (task 2 `autoTitle…`, `recordRun… merges`; task 3 `PATCH and DELETE during
 a run…`), **8** (task 2 `tags are normalised or refused`), **13** (task 3 `neither the request's nor the agent's
 bearer key…`). Not here: decision 1's `docker inspect` on an instance and decision 13's key scan (slice 3,
-`checks.yml`); decision 4's closing-the-tab check end to end (slice 2's Playwright run).
+task 3, `platform/ansible/roles/agui/tasks/checks.yml`); decision 4's closing-the-tab check end to end (slice 2,
+task 5, `platform/dev/e2e/sessions.py`, `check_close_tab`).
 
 **Branch:** `impl/agui-chat-sessions-1-store`, from `main` after the plan merged. Global constraints, shared
 interfaces and Review Focus: [plan README](README.md). Paths below are relative to the repository root unless a
@@ -39,6 +40,13 @@ step `cd`s; `CHAT` means `platform/agui/copilotkit-chat`.
   then `setMessages(input.messages)` and `threadId = input.threadId`. The in-memory runner runs `runAgent()`
   detached from the client, throws "Thread already running" for a second concurrent run of a thread, and its
   `stop()` calls `agent.abortRun()`.
+- `AbstractAgent.runAgent()` chains `[...this.middlewares, <its own normalising middleware>]` with
+  `reduceRight`, so a middleware's `next` is a `{run, messages, state}` wrapper, **not the agent**: it has no
+  `abortRun()`. And unsubscribing from the agent's stream does **not** abort the HTTP request (the HTTP transform
+  subscribes to the response eagerly; tried: a hanging agent kept its connection open after the client
+  unsubscribed). So the recorder closes the request of a run it ends through its own `fetch`, which the
+  `HttpAgent` is given (`new HttpAgent({ url, headers, fetch: recorder.fetch })`; `clone()` copies `fetch`): it
+  adds a per-run abort signal, found by the `runId` in the request body, to the agent's own signal.
 - `HttpAgent.abortRun()` is `this.abortController.abort()`; the HTTP transform turns the `AbortError` into
   `{type: RUN_ERROR, message, code: "abort"}` and completes the stream instead of erroring it. So the stop button
   reaches the recorder as `RUN_ERROR` `code: "abort"` (plan README, *Proposed spec clarifications*, 1).
@@ -46,7 +54,7 @@ step `cd`s; `CHAT` means `platform/agui/copilotkit-chat`.
   glob `'lib/*.test.ts'`, which `node --test` expands itself.
 
 **Tried in scratch before writing this file** (2026-10-30, Node 24.21.0, a copy of `CHAT` with the main
-checkout's `node_modules`): every file below, as written here, gave `npm test` **42 pass, 0 fail** (2 s);
+checkout's `node_modules`): every file below, as first written, gave `npm test` **42 pass, 0 fail** (2 s);
 `npm run build` passed (routes `/api/sessions` and `/api/sessions/[id]` listed, the `.ts` imports resolved by
 Turbopack); `node scripts/check-built-server.mjs` printed `check-built-server: all checks passed` (4 PATCHes
 during the run, one waited for the delayed save); `docker build` succeeded and a run with the compose hardening
@@ -55,14 +63,28 @@ during the run, one waited for the delayed save); `docker build` succeeded and a
 "slow" run took 10 s and ended `RUN_FINISHED`. Two mutation checks: with `withSession` calling `fn()` directly,
 `20 concurrent metadata updates…` fails; with the recorder leaving the running set only after its write,
 `a run started right after a stopped one…` fails (refused as "already running").
+After the review of the plan PR (same day, same copy, the `lib/` files, the test agent and the CopilotKit route
+re-extracted from this file): `npm test` **43 pass, 0 fail**, `npx tsc --noEmit` clean (`npm run build` there
+fails only because that copy's `node_modules` is a symlink, which Turbopack refuses; it was not re-run, nor were
+`check-built-server.mjs` and the image). Three more mutation checks: without `request.abort()` in the
+recorder, the cancel and unsubscription tests fail (`the agent saw its connection close`); with `read` passing
+the parser's error on, the two unparsable-file tests fail (`canary-SECRET-ABC` reaches the log); without the
+declared `content-length` check in `lib/api.ts`, `PATCH over 16 KB…` fails. `uv run` passes `SIGTERM` on to its
+child, so `kill` on an `exec`'d `uv run` stops the fake agent (Task 5, Steps 4 and 6).
 
 **Additions to the README's shared interfaces** (no listed signature changes): `lib/test-agent.ts` exports
 `startTestAgent(delayMs?: number): Promise<TestAgent>` and `type TestAgent = { url: string; requests: {
-headers: IncomingMessage["headers"]; body: any }[]; close: () => Promise<void> }` (test helper, kept out of the
-image). The recorder refuses with these `RUN_ERROR` messages: `"invalid session"`, `"this session was
+headers: IncomingMessage["headers"]; body: any; closed: boolean }[]; close: () => Promise<void> }` (test helper,
+kept out of the image; `closed` turns true when that request's connection closes). `SessionRecorder` also has
+`readonly fetch: (url: string | URL | Request, init?: RequestInit) => Promise<Response>`: whoever builds an
+`HttpAgent` that carries the recorder passes it (`new HttpAgent({ url, headers, fetch: recorder.fetch })`), or a
+run the recorder ends keeps running at the agent. The recorder refuses with these `RUN_ERROR` messages, exported
+in this order as `export const REFUSAL_MESSAGES: readonly string[]`: `"invalid session"`, `"this session was
 deleted"`, `"this session is already running"`, `"the chat UI is shutting down"` (when `shared().closing`),
-`"this session could not be read"` (the file does not parse). `RunHandle.cancel()` ends the run with
-`RUN_ERROR` `{code: "cancelled", message: "the run was stopped"}` after the save. A run leaves
+`"this session could not be read"` (the file does not parse). `RunHandle.cancel()` closes the run's request to
+the agent and ends the run with `RUN_ERROR` `{code: "cancelled", message: "the run was stopped"}` after the save.
+Unsubscription before a terminal event also closes that request (recorded `cancelled`; no event, the client
+has gone). A run leaves
 `shared().running` at the moment its write joins the queue, so slice 2's drain is "until `running` is empty,
 then until `queue` is empty". The save-failed event is `{type: CUSTOM, name: SAVE_FAILED, value: {session:
 <id>}}`. Test-only env `SPE_SESSIONS_TEST_SAVE_DELAY_MS`: `recordRun` waits that long under the session's queue,
@@ -79,15 +101,16 @@ enough; a second process would need a file lock (spec §1). The comment above `s
 `docs/superpowers/plans/2026-10-29-agui-chat-sessions/README.md` (header line, clarification 1). Create: `CHAT/lib/test-agent.ts`.
 Test: `CHAT/lib/clone.test.ts`.
 
-**Interfaces:** Consumes: `@ag-ui/client` 1.0.2 (`HttpAgent`, `Middleware`, `EventType`), rxjs 7.8.1. Produces:
-`npm test`; `startTestAgent(delayMs?)` and `TestAgent` (scripted by the last user message: `hang`, `boom`,
-`error`, `eof`, `crash`, anything else echoes and finishes after `delayMs`), used by tasks 3 and 4.
+**Interfaces:** Consumes: `@ag-ui/client` 1.0.2 (`HttpAgent`, `Middleware`, `EventType`), rxjs 7.8.1,
+`@copilotkit/runtime/v2` (`CopilotRuntime`, `createCopilotRuntimeHandler`). Produces: `npm test`;
+`startTestAgent(delayMs?)` and `TestAgent` (scripted by the last user message: `hang`, `boom`, `error`, `eof`,
+`crash`, anything else echoes and finishes after `delayMs`; each request's `closed` flag), used by tasks 3 and 4.
 
 **Decisions:** none directly; this is the spec's feasibility gate (*Inputs for the plan*, first task of slice 1)
 and it pins plan README clarification 1 (`abortRun() mid-stream reaches the middleware as RUN_ERROR with code
 abort`).
 
-**If the gate fails** (either clone test, after checking the test itself against the facts above): stop the
+**If the gate fails** (any of the three tests, after checking the test itself against the facts above): stop the
 slice. Try once an `HttpAgent` subclass overriding `run()` and `clone()` (the spec's named alternative) in the
 same test file; if that passes, record it as a ruling in the handoff (*decision, why, cost if wrong*) and
 continue with the recorder as that subclass. If it fails too, the plan stops (spec, *Inputs for the
@@ -105,13 +128,14 @@ the spec needs a clarification with a revised design before any further task, an
 //   contains "eof": RUN_STARTED and a text message, then the stream ends without a terminal event
 //   contains "crash": RUN_STARTED and one text chunk, then the connection is destroyed
 //   anything else: a text message echoing it, then RUN_FINISHED (after `delayMs`, default 0)
+// Each request is kept in `requests`; `closed` turns true when its connection closes.
 import { createServer } from "node:http";
 import type { IncomingMessage, Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 export type TestAgent = {
   url: string;
-  requests: { headers: IncomingMessage["headers"]; body: any }[];
+  requests: { headers: IncomingMessage["headers"]; body: any; closed: boolean }[];
   close: () => Promise<void>;
 };
 
@@ -122,7 +146,9 @@ export async function startTestAgent(delayMs = 0): Promise<TestAgent> {
     req.on("data", (chunk) => (raw += chunk));
     req.on("end", async () => {
       const body = JSON.parse(raw);
-      requests.push({ headers: req.headers, body });
+      const entry = { headers: req.headers, body, closed: false };
+      res.on("close", () => (entry.closed = true));
+      requests.push(entry);
       const users = (body.messages ?? []).filter((m: any) => m.role === "user");
       const text = String(users.at(-1)?.content ?? "");
       if (text.includes("boom")) {
@@ -173,24 +199,27 @@ export async function startTestAgent(delayMs = 0): Promise<TestAgent> {
 - [ ] **Step 2: Write the gate test** `CHAT/lib/clone.test.ts`
 
 ```ts
-// The feasibility gate (spec, "Inputs for the plan", first task of slice 1): AG-UI middleware
-// attached with agent.use() survives the runtime's per-request clone(), keeps per-run state
-// per clone, and sees the stop button (abortRun) as RUN_ERROR with code "abort".
+// What the session recorder relies on in @ag-ui/client and @copilotkit/runtime: AG-UI
+// middleware attached with agent.use() survives the runtime's per-request clone(), keeps
+// per-run state per clone, and sees the stop button (abortRun) as RUN_ERROR with code "abort".
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { EventType, HttpAgent, Middleware } from "@ag-ui/client";
 import type { AbstractAgent, BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
+import { CopilotRuntime, createCopilotRuntimeHandler } from "@copilotkit/runtime/v2";
 import { finalize, map, tap } from "rxjs";
 import type { Observable } from "rxjs";
 import { startTestAgent } from "./test-agent.ts";
 
-type Seen = { threadId: string; types: string[]; messages: Message[]; errorCode?: string };
+type Seen = { threadId: string; types: string[]; messages: Message[]; errorCode?: string; nextIsAgent: boolean };
 
 class Probe extends Middleware {
   seen: Seen[] = [];
   onEvent: (event: BaseEvent) => void = () => {};
   run(input: RunAgentInput, next: AbstractAgent): Observable<BaseEvent> {
-    const state: Seen = { threadId: input.threadId, types: [], messages: [] }; // per run, in this closure
+    // per run, in this closure
+    const state: Seen = { threadId: input.threadId, types: [], messages: [], nextIsAgent: next instanceof HttpAgent };
     return this.runNextWithState(input, next).pipe(
       tap(({ event, messages }) => {
         state.types.push(event.type);
@@ -259,6 +288,51 @@ test("abortRun() mid-stream reaches the middleware as RUN_ERROR with code abort"
     await server.close();
   }
 });
+
+test("through the CopilotKit runtime handler, each request's clone keeps the middleware and its own state", async () => {
+  const server = await startTestAgent(50);
+  try {
+    const probe = new Probe();
+    const spe = new HttpAgent({ url: server.url });
+    spe.use(probe);
+    const handler = createCopilotRuntimeHandler({
+      runtime: new CopilotRuntime({ agents: { spe } }),
+      basePath: "/api/copilotkit",
+    });
+    const post = (threadId: string, question: string) =>
+      handler(new Request("http://chat-ui/api/copilotkit/agent/spe/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          threadId, runId: randomUUID(), state: {}, tools: [], context: [], forwardedProps: {},
+          messages: [user(randomUUID(), question)],
+        }),
+      })).then(async (response) => {
+        assert.equal(response.status, 200);
+        return response.text(); // the whole SSE stream
+      });
+    const [a, b] = [randomUUID(), randomUUID()];
+    await Promise.all([post(a, "first through the runtime"), post(b, "second through the runtime")]);
+    for (let i = 0; i < 100 && probe.seen.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+
+    assert.equal(server.requests.length, 2);
+    assert.equal(probe.seen.length, 2);
+    const byThread = Object.fromEntries(probe.seen.map((s) => [s.threadId, s]));
+    for (const [thread, question] of [[a, "first through the runtime"], [b, "second through the runtime"]]) {
+      const s = byThread[thread];
+      assert.equal(s.types.at(-1), EventType.RUN_FINISHED);
+      assert.deepEqual(
+        s.messages.map((m) => [m.role, m.content]),
+        [["user", question], ["assistant", `echo: ${question}`]],
+      );
+      // `next` is the client's wrapper around the rest of the chain, not the agent: a
+      // middleware cannot call abortRun() on it.
+      assert.equal(s.nextIsAgent, false);
+    }
+  } finally {
+    await server.close();
+  }
+});
 ```
 
 - [ ] **Step 3: Run it to see it fail**
@@ -318,9 +392,10 @@ line in the root package's `dependencies`) and no new package.
 - [ ] **Step 5: Run it**
 
 Run: `(cd platform/agui/copilotkit-chat && npm ci && npm test)`
-Expected: PASS, `tests 2`: `middleware survives clone() and keeps per-run state per clone`, `abortRun()
-mid-stream reaches the middleware as RUN_ERROR with code abort`. If either fails, follow *If the gate fails*
-above.
+Expected: PASS, `tests 3`: `middleware survives clone() and keeps per-run state per clone`, `abortRun()
+mid-stream reaches the middleware as RUN_ERROR with code abort`, `through the CopilotKit runtime handler, each
+request's clone keeps the middleware and its own state` (the runtime's own `cloneAgentForRequest`, with the
+middleware attached to the agent it was given). If any fails, follow *If the gate fails* above.
 
 - [ ] **Step 6: Fold clarification 1 into the spec**
 
@@ -363,7 +438,7 @@ its end.
 - [ ] **Step 7: Run the suites and commit**
 
 Run: `(cd platform/agui/copilotkit-chat && npm test && npm run build)`
-Expected: 2 pass; `next build` ends with the route table and no type error.
+Expected: 3 pass; `next build` ends with the route table and no type error.
 
 ```bash
 git add platform/agui/copilotkit-chat/package.json platform/agui/copilotkit-chat/package-lock.json \
@@ -385,8 +460,9 @@ RUN_ERROR code abort. Spec clarification 1 folds the last into §2."
 **Interfaces:** Consumes: `import type { Message } from "@ag-ui/client"`. Produces: everything the README lists
 under `lib/sessions.ts`, with exactly those signatures. `SessionStore.dir` is a public readonly field (tests and
 the recorder test read it). `read` throws on a file that does not parse or is not a `version: 1` record for
-that id (`"session file <id>.json is not a version-1 session"`); `list` skips such files and logs each with
-`console.error` (name and parser message only). New files are created with mode `0600`.
+that id (`"session file <id>.json does not parse"` or `"… is not a version-1 session"`; never the parser's own
+message, which quotes the file's content); `list` skips such files and logs each with `console.error` (that
+message only). New files are created with mode `0600`.
 
 **Decisions:** 1 (the record's shape, `recordRun creates a version-1 file…`), 2 (`isSessionId…`, `the store
 refuses an invalid id before building a path`), 3 (`a write interrupted before the rename…`, `20 concurrent
@@ -401,7 +477,8 @@ de-duplication are refused; `softDelete` also sets `updated_at`.
 - [ ] **Step 1: Write the failing tests** `CHAT/lib/sessions.test.ts`
 
 ```ts
-// The store (spec §1): decisions 1, 2, 3, 7, 8 and Review Focus 1-3.
+// The session store: the record, id and tag validation, atomic writes, the per-session queue,
+// unreadable and leftover files, titles cut by code point.
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -435,7 +512,7 @@ async function seeded(store: SessionStore, text = "hello"): Promise<string> {
   return id;
 }
 
-test("isSessionId accepts only canonical lower-case UUID v4 (decision 2)", () => {
+test("isSessionId accepts only canonical lower-case UUID v4", () => {
   assert.equal(isSessionId(randomUUID()), true);
   for (const bad of [
     "../x", "a/b", "", "6F1C0D2E-1234-4ABC-8DEF-0123456789AB", "6f1c0d2e-1234-1abc-8def-0123456789ab",
@@ -446,7 +523,7 @@ test("isSessionId accepts only canonical lower-case UUID v4 (decision 2)", () =>
   }
 });
 
-test("the store refuses an invalid id before building a path (decision 2)", async () => {
+test("the store refuses an invalid id before building a path", async () => {
   const store = await tmpStore();
   await assert.rejects(store.read("../x"), ValidationError);
   await assert.rejects(store.patch("a/b", { pinned: true }, T0), ValidationError);
@@ -454,7 +531,7 @@ test("the store refuses an invalid id before building a path (decision 2)", asyn
   assert.deepEqual(await fs.readdir(store.dir), []);
 });
 
-test("tags are normalised or refused (decision 8)", () => {
+test("tags are normalised or refused", () => {
   const cases: [unknown, string[]][] = [
     [[" Exfil ", "DNS", "exfil"], ["exfil", "dns"]],
     [["a.b_c-1"], ["a.b_c-1"]],
@@ -486,7 +563,7 @@ test("parsePatch takes title, tags, pinned and hidden only", () => {
   assert.equal(parsePatch({ title: "😀".repeat(200) }).title, "😀".repeat(200)); // 200 code points
 });
 
-test("autoTitle: first user text, whitespace collapsed, 60 code points, Untitled (decision 7)", () => {
+test("autoTitle: first user text, whitespace collapsed, 60 code points, Untitled", () => {
   assert.equal(autoTitle([user("  List\n\tthe   home directory ")]), "List the home directory");
   assert.equal(autoTitle([user("x".repeat(80))]), "x".repeat(60));
   assert.equal(autoTitle([user([{ type: "text", text: "from parts" }])]), "from parts");
@@ -494,14 +571,14 @@ test("autoTitle: first user text, whitespace collapsed, 60 code points, Untitled
   assert.equal(autoTitle([user("   ")]), "Untitled");
 });
 
-test("autoTitle keeps an astral character at the cut whole (Review Focus 3)", () => {
+test("autoTitle keeps an astral character at the cut whole", () => {
   const title = autoTitle([user("a".repeat(59) + "😀" + "tail")]);
   assert.equal(title, "a".repeat(59) + "😀");
   assert.equal(Array.from(title).length, 60);
   assert.equal(title.isWellFormed(), true);
 });
 
-test("recordRun creates a version-1 file, then merges into the latest record (decisions 1, 4, 7)", async () => {
+test("recordRun creates a version-1 file, then merges into the latest record", async () => {
   const store = await tmpStore();
   const id = randomUUID();
   const first = run();
@@ -528,7 +605,7 @@ test("recordRun creates a version-1 file, then merges into the latest record (de
   assert.equal(record.updated_at, at(3).toISOString());
 });
 
-test("a write interrupted before the rename leaves the previous file intact (decision 3)", async () => {
+test("a write interrupted before the rename leaves the previous file intact", async () => {
   const store = await tmpStore();
   const id = await seeded(store, "kept");
   const before = await fs.readFile(path.join(store.dir, `${id}.json`), "utf8");
@@ -544,7 +621,7 @@ test("a write interrupted before the rename leaves the previous file intact (dec
   assert.deepEqual(await fs.readdir(store.dir), [`${id}.json`]); // the temp file is removed
 });
 
-test("20 concurrent metadata updates to one session all land (decision 3)", async () => {
+test("20 concurrent metadata updates to one session all land", async () => {
   const store = await tmpStore();
   const id = await seeded(store);
   // Each update reads the file, changes one field and writes it back. Unserialised, a writer
@@ -589,25 +666,32 @@ test("list: newest updated_at first, deleted left out, hidden kept, capped at 10
   assert.equal(capped[0].title, "s1004");
 });
 
-test("an unparsable session file is skipped and logged; read throws (Review Focus 1)", async () => {
+test("an unparsable session file is skipped and logged; read throws", async () => {
   const store = await tmpStore();
   const good = await seeded(store, "good");
   const broken = randomUUID();
   const future = randomUUID();
+  const quoted = randomUUID();
   await fs.writeFile(path.join(store.dir, `${broken}.json`), "{ not json");
   await fs.writeFile(path.join(store.dir, `${future}.json`), JSON.stringify({ version: 2, id: future }));
+  // Node's parser error for this quotes the text ("…canary-SECRET-ABC… is not valid JSON")
+  await fs.writeFile(path.join(store.dir, `${quoted}.json`), '{"version":1,"title":canary-SECRET-ABC}');
   const logged = mock.method(console, "error", () => {});
   try {
     assert.deepEqual((await store.list()).map((m) => m.id), [good]);
-    assert.equal(logged.mock.callCount(), 2);
+    assert.equal(logged.mock.callCount(), 3);
+    const logs = JSON.stringify(logged.mock.calls.map((c) => c.arguments));
+    assert.doesNotMatch(logs, /canary-SECRET-ABC/);
+    assert.match(logs, new RegExp(`${quoted}\\.json does not parse`));
   } finally {
     logged.mock.restore();
   }
-  await assert.rejects(store.read(broken));
+  await assert.rejects(store.read(broken), /does not parse/);
+  await assert.rejects(store.read(quoted), (error: Error) => !error.message.includes("canary-SECRET-ABC"));
   await assert.rejects(store.read(future), /not a version-1 session/);
 });
 
-test("leftover .tmp- files are never listed or read as sessions (Review Focus 2)", async () => {
+test("leftover .tmp- files are never listed or read as sessions", async () => {
   const store = await tmpStore();
   const id = await seeded(store, "real");
   const record = await fs.readFile(path.join(store.dir, `${id}.json`), "utf8");
@@ -618,7 +702,7 @@ test("leftover .tmp- files are never listed or read as sessions (Review Focus 2)
   assert.deepEqual(list.map((m) => [m.id, m.title]), [[id, "real"]]);
 });
 
-test("softDelete keeps the file with deleted_at; patch and delete then find nothing (decision 6)", async () => {
+test("softDelete keeps the file with deleted_at; patch and delete then find nothing", async () => {
   const store = await tmpStore();
   const id = await seeded(store);
   assert.equal(await store.softDelete(id, at(5)), true);
@@ -645,7 +729,7 @@ Expected: FAIL: `Cannot find module '…/lib/sessions.ts'`.
 - [ ] **Step 3: Write the store** `CHAT/lib/sessions.ts`
 
 ```ts
-// Chat sessions on disk: one JSON file per session, /data/sessions/<uuid>.json (spec §1).
+// Chat sessions on disk: one JSON file per session, /data/sessions/<uuid>.json.
 // The only module that touches the filesystem. Every id is checked by isSessionId() before a
 // path is built from it.
 import fs from "node:fs/promises";
@@ -811,7 +895,15 @@ export class SessionStore {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
     }
-    return checkRecord(JSON.parse(text), id);
+    let value: unknown;
+    try {
+      value = JSON.parse(text);
+    } catch (error) {
+      // The parser's message quotes the file's content: never pass it on, not even to a log.
+      if (error instanceof SyntaxError) throw new Error(`session file ${id}.json does not parse`);
+      throw error;
+    }
+    return checkRecord(value, id);
   }
 
   async write(record: SessionRecord): Promise<void> {
@@ -885,7 +977,7 @@ export class SessionStore {
     });
   }
 
-  // §2 Finalise: re-read under the queue, so metadata changed during the run survives.
+  // A run's end: re-read under the queue, so metadata changed during the run survives.
   // Queued synchronously when called (an async function runs up to its first await), so a
   // drain of shared().queue started right after sees it.
   async recordRun(id: string, messages: Message[], run: RunEntry, now: Date): Promise<void> {
@@ -912,7 +1004,7 @@ export function defaultStore(): SessionStore {
 - [ ] **Step 4: Run them to see them pass**
 
 Run: `(cd platform/agui/copilotkit-chat && npm test)`
-Expected: PASS, `tests 16` (14 here, 2 from task 1).
+Expected: PASS, `tests 17` (14 here, 3 from task 1).
 
 - [ ] **Step 5: Type check and commit**
 
@@ -931,12 +1023,14 @@ git commit -s -m "Chat UI: session store with validated ids, atomic writes and a
 **Interfaces:** Consumes: task 2's `SessionStore`, `shared()`, `withSession`, `isSessionId`, `RunHandle`,
 `RunStatus`; task 1's `startTestAgent`; `@copilotkit/runtime/v2` `CopilotRuntime`, `createCopilotRuntimeHandler`
 (the decision-13 test drives the real runtime). Produces: `SessionRecorder` (`constructor(store: () =>
-SessionStore, now?: () => Date)`, `run(input, next): Observable<BaseEvent>`), `SAVE_FAILED`, the refusal
-messages and `RunHandle.cancel()` behaviour listed at the top of this file, and `SPE_SESSIONS_TEST_SAVE_DELAY_MS`
-(slice 3's reconciliation test sets it on the built server).
+SessionStore, now?: () => Date)`, `run(input, next): Observable<BaseEvent>`, `fetch`), `SAVE_FAILED`,
+`REFUSAL_MESSAGES` (slice 3's browser code mirrors them, and its test compares against this export), the
+`RunHandle.cancel()` behaviour listed at the top of this file, and `SPE_SESSIONS_TEST_SAVE_DELAY_MS` (slice 3's
+reconciliation test sets it on the built server).
 
 **Decisions:** 1 (`RUN_FINISHED: completed, messages, auto title, a schema-valid version-1 file`), 2 and 6
-(`refused runs: RUN_STARTED then RUN_ERROR, the agent never called, nothing written`), 4 (one test per row of
+(`refused runs: RUN_STARTED then RUN_ERROR, the agent never called, nothing written`, which also covers an
+unparsable session file: `"this session could not be read"`, the file unchanged), 4 (one test per row of
 §2's table as amended in task 1: `RUN_FINISHED…`, `RUN_ERROR…`, `an HTTP error from the agent before any
 event…`, `a stream error…`, `EOF without a terminal event…`, `unsubscribed before a terminal event…`, `the stop
 button (abortRun, RUN_ERROR code abort)…`, `a terminal event followed by unsubscription…`; plus `a second run on
@@ -944,7 +1038,9 @@ a running session is refused…` and `PATCH and DELETE during a run survive its 
 test: a user title survives a run), 13 (`neither the request's nor the agent's bearer key reaches the session
 file`: `Authorization: Bearer <k1>` on the request into the runtime, agent key `<k2>` in the `HttpAgent`'s
 headers). Also: `a failed save: spe.session_save_failed before the terminal event, logged without content`,
-`RunHandle.cancel() ends a running session's run as cancelled`, `closing: new runs are refused…`,
+`RunHandle.cancel() ends a running session's run as cancelled and closes the agent request` (the test agent sees
+its connection close; so does `unsubscribed before a terminal event…`), `closing: new runs are refused…` (with
+`"the chat UI is shutting down"`),
 `SPE_SESSIONS_TEST_SAVE_DELAY_MS holds a stopped run's save…`, `a run started right after a stopped one is
 admitted and recorded after it`.
 
@@ -957,11 +1053,16 @@ stream end, unsubscription or `cancel()` wins. Event-driven terminations are cha
 completes before the terminal event is passed on; unsubscription writes after. `recordRun` joins the queue
 synchronously, so the run leaves `running` as soon as its write is queued (and only if its own handle is still
 there): a run started right after a stopped one is queued behind the write instead of being refused.
+**Disconnect**: `cancel()` and an unsubscription before the end also abort the run's request to the agent,
+through the recorder's `fetch` (*Verified facts*: `next` is not the agent, and unsubscribing alone leaves the
+request open). The tests' agents and the CopilotKit route both build the `HttpAgent` with `fetch:
+recorder.fetch`.
 
 - [ ] **Step 1: Write the failing tests** `CHAT/lib/recorder.test.ts`
 
 ```ts
-// The recorder (spec §2): decisions 1, 2, 4, 6, 7, 13 and the §2 termination table.
+// The session recorder: admission, one test per way a run can end, metadata changed during a
+// run, failed saves, shutdown, and keys kept out of session files.
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -971,7 +1072,7 @@ import { randomUUID } from "node:crypto";
 import { EventType, HttpAgent } from "@ag-ui/client";
 import type { BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
 import { CopilotRuntime, createCopilotRuntimeHandler } from "@copilotkit/runtime/v2";
-import { SAVE_FAILED, SessionRecorder } from "./recorder.ts";
+import { REFUSAL_MESSAGES, SAVE_FAILED, SessionRecorder } from "./recorder.ts";
 import { SessionStore, shared } from "./sessions.ts";
 import type { RunEntry, SessionRecord } from "./sessions.ts";
 import { startTestAgent } from "./test-agent.ts";
@@ -981,7 +1082,14 @@ async function setup(delayMs = 0) {
   const store = new SessionStore(await fs.mkdtemp(path.join(os.tmpdir(), "recorder-")));
   const server = await startTestAgent(delayMs);
   const recorder = new SessionRecorder(() => store);
-  return { store, server, recorder, agent: () => new HttpAgent({ url: server.url }) };
+  // As the CopilotKit route builds `spe`: the recorder's fetch lets it close the agent request.
+  return { store, server, recorder, agent: () => new HttpAgent({ url: server.url, fetch: recorder.fetch }) };
+}
+
+// The agent saw its connection close (the request was aborted, not left running).
+async function closedByClient(server: TestAgent, index = 0): Promise<boolean> {
+  for (let i = 0; i < 100 && !server.requests[index]?.closed; i++) await new Promise((r) => setTimeout(r, 10));
+  return server.requests[index]?.closed === true;
 }
 
 function input(threadId: string, text: string, history: Message[] = []): RunAgentInput {
@@ -1035,7 +1143,7 @@ async function onlyRun(store: SessionStore, id: string): Promise<[SessionRecord,
 
 const types = (o: Outcome) => o.events.map((e) => e.type);
 
-test("RUN_FINISHED: completed, messages, auto title, a schema-valid version-1 file (decisions 1, 4, 7)", async () => {
+test("RUN_FINISHED: completed, messages, auto title, a schema-valid version-1 file", async () => {
   const { store, server, recorder, agent } = await setup();
   try {
     const id = randomUUID();
@@ -1085,7 +1193,7 @@ for (const [name, text, expected] of [
   });
 }
 
-test("unsubscribed before a terminal event: cancelled, partial answer kept", async () => {
+test("unsubscribed before a terminal event: cancelled, partial answer kept, agent request closed", async () => {
   const { store, server, recorder, agent } = await setup();
   try {
     const id = randomUUID();
@@ -1094,6 +1202,7 @@ test("unsubscribed before a terminal event: cancelled, partial answer kept", asy
     const [record, run] = await onlyRun(store, id);
     assert.equal(run.status, "cancelled");
     assert.deepEqual(record.messages.map((m) => m.role), ["user", "assistant"]);
+    assert.equal(await closedByClient(server), true);
   } finally {
     await server.close();
   }
@@ -1103,7 +1212,7 @@ test("the stop button (abortRun, RUN_ERROR code abort): cancelled", async () => 
   const { store, server, recorder } = await setup();
   try {
     const id = randomUUID();
-    const base = new HttpAgent({ url: server.url });
+    const base = new HttpAgent({ url: server.url, fetch: recorder.fetch });
     base.use(recorder);
     const clone = base.clone(); // as the runtime does per request
     clone.threadId = id;
@@ -1134,7 +1243,7 @@ test("a terminal event followed by unsubscription: completed, exactly one entry"
   }
 });
 
-test("refused runs: RUN_STARTED then RUN_ERROR, the agent never called, nothing written (decisions 2, 6)", async () => {
+test("refused runs: RUN_STARTED then RUN_ERROR, the agent never called, nothing written", async () => {
   const { store, server, recorder, agent } = await setup();
   try {
     const deleted = randomUUID();
@@ -1142,24 +1251,35 @@ test("refused runs: RUN_STARTED then RUN_ERROR, the agent never called, nothing 
     await store.softDelete(deleted, new Date());
     const before = await fs.readFile(path.join(store.dir, `${deleted}.json`), "utf8");
     const calls = server.requests.length;
-    for (const [id, message] of [
-      ["../x", "invalid session"],
-      ["6F1C0D2E-1234-4ABC-8DEF-0123456789AB", "invalid session"],
-      [deleted, "this session was deleted"],
-    ]) {
-      const out = await drive(recorder, input(id, "again"), agent());
-      assert.deepEqual(types(out), [EventType.RUN_STARTED, EventType.RUN_ERROR]);
-      assert.equal((out.events[1] as { message?: string }).message, message);
+    const unreadable = randomUUID();
+    const broken = '{"version":1,"title":not json';
+    await fs.writeFile(path.join(store.dir, `${unreadable}.json`), broken);
+    const logged = mock.method(console, "error", () => {});
+    try {
+      for (const [id, message] of [
+        ["../x", "invalid session"],
+        ["6F1C0D2E-1234-4ABC-8DEF-0123456789AB", "invalid session"],
+        [deleted, "this session was deleted"],
+        [unreadable, "this session could not be read"],
+      ]) {
+        const out = await drive(recorder, input(id, "again"), agent());
+        assert.deepEqual(types(out), [EventType.RUN_STARTED, EventType.RUN_ERROR]);
+        assert.equal((out.events[1] as { message?: string }).message, message);
+        assert.ok(REFUSAL_MESSAGES.includes(message), message);
+      }
+    } finally {
+      logged.mock.restore();
     }
     assert.equal(server.requests.length, calls);
-    assert.deepEqual(await fs.readdir(store.dir), [`${deleted}.json`]);
+    assert.deepEqual((await fs.readdir(store.dir)).sort(), [`${deleted}.json`, `${unreadable}.json`].sort());
     assert.equal(await fs.readFile(path.join(store.dir, `${deleted}.json`), "utf8"), before);
+    assert.equal(await fs.readFile(path.join(store.dir, `${unreadable}.json`), "utf8"), broken);
   } finally {
     await server.close();
   }
 });
 
-test("a second run on a running session is refused and never reaches the agent (decision 4)", async () => {
+test("a second run on a running session is refused and never reaches the agent", async () => {
   const { store, server, recorder, agent } = await setup(200);
   try {
     const id = randomUUID();
@@ -1177,7 +1297,7 @@ test("a second run on a running session is refused and never reaches the agent (
   }
 });
 
-test("PATCH and DELETE during a run survive its finalisation (decisions 4, 6, 7)", async () => {
+test("PATCH and DELETE during a run survive its finalisation", async () => {
   const { store, server, recorder, agent } = await setup(200);
   try {
     const id = randomUUID();
@@ -1231,7 +1351,7 @@ test("a failed save: spe.session_save_failed before the terminal event, logged w
   }
 });
 
-test("RunHandle.cancel() ends a running session's run as cancelled", async () => {
+test("RunHandle.cancel() ends a running session's run as cancelled and closes the agent request", async () => {
   const { store, server, recorder, agent } = await setup();
   try {
     const id = randomUUID();
@@ -1243,6 +1363,7 @@ test("RunHandle.cancel() ends a running session's run as cancelled", async () =>
     assert.deepEqual([last.type, last.code], [EventType.RUN_ERROR, "cancelled"]);
     const [, run] = await onlyRun(store, id);
     assert.equal(run.status, "cancelled");
+    assert.equal(await closedByClient(server), true, "the agent saw its connection close");
   } finally {
     await server.close();
   }
@@ -1254,6 +1375,7 @@ test("closing: new runs are refused once shutdown has begun", async () => {
   try {
     const out = await drive(recorder, input(randomUUID(), "late"), agent());
     assert.deepEqual(types(out), [EventType.RUN_STARTED, EventType.RUN_ERROR]);
+    assert.equal((out.events[1] as { message?: string }).message, "the chat UI is shutting down");
     assert.equal(server.requests.length, 0);
   } finally {
     shared().closing = false;
@@ -1261,13 +1383,14 @@ test("closing: new runs are refused once shutdown has begun", async () => {
   }
 });
 
-test("neither the request's nor the agent's bearer key reaches the session file (decision 13)", async () => {
+test("neither the request's nor the agent's bearer key reaches the session file", async () => {
   const { store, server } = await setup();
   try {
     const k1 = `k1-${randomUUID()}`; // sent by the browser to the runtime
     const k2 = `k2-${randomUUID()}`; // the runtime's agent key, sent to the agent
-    const spe = new HttpAgent({ url: server.url, headers: { Authorization: `Bearer ${k2}` } });
-    spe.use(new SessionRecorder(() => store));
+    const recorder = new SessionRecorder(() => store);
+    const spe = new HttpAgent({ url: server.url, headers: { Authorization: `Bearer ${k2}` }, fetch: recorder.fetch });
+    spe.use(recorder);
     const handler = createCopilotRuntimeHandler({
       runtime: new CopilotRuntime({ agents: { spe } }),
       basePath: "/api/copilotkit",
@@ -1335,7 +1458,7 @@ Expected: FAIL: `Cannot find module '…/lib/recorder.ts'`.
 - [ ] **Step 3: Write the recorder** `CHAT/lib/recorder.ts`
 
 ```ts
-// The session recorder (spec §2): AG-UI middleware on the `spe` agent that records each run's
+// The session recorder: AG-UI middleware on the `spe` agent that records each run's
 // conversation into its session file. One instance serves every clone of the agent, so all
 // per-run state lives in the closure of run().
 import { EventType, Middleware } from "@ag-ui/client";
@@ -1347,10 +1470,30 @@ import type { RunHandle, RunStatus, SessionStore } from "./sessions.ts";
 
 export const SAVE_FAILED = "spe.session_save_failed";
 
+// Why a run is refused before it reaches the agent: the RUN_ERROR message of a refused run.
+const INVALID = "invalid session";
+const DELETED = "this session was deleted";
+const RUNNING = "this session is already running";
+const CLOSING = "the chat UI is shutting down";
+const UNREADABLE = "this session could not be read";
+export const REFUSAL_MESSAGES: readonly string[] = Object.freeze([INVALID, DELETED, RUNNING, CLOSING, UNREADABLE]);
+
 type Admission = { refused: string } | { refused: null };
 
-// §2's table, for events: RUN_FINISHED completed; RUN_ERROR failed, or cancelled when it is the
-// stop button (HttpAgent.abortRun() turns the aborted fetch into RUN_ERROR with code "abort").
+function runIdOf(body: unknown): string | undefined {
+  if (typeof body !== "string") return undefined;
+  try {
+    const runId = (JSON.parse(body) as { runId?: unknown }).runId;
+    return typeof runId === "string" ? runId : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// A run's status from its terminal event: RUN_FINISHED completed; RUN_ERROR failed, or cancelled
+// when it is the stop button (HttpAgent.abortRun() turns the aborted fetch into RUN_ERROR with
+// code "abort"). A stream that errors or ends without a terminal event is failed; one the client
+// leaves first is cancelled.
 function statusOf(event: BaseEvent): RunStatus | null {
   if (event.type === EventType.RUN_FINISHED) return "completed";
   if (event.type === EventType.RUN_ERROR) return (event as { code?: string }).code === "abort" ? "cancelled" : "failed";
@@ -1360,12 +1503,28 @@ function statusOf(event: BaseEvent): RunStatus | null {
 export class SessionRecorder extends Middleware {
   readonly store: () => SessionStore;
   readonly now: () => Date;
+  // One abort controller per admitted run, by run id, for its request to the agent.
+  private readonly requests = new Map<string, AbortController>();
 
   constructor(store: () => SessionStore, now: () => Date = () => new Date()) {
     super();
     this.store = store;
     this.now = now;
   }
+
+  // The agent's fetch: pass it to the HttpAgent (`new HttpAgent({ url, fetch: recorder.fetch })`)
+  // so that a run the recorder ends (cancel(), or the client leaving) also closes its request
+  // to the agent. Unsubscribing from the agent's stream does not abort that request in
+  // @ag-ui/client 1.0.2, and a middleware's `next` is a wrapper, not the agent, so the recorder
+  // cannot call abortRun() itself. The agent's own signal (abortRun(), the stop button) still
+  // applies.
+  readonly fetch = (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const runId = runIdOf(init?.body);
+    const controller = runId === undefined ? undefined : this.requests.get(runId);
+    if (!controller) return fetch(url, init);
+    const signal = init?.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal;
+    return fetch(url, { ...init, signal });
+  };
 
   run(input: RunAgentInput, next: AbstractAgent): Observable<BaseEvent> {
     return new Observable<BaseEvent>((out) => {
@@ -1378,6 +1537,12 @@ export class SessionRecorder extends Middleware {
       let terminal: RunStatus | null = null; // status of the first terminal event seen
       let inner: Subscription | undefined;
       let chain: Promise<void> = Promise.resolve();
+      const request = new AbortController();
+      // Stops listening to the agent and closes the request to it.
+      const disconnect = () => {
+        inner?.unsubscribe();
+        request.abort();
+      };
 
       const pass = (event: BaseEvent) => {
         if (!out.closed) out.next(event);
@@ -1385,6 +1550,7 @@ export class SessionRecorder extends Middleware {
       // Leaves the running set only if this run is still the one in it.
       const release = () => {
         if (running.get(id) === handle) running.delete(id);
+        if (this.requests.get(input.runId) === request) this.requests.delete(input.runId);
       };
       // Exactly once per run: the first termination wins, every later one does nothing.
       // recordRun joins the session's queue synchronously, so the run leaves the running set as
@@ -1417,7 +1583,7 @@ export class SessionRecorder extends Middleware {
       const handle: RunHandle = {
         cancel: () => {
           if (finalised) return;
-          inner?.unsubscribe();
+          disconnect();
           chain = chain.then(() =>
             end("cancelled", () => {
               pass({ type: EventType.RUN_ERROR, message: "the run was stopped", code: "cancelled" } as BaseEvent);
@@ -1441,6 +1607,7 @@ export class SessionRecorder extends Middleware {
           release();
           return;
         }
+        this.requests.set(input.runId, request);
         inner = this.runNextWithState(input, next).subscribe({
           next: ({ event, messages: latest }) => {
             // Synchronously, so a teardown right after a terminal event still records it.
@@ -1463,27 +1630,31 @@ export class SessionRecorder extends Middleware {
 
       // Unsubscribed before a terminal event: cancelled, saved after the client has gone.
       return () => {
-        inner?.unsubscribe();
-        if (admitted && !finalised) void finalise(terminal ?? "cancelled");
+        if (admitted && !finalised) {
+          disconnect();
+          void finalise(terminal ?? "cancelled");
+        } else {
+          inner?.unsubscribe();
+        }
       };
     });
   }
 
-  // §2 Admit: under the session's queue, so it orders with every write to that session.
+  // Admission: under the session's queue, so it orders with every write to that session.
   private async admit(id: string, handle: RunHandle): Promise<Admission> {
-    if (!isSessionId(id)) return { refused: "invalid session" };
+    if (!isSessionId(id)) return { refused: INVALID };
     const { running } = shared();
     return withSession(id, async () => {
-      if (shared().closing) return { refused: "the chat UI is shutting down" };
-      if (running.has(id)) return { refused: "this session is already running" };
+      if (shared().closing) return { refused: CLOSING };
+      if (running.has(id)) return { refused: RUNNING };
       let record;
       try {
         record = await this.store().read(id);
       } catch (error) {
         console.error(`sessions: reading ${id} failed:`, error instanceof Error ? error.message : error);
-        return { refused: "this session could not be read" };
+        return { refused: UNREADABLE };
       }
-      if (record?.deleted_at) return { refused: "this session was deleted" };
+      if (record?.deleted_at) return { refused: DELETED };
       running.set(id, handle);
       return { refused: null };
     });
@@ -1520,7 +1691,7 @@ and in `recordRun`, between the `const record: SessionRecord = … ;` statement 
 - [ ] **Step 6: Run everything**
 
 Run: `(cd platform/agui/copilotkit-chat && npm test && npm run build)`
-Expected: PASS, `tests 33` (2 + 14 + 17); no type error.
+Expected: PASS, `tests 34` (3 + 14 + 17); no type error.
 
 - [ ] **Step 7: Commit**
 
@@ -1543,19 +1714,19 @@ Modify: `CHAT/app/api/copilotkit/[[...slug]]/route.ts`. Test: `CHAT/lib/api.test
 **Interfaces:** Consumes: tasks 2 and 3. Produces: `listSessions(store)`, `getSession(store, id)`,
 `patchSession(store, id, request)`, `deleteSession(store, id)`, each `Promise<Response>`; routes `GET
 /api/sessions`, `GET`/`PATCH`/`DELETE /api/sessions/{id}` (slice 2's page calls them); the `spe` agent carries
-`SessionRecorder(defaultStore)`.
+`SessionRecorder(defaultStore)` and is built with its `fetch`.
 
 **Decisions:** 2 (`ids that are not canonical UUID v4 get 400 from every route, no file created`), 5 (`PATCH with
 messages, runs, id, deleted_at or an unknown key: 400, nothing changed`; `a new session is absent from the list
 until a run on it ends`), 6 (`DELETE: 204, then gone from list, GET, PATCH and DELETE (404); the file kept`).
-Spec §2's table: `GET one…`, `PATCH: 200 with the new metadata…`, `PATCH over 16 KB: 413…` (declared and
-streamed bodies). Review Focus 1 (`store failures give the generic 500 and log no message content`), 4 (`PATCH
+Spec §2's table: `GET one…`, `PATCH: 200 with the new metadata…`, `PATCH over 16 KB: 413…` (a body over the
+limit, a declared `content-length: 17000` on a small body, and a streamed body without a length). Review Focus 1 (`store failures give the generic 500 and log no message content`), 4 (`PATCH
 bodies that are not a JSON object: 400, nothing changed`).
 
 - [ ] **Step 1: Write the failing tests** `CHAT/lib/api.test.ts`
 
 ```ts
-// The session API (spec §2, Session API): decisions 2, 5, 6 and Review Focus 4.
+// The session API: id checks, metadata-only PATCH, body limits, soft delete, generic errors.
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -1590,7 +1761,7 @@ function patchRequest(body: string): Request {
 
 const BAD_IDS = ["../x", "a/b", "6F1C0D2E-1234-4ABC-8DEF-0123456789AB", "6f1c0d2e-1234-1abc-8def-0123456789ab", "x"];
 
-test("ids that are not canonical UUID v4 get 400 from every route, no file created (decision 2)", async () => {
+test("ids that are not canonical UUID v4 get 400 from every route, no file created", async () => {
   const store = await tmpStore();
   for (const id of BAD_IDS) {
     for (const response of [
@@ -1617,7 +1788,7 @@ test("GET one: the record without deleted_at and runs; 404 when missing", async 
   assert.equal((await getSession(store, randomUUID())).status, 404);
 });
 
-test("PATCH with messages, runs, id, deleted_at or an unknown key: 400, nothing changed (decision 5)", async () => {
+test("PATCH with messages, runs, id, deleted_at or an unknown key: 400, nothing changed", async () => {
   const store = await tmpStore();
   const id = await seeded(store);
   const file = path.join(store.dir, `${id}.json`);
@@ -1633,7 +1804,7 @@ test("PATCH with messages, runs, id, deleted_at or an unknown key: 400, nothing 
   assert.equal(await fs.readFile(file, "utf8"), before);
 });
 
-test("PATCH bodies that are not a JSON object: 400, nothing changed (Review Focus 4)", async () => {
+test("PATCH bodies that are not a JSON object: 400, nothing changed", async () => {
   const store = await tmpStore();
   const id = await seeded(store);
   const file = path.join(store.dir, `${id}.json`);
@@ -1655,6 +1826,13 @@ test("PATCH over 16 KB: 413, nothing changed", async () => {
   const response = await patchSession(store, id, patchRequest(big));
   assert.equal(response.status, 413);
   assert.deepEqual(await response.json(), { error: "the request body is too large" });
+  // a declared content-length over the limit is refused before the body is read
+  const declared = new Request("http://chat-ui/api/sessions/x", {
+    method: "PATCH", headers: { "content-type": "application/json", "content-length": "17000" },
+    body: '{"pinned":true}',
+  });
+  assert.equal(declared.headers.get("content-length"), "17000");
+  assert.equal((await patchSession(store, id, declared)).status, 413);
   // the same body streamed without a content-length is cut off as it is read
   const streamed = new Request("http://chat-ui/api/sessions/x", {
     method: "PATCH", body: new Blob([big]).stream(), duplex: "half",
@@ -1675,7 +1853,7 @@ test("PATCH: 200 with the new metadata; title_source becomes user", async () => 
   assert.equal((await patchSession(store, randomUUID(), patchRequest('{"pinned":true}'))).status, 404);
 });
 
-test("DELETE: 204, then gone from list, GET, PATCH and DELETE (404); the file kept (decision 6)", async () => {
+test("DELETE: 204, then gone from list, GET, PATCH and DELETE (404); the file kept", async () => {
   const store = await tmpStore();
   const id = await seeded(store);
   const other = await seeded(store, "other");
@@ -1687,7 +1865,7 @@ test("DELETE: 204, then gone from list, GET, PATCH and DELETE (404); the file ke
   assert.notEqual(((await store.read(id)) as SessionRecord).deleted_at, null);
 });
 
-test("a new session is absent from the list until a run on it ends (decision 5)", async () => {
+test("a new session is absent from the list until a run on it ends", async () => {
   const store = await tmpStore();
   const server = await startTestAgent(300);
   try {
@@ -1707,10 +1885,10 @@ test("a new session is absent from the list until a run on it ends (decision 5)"
   }
 });
 
-test("store failures give the generic 500 and log no message content (Review Focus 1)", async () => {
+test("store failures give the generic 500 and log no message content", async () => {
   const store = await tmpStore();
   const broken = randomUUID();
-  await fs.writeFile(path.join(store.dir, `${broken}.json`), '{"version":1,"secret":"canary-123"');
+  await fs.writeFile(path.join(store.dir, `${broken}.json`), '{"version":1,"secret":canary-123}');
   const logged = mock.method(console, "error", () => {});
   try {
     const response = await getSession(store, broken);
@@ -1734,7 +1912,7 @@ Expected: FAIL: `Cannot find module '…/lib/api.ts'`.
 - [ ] **Step 3: Write the handlers** `CHAT/lib/api.ts`
 
 ```ts
-// The session API's handlers (spec §2, Session API), framework-free: the Next.js routes in
+// The session API's handlers, framework-free: the Next.js routes in
 // app/api/sessions/ only call these. Error bodies are generic; details go to the server log.
 import { ValidationError, isSessionId, parsePatch } from "./sessions.ts";
 import type { SessionStore, SessionView } from "./sessions.ts";
@@ -1824,7 +2002,7 @@ export async function deleteSession(store: SessionStore, id: string): Promise<Re
 - [ ] **Step 4: Run them to see them pass**
 
 Run: `(cd platform/agui/copilotkit-chat && npm test)`
-Expected: PASS, `tests 42` (2 + 14 + 17 + 9).
+Expected: PASS, `tests 43` (3 + 14 + 17 + 9).
 
 - [ ] **Step 5: The routes** `CHAT/app/api/sessions/route.ts`
 
@@ -1891,10 +2069,12 @@ function getHandler(): Handler {
     if (!url || !key) {
       throw new Error("AGENT_URL and AGENT_API_KEY must be set");
     }
-    const spe = new HttpAgent({ url, headers: { Authorization: `Bearer ${key}` } });
     // Records every run into its session file (lib/recorder.ts); the runtime clones `spe` per
-    // request and the clone keeps the recorder.
-    spe.use(new SessionRecorder(defaultStore));
+    // request and the clone keeps the recorder and its fetch, through which the recorder closes
+    // the agent request of a run it ends.
+    const recorder = new SessionRecorder(defaultStore);
+    const spe = new HttpAgent({ url, headers: { Authorization: `Bearer ${key}` }, fetch: recorder.fetch });
+    spe.use(recorder);
     const copilotRuntime = new CopilotRuntime({ agents: { spe } });
     handler = createCopilotRuntimeHandler({ runtime: copilotRuntime, basePath: "/api/copilotkit" });
   }
@@ -1954,7 +2134,7 @@ keep separate recorder state across clones).
 
 ```js
 #!/usr/bin/env node
-// Checks the built standalone server (spec §6): what unit tests cannot show because Next.js
+// Checks the built standalone server: what unit tests cannot show because Next.js
 // bundles each route separately. Builds nothing: run `npm run build` first. Starts
 // platform/dev/fake_agent.py (no model calls) and `node .next/standalone/server.js` with a
 // temporary sessions directory and a delayed save, then checks that
@@ -2126,18 +2306,20 @@ and in `scripted`, the `if isinstance(last, ToolReturnPart):` branch becomes:
 - [ ] **Step 4: Check the slow run by timing it**
 
 ```bash
-cd platform/agui/pydantic-ai-agent && uv run --group dev python ../../dev/fake_agent.py --port 18181 --key TEST_KEY &
-FAKE=$!; sleep 3
+( cd platform/agui/pydantic-ai-agent && exec uv run --group dev python ../../dev/fake_agent.py --port 18181 --key TEST_KEY ) &
+FAKE=$!   # the uv process itself (exec), so kill reaches it; uv passes the signal on to python
+for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:18181/ && break; sleep 0.5; done
 S=$(date +%s)
 curl -sN -X POST http://127.0.0.1:18181/agent -H 'authorization: Bearer TEST_KEY' \
   -H 'content-type: application/json' -H 'accept: text/event-stream' \
   -d '{"threadId":"t","runId":"r","messages":[{"id":"m1","role":"user","content":"a slow one please"}],"tools":[],"context":[],"state":{},"forwardedProps":{}}' \
   | grep -o '"type":"RUN_[A-Z]*"\|"toolCallName":"run_command"\|Slow step 10 of 10'
-echo "$(( $(date +%s) - S )) s"; kill $FAKE; cd -
+echo "$(( $(date +%s) - S )) s"; kill $FAKE; wait $FAKE
+ss -ltn 'sport = :18181' | grep -c LISTEN   # 0: the fake agent is gone
 ```
 
 Expected: `"type":"RUN_STARTED"`, `"toolCallName":"run_command"`, `Slow step 10 of 10`, `"type":"RUN_FINISHED"`,
-then `10 s` (or 11). Then `(cd platform/agui/pydantic-ai-agent && uv run --group dev pytest -q)` still passes
+then `10 s` (or 11), then `0`. Then `(cd platform/agui/pydantic-ai-agent && uv run --group dev pytest -q)` still passes
 (Global Constraints: `fake_agent.py` changed).
 
 - [ ] **Step 5: Volume, image, `.dockerignore`**
@@ -2198,8 +2380,9 @@ Expected: `compose template: chat-sessions at /data, read_only and tmpfs unchang
 
 ```bash
 (cd platform/agui/copilotkit-chat && docker build -t spe-chat-ui:slice1 .)
-(cd platform/agui/pydantic-ai-agent && uv run --group dev python ../../dev/fake_agent.py --port 18181 --key TEST_KEY &)
-sleep 3
+( cd platform/agui/pydantic-ai-agent && exec uv run --group dev python ../../dev/fake_agent.py --port 18181 --key TEST_KEY ) &
+FAKE=$!
+for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:18181/ && break; sleep 0.5; done
 docker volume create spe-slice1-sessions
 docker run -d --name spe-slice1-ui --network host --read-only --tmpfs /tmp \
   --tmpfs /app/.next/cache:uid=1000,gid=1000,mode=0700 --cap-drop ALL --security-opt no-new-privileges:true \
@@ -2213,12 +2396,14 @@ curl -sN -X POST http://127.0.0.1:18182/api/copilotkit/agent/spe/run -H 'content
 curl -s http://127.0.0.1:18182/api/sessions; echo
 docker exec spe-slice1-ui ls -ln /data /data/sessions
 docker rm -f spe-slice1-ui; docker volume rm spe-slice1-sessions
-kill "$(lsof -t -i :18181)"   # the fake agent
+kill $FAKE; wait $FAKE   # the fake agent
+ss -ltn 'sport = :18181' | grep -c LISTEN   # 0
 ```
 
 Expected: the first `curl` prints `[]` (the volume starts with an empty, writable `/data/sessions`); the run
 prints `"type":"RUN_STARTED"` and `"type":"RUN_FINISHED"`; the list holds one entry with `"title":"hello from
-docker"`; `ls -ln` shows `sessions` as `drwx------ 1000 1000` and `<ID>.json` as `-rw------- 1000 1000`. Paste
+docker"`; `ls -ln` shows `sessions` as `drwx------ 1000 1000` and `<ID>.json` as `-rw------- 1000 1000`; the
+last line is `0`. Paste
 the output into the PR body.
 
 - [ ] **Step 7: The chat UI's README, *Sessions*** (`CHAT/README.md`)
@@ -2289,7 +2474,20 @@ uv run --with pytest pytest platform/dev/tests -q
 python3 .methodology/shared/sync-agents.py --check
 ```
 
-Expected: `tests 42`, `fail 0`; `all checks passed`; both pytest runs pass; `sync-agents.py --check` exits 0.
+Then check that no code or test file this slice adds or changes cites the fork-only spec, plan or review
+(upstream-clean, README *Global Constraints*):
+
+```bash
+grep -nE 'spec §|[Dd]ecision [0-9]|Review Focus|slice [0-9]|clarification [0-9]' \
+  platform/agui/copilotkit-chat/lib/*.ts platform/agui/copilotkit-chat/scripts/check-built-server.mjs \
+  platform/agui/copilotkit-chat/app/api/sessions/route.ts "platform/agui/copilotkit-chat/app/api/sessions/[id]/route.ts" \
+  "platform/agui/copilotkit-chat/app/api/copilotkit/[[...slug]]/route.ts" platform/agui/copilotkit-chat/Dockerfile \
+  platform/ansible/roles/agui/templates/docker-compose.yml.j2 platform/dev/fake_agent.py \
+  && echo "fork-only citations: rewrite each comment to state the behaviour" || echo ok
+```
+
+Expected: `tests 43`, `fail 0`; `all checks passed`; both pytest runs pass; `sync-agents.py --check` exits 0;
+the grep prints `ok`.
 
 ```bash
 git add platform/agui/copilotkit-chat/Dockerfile platform/agui/copilotkit-chat/.dockerignore \

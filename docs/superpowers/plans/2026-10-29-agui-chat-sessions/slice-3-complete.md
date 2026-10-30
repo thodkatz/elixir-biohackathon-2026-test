@@ -2,15 +2,15 @@
 
 Completes the sidebar of spec §3 on top of slice 2's list, row menu and URL: the title search, the tag filter
 with counts, the date groups, *Show hidden*, the chat header, the controls disabled during a run and the list
-reconciliation after it. Then the checks that need an instance: "Session API answers" and the key scan over the
-`chat-sessions` volume in `roles/agui/tasks/checks.yml` (run by `create.yml` and `verify.yml`), the `archive.yml`
-runs of decision 11 on the dev VM with `fake_agent.py` standing in for the agent, and the one paid check. The
-last task closes the track.
+reconciliation after it. Then the checks that need an instance: "Session API answers", `chat-ui`'s hardening as
+`docker inspect` reports it and the key scan over the `chat-sessions` volume in `roles/agui/tasks/checks.yml` (run
+by `create.yml` and `verify.yml`), the `archive.yml` runs of decision 11 on the dev VM with `fake_agent.py`
+standing in for the agent, and the one paid check. The last task closes the track.
 
 **Implements:** spec [`2026-10-29-agui-chat-sessions-design.md`](../../specs/2026-10-29-agui-chat-sessions-design.md),
 §3 *The sidebar* (Layout, Chat header, During a run, Refresh), §5 *Key scan as a detector*, §6 *On an instance* and
-*One paid check*. Decisions **9** (the rest of it: task 1, `lib/sidebar-view.test.ts` and `check_view`; task 2,
-`check_header`), **10** (task 2, `lib/reconcile.test.ts` and `check_stop` in the runs `all`, `stop` and
+*One paid check*. Decisions **1** (its `docker inspect` acceptance check: task 3), **9** (the rest of it: task 1,
+`lib/sidebar-view.test.ts` and `check_view`; task 2, `check_header`), **10** (task 2, `lib/reconcile.test.ts` and `check_stop` in the runs `all`, `stop` and
 `stop-unsaved`), **11** (task 4, the `archive.yml` runs on the dev VM), **13** (task 3, the key scan), **14**
 (task 1: search treats HTML as text, `check_view` searches a seeded `<img …>` title), **15** (task 3, "Session API
 answers").
@@ -37,9 +37,11 @@ is authoritative, and a difference found there is recorded as a ruling in the ha
   puts the open session into the URL if the list has it. Task 2 replaces that effect.
 - `CHAT/app/globals.css`, slice 2's whole file.
 - `platform/dev/e2e/sessions.py` (Python Playwright; slice 2's ruling 1): `Run` (`page`, `sessions`, `shot`, `ok`,
-  `files`, `url_session`, `rows`, `row`, `send`, `menu`), `check_list(r) -> ids`, `check_menu(r, ids)`, `BASE`,
-  `XSS`, `main()`. After `check_menu` there are three sessions: "List the home directory (exfil try)" (pinned, tags
-  `exfil, dns`, two runs), "Read the dataset" (hidden), "Try the canary" (deleted). Task 2 adds checks after them.
+  `files`, `wait_runs`, `url_session`, `rows`, `row`, `send`, `menu`), `check_list(r) -> ids`, `check_menu(r, ids)`,
+  `check_close_tab(r, ids)`, `BASE`, `XSS`, `main()`, which calls the three checks in that order. After
+  `check_close_tab` there are three sessions: "List the home directory (exfil try)" (pinned, tags `exfil, dns`, two
+  runs), "Read the dataset" (hidden, a second `completed` run from `check_close_tab`), "Try the canary" (deleted).
+  Task 2 adds checks after them, and its new `main()` keeps calling all three.
 - Slice 2's dev-VM commands (its task 5, steps 5 and 6, ruling 5): `create.yml` from the main checkout with
   `-e spe_agui_source_dir=$W/platform/agui`; `archive.yml` (and here `verify.yml`) from the worktree with the main
   checkout's instance file and `-e spe_output_root=$M/platform/ansible/output`, so the branch's roles run.
@@ -49,23 +51,30 @@ is authoritative, and a difference found there is recorded as a ruling in the ha
 tags: string[]; showHidden: boolean }`, `type TagCount`, `filterSessions(list, filter): SessionMeta[]`,
 `tagCounts(list, showHidden, selected): TagCount[]`, `dateGroup(updatedAt: string, now: Date): DateGroup`,
 `sections(list, now: Date): Section[]`, `toggleTag(selected, tag): string[]`. `lib/reconcile.ts`:
-`SAVE_FAILED_MESSAGE`, `RECONCILE_RETRIES = 5`, `RECONCILE_DELAY_MS = 500`, `REFUSED_RUN_MESSAGES`,
-`clockOffset(dateHeader, browserNowMs): number`, `serverRunStart(browserStartMs, serverOffsetMs): number`,
-`showsRun(list, id, runStartServerMs): boolean`, `isRefusal(message): boolean`, `fetchSessionList(f?: Fetch):
+`SAVE_FAILED_MESSAGE`, `RECONCILE_RETRIES = 5`, `RECONCILE_DELAY_MS = 500`, `SAVE_FAILED_EVENT` (equal to slice 1's
+`SAVE_FAILED`), `REFUSED_RUN_MESSAGES` (equal to slice 1's `REFUSAL_MESSAGES`; `lib/reconcile.ts` is browser code
+and does not import `lib/recorder.ts`), `clockOffset(dateHeader, browserNowMs): number`,
+`serverRunStart(browserStartMs, serverOffsetMs): number`, `showsRun(list, id, runStartServerMs): boolean`,
+`isRefusal(message): boolean`, `isSaveFailed(event: { name: string; value?: unknown }, id: string): boolean`,
+`fetchSessionList(f?: Fetch):
 Promise<{ list; serverOffsetMs }>`, `reconcile(fetchList, id, browserStartMs, sleep?): Promise<{ list; saved }>`.
 `app/session-filters.tsx`: `SessionFilters`, `HiddenToggle`, `DELETED_NOTE`. `app/chat-header.tsx`: `ChatHeader({
 session, knownTags, onPatch })`, `TOOL_CALL_NOTE`. `app/use-run-reconcile.ts`: `useRunReconcile({ openId, onList,
 onError }): { busy: boolean; noteRunError(message): void }`. `Sidebar` gains `busy: boolean`. `sessions.py` gains
-`check_view`, `check_header`, `check_stop`, `slow_loop`, `two_turn`, `InstanceRun` and the options `--scenario`,
+`check_view`, `check_header`, `check_stop`, `check_save_failed`, `slow_loop`, `two_turn`, `InstanceRun` and the options `--scenario`,
 `--save-delay-ms`, `--url`, `--compose-file`. `platform/dev/fake_agent.py` gains `--run-log PATH` and reads `--key`
 from `SPE_AGENT_API_KEY` when it is not given.
 
 **Tried before writing this plan** (scratch, Node 24.21, the main checkout's `node_modules` read only, slice 2's
 task 1–2 code extracted from its plan file with a stub of slice 1's `lib/sessions.ts` types):
 - `node --test` over `lib/`: 26 pass, 0 fail (slice 2's 7 without the `listOrder` test, `sidebar-view` 10,
-  `reconcile` 9), and `sidebar-view` alone under `TZ=UTC`, `Europe/Berlin`, `America/New_York`,
+  `reconcile` 9 in its first version), and `sidebar-view` alone under `TZ=UTC`, `Europe/Berlin`, `America/New_York`,
   `Pacific/Kiritimati` and `Australia/Lord_Howe`. With `sidebar-view.ts` absent its test fails with
   `ERR_MODULE_NOT_FOUND`.
+- `reconcile.test.ts` as written below, beside slice 1's `lib/recorder.ts` (with `REFUSAL_MESSAGES`) and
+  `lib/sessions.ts`: 12 pass. Three mutations fail it: the 1 s slack put back into `serverRunStart` (the 30 s case
+  and the 1.5 s case), a refusal message dropped from `REFUSED_RUN_MESSAGES`. `tsc` accepts
+  `app/use-run-reconcile.ts` against CopilotKit 1.79's `AgentSubscriber` and rejects a misspelt `onCustomEvent`.
 - `tsc --noEmit` (the chat UI's options plus `allowImportingTsExtensions`) clean after task 1 and after task 2. The
   diffs below `git apply` cleanly to slice 2's `page.tsx` and to task 1's `sidebar.tsx` and give exactly the tested
   files. `next build` could not run in scratch (Turbopack refuses a symlinked `node_modules`).
@@ -73,7 +82,9 @@ task 1–2 code extracted from its plan file with a stub of slice 1's `lib/sessi
   that needs slices 1 and 2.
 - `checks.yml` (task 3) against a stub API and a `node:24-slim` stand-in for `chat-ui`: passes on clean files; fails
   naming `/data/sessions/b.json` when it holds the LLM key; fails on a 200 that is not a list; fails with "could
-  not scan" when `/data/sessions` is absent.
+  not scan" when `/data/sessions` is absent. The hardening check (task 3, step 4) against a compose project with
+  `chat-ui`'s `read_only`, tmpfs and volume: passes; fails naming the value with `read_only: false`, an extra bind
+  mount, an extra tmpfs; fails with no `chat-ui` container.
 - `fake_agent.py` with task 4's change inside the instance's agent image (`spe-agent:ac7fe88374e0`, read-only root,
   the `agent-runs` volume) through `fake-agent.compose.yml`: healthy, a run streams `RUN_FINISHED`, one line lands in
   `/var/lib/spe-agent/runs.jsonl`, and the key is not in the process's argv.
@@ -204,7 +215,7 @@ Expected: FAIL, `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '…/lib/sideb
 - [ ] **Step 3: Write `CHAT/lib/sidebar-view.ts`**
 
 ```ts
-// What the sidebar shows, as pure functions of the session list (spec §3, Layout): the
+// What the sidebar shows, as pure functions of the session list: the
 // title search, the tag filter and its chips, *Show hidden*, and the order: pinned first,
 // then Today / Yesterday / Previous 7 days / Older by `updated_at`, in the browser's time zone.
 import type { SessionMeta } from "./sessions.ts";
@@ -294,7 +305,7 @@ Expected: `pass 10`, `fail 0` four times.
 
 ```tsx
 "use client";
-// The sidebar's filters (spec §3, Layout): title search and tag chips above the list, the
+// The sidebar's filters: title search and tag chips above the list, the
 // *Show hidden* toggle and the note on deleted sessions below it. All text is React text.
 import type { SessionMeta } from "../lib/sessions.ts";
 import type { ViewFilter } from "../lib/sidebar-view.ts";
@@ -629,9 +640,13 @@ Pure helpers in lib/sidebar-view.ts (node --test, several time zones) replace li
 **Interfaces:** Consumes: task 1; `Fetch`, `updateSession`, `renamePatch`, `withTag`, `withoutTag`
 (`lib/client.ts`); slice 1's test hook `SPE_SESSIONS_TEST_SAVE_DELAY_MS` (delays the recorder's finalisation write
 by that many ms) and `SPE_SESSIONS_DIR`; the recorder's refusal messages ("invalid session", "this session was
-deleted", "this session is already running", spec §2 *Admit*); `fake_agent.py`'s slow run (a user message
-containing "slow" streams for about 10 s); `@ag-ui/client`'s subscriber hooks `onRunInitialized` and
-`onRunFinalized` (the latter runs in the run's `finalize`, so on finish, error and abort alike). Produces:
+deleted", "this session is already running", "the chat UI is shutting down", "this session could not be read",
+spec §2 *Admit*; slice 1's `REFUSAL_MESSAGES`) and its save-failed `CUSTOM` event (`SAVE_FAILED`, value `{session:
+id}`, sent before the run's terminal event, spec §5); `fake_agent.py`'s slow run (a user message
+containing "slow" streams for about 10 s); `@ag-ui/client`'s subscriber hooks `onRunInitialized`,
+`onCustomEvent` (`{ event: CustomEvent }`, `event.name` and `event.value`; the CopilotKit runtime passes every
+event of the run through to the browser) and `onRunFinalized` (the latter runs in the run's `finalize`, so on
+finish, error and abort alike). Produces:
 `useRunReconcile`, `ChatHeader`, `Sidebar`'s `busy`; header labels `Chat title`, `New tag for this chat`, `Untag
 <t>` (none contains a row-menu label, so slice 2's `get_by_label("Session title")` and `get_by_label("Add a tag")`
 still find one element); the `sessions.py` scenarios.
@@ -643,9 +658,12 @@ cards), 14 (header text is React text).
 How the reconciliation decides (spec §3, *Refresh*): after a run ends however it ended, the list is fetched until
 it has the run's session with an `updated_at` not older than the run's start, at most once plus 5 retries 500 ms
 apart; then the error bar says "this session could not be saved". The run's start is taken on the browser's
-clock and converted with each answer's `Date` header (minus 1 s, the header's resolution), so a browser clock that
-is off does not lose the run. A run the recorder refused at admission writes nothing, so its own `RUN_ERROR` is the
-only message. The hook replaces slice 2's run-end effect: the list it returns also puts the open session into the
+clock and converted with each answer's `Date` header, so a browser clock that is off does not lose the run. The
+header has whole seconds, rounded down, so the converted start is already up to 1 s early: no further slack, or a
+save from the previous run up to 2 s before this one would count. A run the recorder refused at admission writes
+nothing, so its own `RUN_ERROR` is the only message. When the recorder reports a failed save itself (the
+`spe.session_save_failed` event, spec §5), the error bar says "this session could not be saved" at once and the
+list is fetched once after the run, without retries. The hook replaces slice 2's run-end effect: the list it returns also puts the open session into the
 URL once listed. The open session's *Delete* is disabled during a run as well (it would start a new chat under the
 running one, through slice 2's `onDeleted`); record this as a ruling (cost if wrong: one more click after the run).
 
@@ -655,15 +673,18 @@ running one, through slice 2's `onDeleted`); record this as a ruling (cost if wr
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Fetch } from "./client.ts";
+// Node-only: the recorder is never imported by the browser module; the test pins the copies.
+import { REFUSAL_MESSAGES, SAVE_FAILED } from "./recorder.ts";
 import type { SessionMeta } from "./sessions.ts";
 import {
-  RECONCILE_DELAY_MS, SAVE_FAILED_MESSAGE, clockOffset, fetchSessionList, isRefusal, reconcile, serverRunStart, showsRun,
+  RECONCILE_DELAY_MS, REFUSED_RUN_MESSAGES, SAVE_FAILED_EVENT, SAVE_FAILED_MESSAGE, clockOffset, fetchSessionList,
+  isRefusal, isSaveFailed, reconcile, serverRunStart, showsRun,
 } from "./reconcile.ts";
 
 const ID = "6f1c0d2e-4b1a-4c3d-8e9f-0a1b2c3d4e5f";
 const START = Date.parse("2026-10-29T10:00:00.000Z");
-// reconcile() takes the browser's start time; with offset 0 the server start is 1 s earlier (Date header slack).
-const BROWSER_START = START + 1000;
+// The browser's start time; with offset 0 the clocks agree.
+const BROWSER_START = START;
 const row = (updated: string, id = ID): SessionMeta => ({
   id, title: "t", tags: [], pinned: false, hidden: false, created_at: updated, updated_at: updated,
 });
@@ -680,6 +701,7 @@ test("clockOffset and serverRunStart: a browser clock 30 s fast does not lose th
   const browserNow = Date.parse("2026-10-29T10:00:30.000Z");
   const offset = clockOffset("Thu, 29 Oct 2026 10:00:00 GMT", browserNow);
   assert.equal(offset, -30_000);
+  assert.equal(serverRunStart(browserNow, offset), START);
   // The browser saw the run start at 10:00:30 by its clock; the server saved at 10:00:02.
   assert.equal(showsRun([row("2026-10-29T10:00:02.000Z")], ID, serverRunStart(browserNow, offset)), true);
   assert.equal(clockOffset(null, browserNow), 0);
@@ -699,10 +721,25 @@ test("reconcile: a save that lands on the third fetch is found, two sleeps of 50
 });
 
 test("reconcile: each fetch's own clock offset converts the browser's start", async () => {
-  // Browser clock 30 s fast: it saw the run start at 10:00:31; the server saved at 10:00:02.
+  // Browser clock 30 s fast: it saw the run start at 10:00:30; the server saved at 10:00:02.
   const result = await reconcile(async () => ({ list: [row("2026-10-29T10:00:02.000Z")], serverOffsetMs: -30_000 }),
-    ID, START + 31_000, async () => assert.fail("no sleep expected"));
+    ID, START + 30_000, async () => assert.fail("no sleep expected"));
   assert.equal(result.saved, true);
+});
+
+test("reconcile: the previous run's save, 1.5 s before this run's start, is not this run", async () => {
+  // Clocks agree. Second case, the Date header's rounding at its worst: the run starts at
+  // 10:00:00.999 and the header says 10:00:00, so the offset is 999 ms too small.
+  for (const [browserStart, serverOffsetMs] of [
+    [START, 0],
+    [START + 999, clockOffset("Thu, 29 Oct 2026 10:00:00 GMT", START + 999)],
+  ]) {
+    const previous = [row(new Date(browserStart - 1500).toISOString())];
+    let calls = 0;
+    const result = await reconcile(async () => { calls++; return { list: previous, serverOffsetMs }; }, ID,
+      browserStart, async () => {});
+    assert.deepEqual([result.saved, calls], [false, 6], previous[0].updated_at);
+  }
 });
 
 test("reconcile: shown at once, no retry", async () => {
@@ -725,10 +762,20 @@ test("reconcile: a failing fetch is the caller's error, not a save failure", asy
 });
 
 test("isRefusal: the recorder's admission errors, nothing else", () => {
-  assert.equal(isRefusal("this session is already running"), true);
-  assert.equal(isRefusal("this session was deleted"), true);
-  assert.equal(isRefusal("invalid session"), true);
+  for (const m of REFUSED_RUN_MESSAGES) assert.equal(isRefusal(m), true, m);
   assert.equal(isRefusal("scripted model failure (the message asked for it)"), false);
+});
+
+test("REFUSED_RUN_MESSAGES are the recorder's refusal messages, all of them", () => {
+  assert.deepEqual([...REFUSED_RUN_MESSAGES], [...REFUSAL_MESSAGES]);
+});
+
+test("isSaveFailed: the recorder's save-failed event for this run's session only", () => {
+  assert.equal(SAVE_FAILED_EVENT, SAVE_FAILED);
+  assert.equal(isSaveFailed({ name: SAVE_FAILED_EVENT, value: { session: ID } }, ID), true);
+  assert.equal(isSaveFailed({ name: SAVE_FAILED_EVENT, value: { session: "other" } }, ID), false);
+  assert.equal(isSaveFailed({ name: SAVE_FAILED_EVENT, value: null }, ID), false);
+  assert.equal(isSaveFailed({ name: "something.else", value: { session: ID } }, ID), false);
 });
 
 test("fetchSessionList: list and offset from one GET; a non-200 throws", async () => {
@@ -751,36 +798,43 @@ Expected: FAIL, `ERR_MODULE_NOT_FOUND` for `lib/reconcile.ts`.
 - [ ] **Step 3: Write `CHAT/lib/reconcile.ts`**
 
 ```ts
-// After a run ends, fetch the session list until it shows that run (spec §3, Refresh): a
-// stopped run is saved after the browser has unsubscribed, so its save can land after the
-// first fetch. Pure apart from the injected fetch and sleep, so `node --test` covers it.
+// After a run ends, fetch the session list until it shows that run: a stopped run is saved
+// after the browser has unsubscribed, so its save can land after the first fetch. Pure apart
+// from the injected fetch and sleep, so `node --test` covers it. Browser code: it must not
+// import recorder.ts (Node-only); reconcile.test.ts checks the copies below against it.
 import type { Fetch } from "./client.ts";
 import type { SessionMeta } from "./sessions.ts";
 
 export const SAVE_FAILED_MESSAGE = "this session could not be saved";
 export const RECONCILE_RETRIES = 5;
 export const RECONCILE_DELAY_MS = 500;
-/** The `Date` header has whole seconds: the run's start in server time is taken this much earlier. */
-const DATE_HEADER_SLACK_MS = 1000;
+/** Name of the CUSTOM event the recorder sends, before the run's last event, when the session
+ *  file could not be written; its value is `{ session: <id> }`. */
+export const SAVE_FAILED_EVENT = "spe.session_save_failed";
 /** RUN_ERROR messages of a run the recorder refused at admission: such a run writes nothing. */
 export const REFUSED_RUN_MESSAGES: readonly string[] = [
   "invalid session",
   "this session was deleted",
   "this session is already running",
+  "the chat UI is shutting down",
+  "this session could not be read",
 ];
 
 export type ListResult = { list: SessionMeta[]; serverOffsetMs: number };
 export type FetchList = () => Promise<ListResult>;
 
-/** Server clock minus browser clock, from a response's `Date` header; 0 when absent or invalid. */
+/** Server clock minus browser clock, from a response's `Date` header; 0 when absent or invalid.
+ *  The header has whole seconds, rounded down, so this is up to 1 s too small. */
 export function clockOffset(dateHeader: string | null, browserNowMs: number): number {
   const server = dateHeader === null ? NaN : Date.parse(dateHeader);
   return Number.isNaN(server) ? 0 : server - browserNowMs;
 }
 
-/** The run's start in server time, from the browser's clock and the last measured offset. */
+/** The run's start in server time, from the browser's clock and the last measured offset. The
+ *  offset's rounding makes it up to 1 s early: a save is never missed, and a save older than
+ *  that is never taken for this run's. */
 export function serverRunStart(browserStartMs: number, serverOffsetMs: number): number {
-  return browserStartMs + serverOffsetMs - DATE_HEADER_SLACK_MS;
+  return browserStartMs + serverOffsetMs;
 }
 
 /** True when the list has the session with an `updated_at` not older than the run's start. */
@@ -792,6 +846,12 @@ export function showsRun(list: readonly SessionMeta[], id: string, runStartServe
 /** True when a run error is the recorder's refusal at admission (nothing to reconcile). */
 export function isRefusal(message: string): boolean {
   return REFUSED_RUN_MESSAGES.some((m) => message.includes(m));
+}
+
+/** True when a CUSTOM event is the recorder's report that session `id` could not be saved. */
+export function isSaveFailed(event: { name: string; value?: unknown }, id: string): boolean {
+  const value = event.value as { session?: unknown } | null | undefined;
+  return event.name === SAVE_FAILED_EVENT && typeof value === "object" && value !== null && value.session === id;
 }
 
 /** GET /api/sessions, as lib/client.ts's fetchSessions, plus the clock offset its `Date` header
@@ -826,25 +886,27 @@ export async function reconcile(
 - [ ] **Step 4: Run it to see it pass**
 
 Run: `(cd platform/agui/copilotkit-chat && node --test lib/reconcile.test.ts)`
-Expected: `pass 9`, `fail 0`.
+Expected: `pass 12`, `fail 0`.
 
 - [ ] **Step 5: Write `CHAT/app/use-run-reconcile.ts`**
 
 ```ts
-// The agent's run state for the page (spec §3, During a run and Refresh): `busy` while a run is
-// in progress (the sidebar disables switching and New chat), and after each run, however it
-// ended, the list is fetched until it shows that run, or the error bar says it was not saved.
+// The agent's run state for the page: `busy` while a run is in progress (the sidebar disables
+// switching and New chat), and after each run, however it ended, the list is fetched until it
+// shows that run, or the error bar says it was not saved. When the server reports the failed
+// save itself (a CUSTOM event during the run), the bar says so at once and the list is fetched
+// once, without retries.
 import { UseAgentUpdate, useAgent } from "@copilotkit/react-core/v2";
 import { useCallback, useEffect, useRef } from "react";
 import type { SessionMeta } from "../lib/sessions.ts";
-import { SAVE_FAILED_MESSAGE, fetchSessionList, isRefusal, reconcile } from "../lib/reconcile.ts";
+import { SAVE_FAILED_MESSAGE, fetchSessionList, isRefusal, isSaveFailed, reconcile } from "../lib/reconcile.ts";
 
 type Options = {
   openId: string;
   onList: (list: SessionMeta[]) => void;
   onError: (message: string) => void;
 };
-type Run = { id: string; startMs: number; refused: boolean };
+type Run = { id: string; startMs: number; refused: boolean; saveFailed: boolean };
 
 const LIST_FAILED = "The session list could not be loaded.";
 
@@ -859,12 +921,27 @@ export function useRunReconcile({ openId, onList, onError }: Options) {
     const sub = agent.subscribe({
       onRunInitialized: () => {
         // The open session is read when a run starts: switching is disabled until it ends.
-        current.current = last.current = { id: latest.current.openId, startMs: Date.now(), refused: false };
+        current.current = last.current = {
+          id: latest.current.openId, startMs: Date.now(), refused: false, saveFailed: false,
+        };
+      },
+      onCustomEvent: ({ event }) => {
+        const run = current.current;
+        if (run === null || run.saveFailed || !isSaveFailed(event, run.id)) return;
+        run.saveFailed = true;
+        latest.current.onError(SAVE_FAILED_MESSAGE);
       },
       onRunFinalized: () => {
         const ended = current.current;
         current.current = null;
         if (ended === null) return;
+        if (ended.saveFailed) {
+          // Already reported; the file will not change, so one fetch for the sidebar is enough.
+          fetchSessionList()
+            .then(({ list }) => latest.current.onList(list))
+            .catch(() => latest.current.onError(LIST_FAILED));
+          return;
+        }
         reconcile(fetchSessionList, ended.id, ended.startMs)
           .then(({ list, saved }) => {
             latest.current.onList(list);
@@ -891,7 +968,7 @@ export function useRunReconcile({ openId, onList, onError }: Options) {
 
 ```tsx
 "use client";
-// The chat header (spec §3, Chat header): the open session's title and tags, editable here as in
+// The chat header: the open session's title and tags, editable here as in
 // the row menu (same PATCH bodies: lib/client.ts), and the note that every tool call is shown. A
 // session not yet recorded (New chat, before its first run ends) has nothing to edit: PATCH would
 // answer 404. Labels differ from the row menu's ("Session title", "Add a tag"), so a label lookup
@@ -1100,7 +1177,7 @@ row's *Delete*):
    onChanged: () => void;
    onDeleted: (id: string) => void;
    onError: (message: string) => void;
-+  /** A run is in progress: switching session and New chat are disabled (spec §3, During a run). */
++  /** A run is in progress: switching session, New chat and the open session's Delete are disabled. */
 +  busy: boolean;
  };
  
@@ -1194,7 +1271,7 @@ prints nothing (slice 2's effect is gone).
 3. Insert before `def main()`:
 
 ```python
-# --- slice 3: search, tag filter, date groups, Show hidden, header, a stopped run -------------
+# --- search, tag filter, date groups, Show hidden, header, a stopped run, a failed save ------
 
 SAVE_FAILED = "this session could not be saved"
 
@@ -1223,7 +1300,7 @@ def chip(r: Run, tag: str):
 
 
 def check_view(r: Run) -> None:
-    """After check_menu: one pinned session updated today, one hidden, one deleted."""
+    """After check_close_tab: one pinned session updated today, one hidden, one deleted."""
     page = r.page
     seed(r, "Seeded yesterday", 1, tags=["alpha", "beta"])
     seed(r, "Seeded five days ago", 5, tags=["beta"])
@@ -1340,6 +1417,35 @@ def check_stop(r: Run, expect_saved: bool) -> str:
     sys.exit(f"FAIL: no session file titled {title!r} with a run")
 
 
+def check_save_failed(r: Run) -> None:
+    """The chat UI cannot write the session (its directory made read-only for the run): the
+    server's save-failed event puts the error bar up, and the list is not fetched again and again
+    (a retrying reconciliation would fetch it 6 times). Local run only, as a normal user."""
+    if os.geteuid() == 0:
+        sys.exit("FAIL: check_save_failed needs a normal user (root writes to a read-only directory)")
+    page = r.page
+    lists: list[str] = []
+    page.on("request", lambda req: lists.append(req.url)
+            if req.method == "GET" and req.url.split("?")[0].endswith("/api/sessions") else None)
+    page.get_by_role("button", name="New chat").click()
+    expect(page.locator(".spe-header-title")).to_have_text("New chat")
+    title = f"run that cannot be saved {uuid.uuid4().hex[:8]}"
+    mode = r.sessions.stat().st_mode & 0o7777
+    r.sessions.chmod(0o500)
+    try:
+        lists.clear()
+        r.send(title, 1)
+        expect(page.locator(".spe-error")).to_contain_text(SAVE_FAILED, timeout=5_000)
+        expect(page.get_by_role("button", name="New chat")).to_be_enabled(timeout=5_000)
+        time.sleep(3.5)  # longer than five retries 500 ms apart
+        assert len(lists) <= 2, lists  # the one fetch after the run, and at most one from New chat
+    finally:
+        r.sessions.chmod(mode)
+    assert not any(f["title"] == title for f in r.files().values())
+    r.shot("save-failed")
+    r.ok("failed save: the server's event shows the error bar; the list is fetched once, not retried")
+
+
 def slow_loop(r: Run) -> None:
     """Archive check during a run: slow runs back to back, each in a new session (a second run of
     one thread right after the first can be refused while the server finishes it), until the chat
@@ -1414,7 +1520,7 @@ def main() -> None:
     ap.add_argument("--shots", type=Path, help="write numbered screenshots here")
     ap.add_argument("--sessions", type=Path, help="sessions directory to use and keep (default: a temporary one)")
     ap.add_argument("--scenario", default="all", choices=sorted(set(LOCAL + INSTANCE)),
-                    help="all: every check; stop / stop-unsaved: a stopped run whose save is delayed "
+                    help="all: every check (save-failed last); stop / stop-unsaved: a stopped run whose save is delayed "
                          "(--save-delay-ms) within / past the reconciliation; slow-loop, two-turn: --url only")
     ap.add_argument("--save-delay-ms", type=int, default=0,
                     help="SPE_SESSIONS_TEST_SAVE_DELAY_MS for the local chat UI")
@@ -1464,9 +1570,11 @@ def main() -> None:
             if args.scenario == "all":
                 ids = check_list(r)
                 check_menu(r, ids)
+                check_close_tab(r, ids)
                 check_view(r)
                 check_header(r, ids)
                 check_stop(r, expect_saved=True)
+                check_save_failed(r)
             else:
                 page.goto(BASE + "/")
                 check_stop(r, expect_saved=args.scenario == "stop")
@@ -1489,10 +1597,10 @@ python3 platform/dev/e2e/sessions.py --scenario stop-unsaved --save-delay-ms 400
 ```
 
 Expected: the first run prints slice 2's `ok - …` lines, then `ok - groups: …`, `ok - search: …`, `ok - tag
-filter: …`, `ok - Show hidden: …`, `ok - header: …`, `ok - stopped run: … (row shown)`; the second `ok - stopped
+filter: …`, `ok - Show hidden: …`, `ok - header: …`, `ok - stopped run: … (row shown)`, `ok - failed save: …`; the second `ok - stopped
 run: … (row shown)` (the save landed during the reconciliation); the third `ok - stopped run: … (error bar shown,
 file saved later)`. Look at every screenshot in `$E` (Read tool): `groups`, `search`, `tag-filter`, `show-hidden`,
-`header`, `during-run`, `after-stop`, beside slice 2's.
+`header`, `during-run`, `after-stop`, `save-failed`, beside slice 2's.
 
 If `stop-unsaved` never shows the error bar because the browser's run ends only after the server's delayed save
 (the stop waits for the save, and the reconciliation always finds it): decision 10 holds in a stronger way. Record
@@ -1527,7 +1635,7 @@ sessions.py covers search, tags, groups, Show hidden, the header, a stopped run 
 save delayed by SPE_SESSIONS_TEST_SAVE_DELAY_MS."
 ```
 
-### Task 3: instance checks — "Session API answers" and the key scan over the volume
+### Task 3: instance checks — "Session API answers", `chat-ui`'s hardening, the key scan over the volume
 
 **Files:** Modify: `platform/ansible/roles/agui/tasks/checks.yml`.
 
@@ -1537,7 +1645,9 @@ save delayed by SPE_SESSIONS_TEST_SAVE_DELAY_MS."
 later tasks call. The checks run in `create.yml` (the `agui` role) and `verify.yml` (the `verify` role already
 includes `checks.yml` when `spe_frontend == 'agui'`), so `verify.yml` itself needs no change.
 
-**Decisions:** 15 ("Session API answers": `GET /api/sessions` → 200 and a JSON list), 13 (the key check extended
+**Decisions:** 1 (`docker inspect` of `chat-ui`: `ReadonlyRootfs: true`, exactly one mount, the volume at `/data`,
+and tmpfs exactly `/tmp` and `/app/.next/cache`, as slice 1's compose template sets them), 15 ("Session API
+answers": `GET /api/sessions` → 200 and a JSON list), 13 (the key check extended
 to the volume as a detector: no file under `/data/sessions` holds the agent, LLM or sandbox key; a hit fails and
 names the files, it is never hidden). The answer and the scan's output are `no_log` (titles; the keys go to grep
 on stdin, never in argv); the asserts say what was wrong. The scan first asserts all three keys were found,
@@ -1559,15 +1669,15 @@ git -C $M status --short && git -C $M log --oneline -1     # clean, on main, sli
 
 - [ ] **Step 1: See the checks missing**
 
-Run: `grep -c "Session API answers\|No session file holds" platform/ansible/roles/agui/tasks/checks.yml`
+Run: `grep -c "Session API answers\|No session file holds\|chat-ui keeps a read-only root" platform/ansible/roles/agui/tasks/checks.yml`
 Expected: `0`.
 
 - [ ] **Step 2: Add "Session API answers"** to `checks.yml`, right after the task "Chat UI answers":
 
 ```yaml
 - name: Session API answers
-  # Decision 15: GET /api/sessions gives 200 and a JSON list. The answer holds participants'
-  # titles and tags, so it is not logged; the assertion below says what was wrong.
+  # GET /api/sessions must give 200 and a JSON list. The answer holds participants' titles
+  # and tags, so it is not logged; the assertion below says what was wrong.
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ spe_agui_ui_port }}/api/sessions"
   register: agui_sessions_api
@@ -1607,7 +1717,7 @@ Expected: `0`.
     quiet: true
 
 - name: Session files scanned for the keys
-  # Decision 13, a detector: chat-ui never holds the LLM or sandbox key, so a hit means a key
+  # A detector: chat-ui never holds the LLM or sandbox key, so a hit means a key
   # reached a conversation through the agent or a tool. Keys go in on stdin, never in argv;
   # grep prints file names only. rc 1: no file holds any key; rc 2: /data/sessions unreadable.
   ansible.builtin.command:
@@ -1632,43 +1742,98 @@ Expected: `0`.
     quiet: true
 ```
 
-- [ ] **Step 4: Check the failure paths locally** (no instance touched), in a scratch directory outside the repo
+- [ ] **Step 4: Add the hardening check** to `checks.yml`, right after "Session API answered 200 with a JSON
+  list". `docker inspect`'s output holds `chat-ui`'s environment (the agent key), so only the three values are
+  kept and shown:
+
+```yaml
+- name: chat-ui container
+  ansible.builtin.command:
+    argv: [docker, compose, -p, spe-frontend, -f, "{{ spe_frontend_dir }}/docker-compose.yml", ps, -q, chat-ui]
+  register: agui_ui_container
+  changed_when: false
+  failed_when: agui_ui_container.rc != 0 or agui_ui_container.stdout_lines | length != 1
+
+- name: chat-ui as Docker runs it
+  ansible.builtin.command:
+    argv: [docker, inspect, "{{ agui_ui_container.stdout }}"]
+  register: agui_ui_inspect
+  changed_when: false
+  no_log: true   # Config.Env holds the agent key
+
+- name: chat-ui's root filesystem, mounts and tmpfs
+  ansible.builtin.set_fact:
+    agui_ui_readonly: "{{ (agui_ui_inspect.stdout | from_json | first).HostConfig.ReadonlyRootfs | default(false) }}"
+    agui_ui_mounts: >-
+      {{ (agui_ui_inspect.stdout | from_json | first).Mounts | default([], true)
+         | map(attribute='Type') | zip((agui_ui_inspect.stdout | from_json | first).Mounts | default([], true)
+         | map(attribute='Destination')) | map('join', ':') | sort }}
+    agui_ui_tmpfs: "{{ ((agui_ui_inspect.stdout | from_json | first).HostConfig.Tmpfs | default({}, true)).keys() | sort }}"
+
+- name: chat-ui keeps a read-only root, one volume at /data and tmpfs only at /tmp and /app/.next/cache
+  # The sessions volume is the only writable place that outlives the container; anything
+  # else written goes to the two tmpfs. A change to the compose file that loosens this fails here.
+  ansible.builtin.assert:
+    that:
+      - agui_ui_readonly | bool
+      - agui_ui_mounts == ['volume:/data']
+      - agui_ui_tmpfs == ['/app/.next/cache', '/tmp']
+    fail_msg: >-
+      chat-ui hardening changed: ReadonlyRootfs {{ agui_ui_readonly }}, mounts {{ agui_ui_mounts }},
+      tmpfs {{ agui_ui_tmpfs }}; expected true, ['volume:/data'], ['/app/.next/cache', '/tmp']
+    quiet: true
+```
+
+- [ ] **Step 5: Check the failure paths locally** (no instance touched), in a scratch directory outside the repo
   (`S=$(mktemp -d /var/tmp/spe-checks-XXXX)`): a compose project `spe-frontend-s3test` with one service `chat-ui`
-  (`image: node:24-slim`, `command: ["sleep", "infinity"]`, `user: "1000"`, `volumes: ["./s:/data/sessions:ro"]`),
+  (`image: node:24-slim`, `command: ["sleep", "infinity"]`, `user: "1000"`, `read_only: true`, `tmpfs: [/tmp,
+  "/app/.next/cache:uid=1000,gid=1000,mode=0700"]`, `volumes: ["chat-sessions:/data"]` with a top-level
+  `volumes: {chat-sessions: {}}`; the session files are put there with `docker compose cp`),
   an `agent.env` with three dummy keys, a one-line Python HTTP stub on port 18333 answering `GET` with a given body,
   and a play on `localhost` (`-c local`) with `spe_agui_ui_port: 18333`, `spe_agent_api_key: <the dummy agent key>`,
   `spe_frontend_dir: <S>` that slurps `agent.env` into `agui_agent_env` and includes a copy of the new tasks with
-  `-p spe-frontend` replaced by `-p spe-frontend-s3test`. Run it four ways:
+  `-p spe-frontend` replaced by `-p spe-frontend-s3test`. Run it these ways (`docker compose up -d
+  --force-recreate` after each change to the compose file):
 
 | Case | Expected |
 |---|---|
 | stub answers `[]`, files without keys | `failed=0` |
-| a file in `s/` contains the dummy LLM key | fails: "a key reached a session file …: /data/sessions/<file>" |
+| a file in `/data/sessions` contains the dummy LLM key | fails: "a key reached a session file …: /data/sessions/<file>" |
 | stub answers `{"a":1}` | fails: "GET /api/sessions answered 200 without a JSON list" |
-| volume mounted elsewhere (`./s:/data/other:ro`) | fails: "could not scan /data/sessions in chat-ui (grep exit 2)" |
+| volume mounted elsewhere (`chat-sessions:/data/other`) | fails: "chat-ui hardening changed: … mounts ['volume:/data/other'] …" |
+| `read_only: false` | fails: "chat-ui hardening changed: ReadonlyRootfs False, …" |
+| a second mount (`./x:/x`) | fails: "… mounts ['bind:/x', 'volume:/data'] …" |
+| a third tmpfs (`/run`) | fails: "… tmpfs ['/app/.next/cache', '/run', '/tmp'] …" |
+| volume back at `/data` but no `sessions/` in it (`docker compose exec -u 0 chat-ui rm -rf /data/sessions`) | fails: "could not scan /data/sessions in chat-ui (grep exit 2)" |
 
-  Then `docker compose -p spe-frontend-s3test down` and `rm -rf "$S"`. Paste the four results into the handoff.
+  The hardening rows were tried while writing this plan against such a project. Then `docker compose -p
+  spe-frontend-s3test down -v` and `rm -rf "$S"`. Paste the results into the handoff.
 
-- [ ] **Step 5: Run on the dev VM** (no model call: `dev-local.yml` has `spe_agui_smoke: false`): `play verify`.
-  Expected: `ok` for "Session API answers", "Session API answered 200 with a JSON list", "All three keys found",
+- [ ] **Step 6: Run on the dev VM** (no model call: `dev-local.yml` has `spe_agui_smoke: false`): `play verify`.
+  Expected: `ok` for "Session API answers", "Session API answered 200 with a JSON list", "chat-ui keeps a read-only
+  root, one volume at /data and tmpfs only at /tmp and /app/.next/cache", "All three keys found",
   "Session files could be scanned", "No session file holds the agent, LLM or sandbox key"; `failed=0`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add platform/ansible/roles/agui/tasks/checks.yml
-git commit -s -m "agui checks: session API answers; no key in a session file
+git commit -s -m "agui checks: session API answers; chat-ui hardening; no key in a session file
 
-Run by create.yml and verify.yml. The key scan is a detector: chat-ui never holds
-the LLM or sandbox key, so a hit means one reached a conversation."
+Run by create.yml and verify.yml. docker inspect of chat-ui: read-only root, the
+sessions volume at /data as its only mount, tmpfs only at /tmp and /app/.next/cache.
+The key scan is a detector: chat-ui never holds the LLM or sandbox key, so a hit
+means one reached a conversation."
 ```
 
 ### Task 4: the dev-VM archive checks (decision 11)
 
 **Files:** Create: `platform/dev/fake-agent.compose.yml`. Modify: `platform/dev/fake_agent.py`.
 
-**Interfaces:** Consumes: slice 2's `agui` export in `roles/run_archive` (barrier `stop -t 30 chat-ui` then
-`agent`, copy, restart; `ps -a -q chat-ui` fails the export when the container is missing; `write_agui_run.py`);
+**Interfaces:** Consumes: slice 2's `agui` export in `roles/run_archive` (spec §4 *Export*, step 1 (*Barrier*):
+`stop -t 30 chat-ui` then `agent`; copy, restart; `ps -a -q chat-ui` fails the export when the container is
+missing; an absent run log is accepted through `docker compose cp`'s `Could not find the file` error, slice 2's
+clarification 3; `write_agui_run.py`);
 `sessions.py` (task 2) locally and with `--url http://127.0.0.1:3000 --compose-file $F` (scenarios `stop` and
 `slow-loop`); the dev VM's instance `dev-local` (`spe_provision: existing`, `spe_frontend: agui`, frontend
 directory `/home/ubuntu/spe-frontend`, chat UI on `127.0.0.1:3000`, run directories
@@ -1682,18 +1847,30 @@ container as it would the real agent. `create` puts the real agent back.
 - [ ] **Step 1: Let `fake_agent.py` run as the instance's agent**
 
 Change `platform/dev/fake_agent.py` (`--key` from the agent's environment, so it never sits in argv; the run log
-at a given path, so it lands on the `agent-runs` volume):
+at a given path, so it lands on the `agent-runs` volume). The diff is against the file as slice 1 left it (with
+`import asyncio` and the slow run); `git apply` it:
 
 ```diff
-@@ -11,6 +11,7 @@
+--- a/platform/dev/fake_agent.py
++++ b/platform/dev/fake_agent.py
+@@ -7,13 +7,15 @@
+ "fail" makes the model raise, so the run ends in RUN_ERROR; a message containing
+ "slow" streams its answer in SLOW_STEPS chunks, SLOW_STEP_SECONDS apart (about 10 s),
+ for stopping, closing or archiving a run in progress. The run log goes to a
+-temporary directory.
++temporary directory, or to --run-log PATH; --key defaults to $SPE_AGENT_API_KEY, so
++the key need not sit in argv.
+ """
+ from __future__ import annotations
  
  import argparse
+ import asyncio
  import json
 +import os
  import tempfile
  from pathlib import Path
  
-@@ -60,23 +61,28 @@
+@@ -70,23 +72,28 @@
      ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
      ap.add_argument("--port", type=int, default=18100)
      ap.add_argument("--host", default="127.0.0.1")
@@ -1803,8 +1980,8 @@ print("session:", rec["runs"][-1]["status"] if rec["runs"] else "no run",
 PY
 ```
 
-Expected: `session: cancelled | run log: ['cancelled']` (the barrier stopped `chat-ui` mid-run; slice 2's
-`SIGTERM` drain finalised it `cancelled`; the agent, stopped second, logged the client's disconnect as
+Expected: `session: cancelled | run log: ['cancelled']` (the barrier, spec §4 *Export*, step 1 (*Barrier*),
+stopped `chat-ui` mid-run; slice 2's `SIGTERM` drain finalised it `cancelled`; the agent, stopped second, logged the client's disconnect as
 `cancelled`). If the barrier fell between two runs (the last title's run `completed`, or no file for it), repeat
 the step.
 
@@ -1826,11 +2003,18 @@ ls -A $R/agui-sessions | wc -l; test -e $R/agent-runs.jsonl || echo no-run-log; 
 docker compose -p spe-frontend -f $F stop -t 30 chat-ui agent
 docker run --rm --user 0 --entrypoint sh -v spe-frontend_chat-sessions:/s -v spe-frontend_agent-runs:/r -v $B:/b $IMG \
   -c 'cp -a /b/sessions/. /s/sessions/ && cp -a /b/runs/. /r/'
-docker compose -p spe-frontend -f $F start agent chat-ui; rm -rf $B
+docker compose -p spe-frontend -f $F start agent chat-ui
+# The copies keep the containers' owners (uid 1000 and the agent's 10001) and mode 0700, so the host
+# user cannot delete them: remove them as root in a container, then the empty directory.
+docker run --rm --user 0 --entrypoint sh -v $B:/b $IMG -c 'rm -rf /b/sessions /b/runs' && rmdir $B
+test -e $B && echo "BACKUP LEFT: $B" || echo backup-removed
 ```
 
-Expected: `archive.yml` `failed=0`; `0`; `no-run-log`; the index line saying no session was recorded. After the
-restore `curl -s 127.0.0.1:3000/api/sessions` lists step 4's sessions again.
+Expected: `archive.yml` `failed=0` (the emptied `agent-runs` volume has no `runs.jsonl`: the export accepts the
+copy's `Could not find the file`, slice 2's clarification 3); `0`; `no-run-log`; the index line saying no session
+was recorded;
+`backup-removed` (the backup holds a run log and sessions with canaries: if `BACKUP LEFT` prints, remove it before
+going on). After the restore `curl -s 127.0.0.1:3000/api/sessions` lists step 4's sessions again.
 
 - [ ] **Step 7: Archive with `chat-ui` removed (check 4) — STOP AND ASK before `destroy.yml`**
 
@@ -1875,8 +2059,8 @@ Either way, bring `chat-ui` back and the real agent with it: `create`.
 ### Task 5: the paid check and closing the track
 
 **Files:** Modify: `AGENTS.md` (*Current work*, *AG-UI agent frontend*),
-`docs/superpowers/plans/2026-10-29-agui-chat-sessions/README.md` (*PR slices* status column), `BACKLOG.md` (only
-if something stays open). Create: `docs/superpowers/plans/2026-10-29-agui-chat-sessions/handoffs/<UTC
+`docs/superpowers/plans/2026-10-29-agui-chat-sessions/README.md` (*PR slices* status column), `BACKLOG.md` (the
+run-report item's reason; more only if something stays open), `docs/README.md` (the plan's row). Create: `docs/superpowers/plans/2026-10-29-agui-chat-sessions/handoffs/<UTC
 time>-slice-3-done.md`.
 
 **Interfaces:** Consumes: `sessions.py --scenario two-turn` (task 2); the dev VM with the real agent
@@ -1916,6 +2100,29 @@ leave it out of the evidence.
     the archiving part; fix it if it did not).
   - Plan `README.md`, *PR slices*: the status of 1/3 and 2/3 reads `merged #<n>`, and 3/3 `merged #<this PR>`
     (set when the PR is open; the user merges it).
+  - `BACKLOG.md`, the run-report item (`- A run report in the CopilotKit chat, …`): its premise "the chat sessions
+    work comes first" is gone. Its last sentence, from `Waits because`, becomes:
+
+    ```markdown
+    Waits because no one has asked for it on the AG-UI path yet. The chat sessions (plan
+    `docs/superpowers/plans/2026-10-29-agui-chat-sessions/`, done) now record every run per session, on the
+    `chat-sessions` volume and in the archive, so a report can be built from them.
+    ```
+
+  - `docs/README.md`, the row of `superpowers/plans/2026-10-29-agui-chat-sessions/` becomes:
+
+    ```markdown
+    | `superpowers/plans/2026-10-29-agui-chat-sessions/` | plan: AG-UI chat sessions in three slices, done (all three merged); shared interfaces in its `README.md`, handoffs in `handoffs/` | you change the CopilotKit chat's sessions or the agui archive, or look for why they work as they do |
+    ```
+
+  - The code this slice changed cites no fork-only document (plan README, *Upstream-clean*); this prints nothing
+    (rewrite any hit to state the behaviour instead):
+
+    ```bash
+    git diff --name-only origin/main...HEAD -- platform | grep -v '\.md$' \
+      | xargs -r grep -nE 'spec §|[Dd]ecision [0-9]|Review Focus|slice [0-9]|clarification [0-9]|plan README'
+    ```
+
   - Handoff `handoffs/$(date -u +%Y-%m-%dT%H%MZ)-slice-3-done.md`, heading `# <date>: slice 3 done, track closed`:
     what was built, the evidence of tasks 2–5 (browser runs, `verify.yml`, the four archive checks, the paid
     check), every ruling as *decision, why, cost if wrong*, links to `evidence/slice-3/` and to any new
@@ -1925,7 +2132,7 @@ leave it out of the evidence.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add AGENTS.md docs/superpowers/plans/2026-10-29-agui-chat-sessions/README.md \
+git add AGENTS.md BACKLOG.md docs/README.md docs/superpowers/plans/2026-10-29-agui-chat-sessions/README.md \
   docs/superpowers/plans/2026-10-29-agui-chat-sessions/handoffs/<file>.md \
   docs/superpowers/plans/2026-10-29-agui-chat-sessions/evidence/slice-3
 git commit -s -m "AG-UI chat sessions: slice 3 done, track closed
@@ -1933,6 +2140,5 @@ git commit -s -m "AG-UI chat sessions: slice 3 done, track closed
 Paid check, archive checks and verify.yml evidence in the handoff."
 ```
 
-(Add `BACKLOG.md` if step 1 or 3 changed it.) The PR body lists what ran (*Running things* suites, the browser
-runs, `verify.yml`, the archive checks, the paid check) and links the handoff; after the local review round the
-user merges it (`AGENTS.md`, *Overrides*).
+The PR body lists what ran (*Running things* suites, the browser runs, `verify.yml`, the archive checks, the paid
+check) and links the handoff; after the local review round the user merges it (`AGENTS.md`, *Overrides*).

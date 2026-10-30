@@ -21,7 +21,8 @@ Decisions **9** in part (task 1: list, open, New chat, URL; task 2: row menu; se
 hidden* are slice 3), **11** (task 4: the export; task 5: `archive.yml` on the dev VM after the Playwright run; the
 slow-run, fresh-instance and removed-`chat-ui` runs are slice 3), **12** (task 4,
 `platform/dev/tests/test_write_agui_run.py`), **14** (task 1 and task 5: a title of `<img src=x onerror=…>` shows as
-text; task 4: the fence tests, `write_run.py` too). Review Focus 5 (task 1).
+text; task 4: the fence tests, `write_run.py` too), and **4**'s end-to-end check (task 2, `check_close_tab`: closing
+the tab mid-run leaves the whole run on disk, `completed`). Review Focus 5 (task 1).
 
 **Branch:** `impl/agui-chat-sessions-2-sidebar`, from `main` after slice 1 merged. Global constraints, shared
 interfaces and Review Focus: [plan README](README.md). Paths below are relative to the repository root; `CHAT` is
@@ -49,8 +50,10 @@ interfaces and Review Focus: [plan README](README.md). Paths below are relative 
 - `lib/shutdown.ts`: besides `installShutdown()`, `DRAIN_TIMEOUT_MS = 25_000`, `drain(state: Shared, timeoutMs:
   number, pollMs?: number): Promise<boolean>`, `shutdown(state: Shared, exit: (code: number) => void, timeoutMs?:
   number): Promise<void>`.
-- `platform/dev/e2e/sessions.py` (not `sessions.mjs` as the README's file table says: see ruling 1), with
-  `check_list(r) -> dict[str, str]` and `check_menu(r, ids)`; slice 3 adds its checks as further functions.
+- `platform/dev/e2e/sessions.py` (Python Playwright, ruling 1), with `Run.wait_runs(sid, n, seconds=5) -> dict`,
+  `check_list(r) -> dict[str, str]`, `check_menu(r, ids)` and `check_close_tab(r, ids)` (a second, `completed` run
+  on the hidden session "Read the dataset"); slice 3 adds its checks as further functions, and its `main()` keeps
+  calling all three.
 - `scripts/check-shutdown.mjs` (`node scripts/check-shutdown.mjs [--image <tag>]`).
 - `run_archive/files/write_agui_run.py <bundle dir> <run dir>`, with `main(argv) -> int`; `write_run.py` gains
   `main(argv)` and an import guard so its `slug`, `fence` and `write` can be imported.
@@ -113,16 +116,17 @@ Next.js 16.4.1), and run in `/var/tmp/claude-1000/slice2-scratch/` (not committe
 
 ### Rulings (record them in the slice's handoff as *decision, why, cost if wrong*)
 
-1. **The e2e script is Python** (`platform/dev/e2e/sessions.py`), not `sessions.mjs`: the dev VM has Python
+1. **The e2e script is Python Playwright** (`platform/dev/e2e/sessions.py`), not Node Playwright: the dev VM has Python
    Playwright 1.64.1 with its Chromium (the `browser-playwright` skill), and no Node Playwright; adding the npm
    package would be a new dependency and a second browser download. Cost if wrong: one file to port.
 2. **Opening a session remounts CopilotChat on a non-explicit thread** (above). Cost if wrong: if a later CopilotKit
    makes the first mount clear messages, opening shows an empty chat; the e2e reload check catches it.
 3. **The image sets `NEXT_MANUAL_SIG_HANDLE=true`**; `installShutdown()` warns at start when it is unset (`next
-   start`, a hand-run `server.js`). Spec §4 *Barrier* gains that (clarification, task 3).
+   start`, a hand-run `server.js`). Spec §4 *Export*, step 1 (*Barrier*) gains that (clarification 2, task 3).
 4. **An absent run log is recognised by `docker compose cp`'s own error** (`Could not find the file`) rather than a
    check before the copy: the agent is stopped by then, so nothing can be checked inside it, and checking before
-   stopping it races with its last write. Spec §4 step 2 is rewritten to say so (task 4).
+   stopping it races with its last write. Spec §4 *Export*, step 2 is rewritten to say so (clarification 3, task 3,
+   step 7; task 4 implements it).
 5. **`archive.yml` for the early output runs from the worktree**, with the main checkout's instance file and output
    (`-e spe_output_root=<main>/platform/ansible/output`): the new `run_archive` code is only in the worktree, and
    `AGENTS.md`'s `-e spe_agui_source_dir` covers the agent and chat-UI sources only.
@@ -164,7 +168,7 @@ stop and re-read `function CopilotChat` before going on; record what changed as 
 `CHAT/lib/session-id.ts`:
 
 ````ts
-// The session id check, shared by the server store (lib/sessions.ts re-exports it) and the page.
+// The session id check, shared by the server store and the page.
 // No Node imports here: the browser bundle includes this file.
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -173,15 +177,20 @@ export function isSessionId(value: unknown): value is string {
 }
 ````
 
-In `CHAT/lib/sessions.ts`, delete slice 1's `isSessionId` function (and its regular expression constant, if it has
-one) and put in its place:
+In `CHAT/lib/sessions.ts`, delete slice 1's `isSessionId` function and its `UUID_V4` constant, and put in their
+place an import (the store itself calls `isSessionId` in `file()` and `list()`) and a re-export (`api.ts`,
+`recorder.ts` and the tests import it from `./sessions.ts`):
 
 ````ts
-export { isSessionId } from "./session-id.ts";
+import { isSessionId } from "./session-id.ts";
+export { isSessionId };
 ````
 
-Run: `(cd platform/agui/copilotkit-chat && npm test)`. Expected: every slice-1 test still passes (they import
-`isSessionId` from `./sessions.ts`).
+A bare `export { isSessionId } from "./session-id.ts"` would not do: it binds no local name, so `file()` and
+`list()` would fail the type check (TS2304) and throw a `ReferenceError` at run time.
+
+Run: `(cd platform/agui/copilotkit-chat && npm test && npm run build)`. Expected: all of slice 1's tests pass (42/42
+in a scratch copy of slice 1 with this change) and the build's type check passes.
 
 - [ ] **Step 3: Write the failing tests for the URL helpers and the API client**
 
@@ -442,6 +451,17 @@ class Run:
     def files(self) -> dict[str, dict]:
         return {p.stem: json.loads(p.read_text()) for p in self.sessions.glob("*.json")}
 
+    def wait_runs(self, sid: str, n: int, seconds: float = 5) -> dict:
+        """The session's record once it has n runs: the recorder writes after the answer is shown."""
+        until = time.time() + seconds
+        while True:
+            path = self.sessions / f"{sid}.json"
+            rec = json.loads(path.read_text()) if path.exists() else {"runs": []}
+            if len(rec["runs"]) >= n or time.time() > until:
+                assert len(rec["runs"]) == n, (sid, n, rec["runs"])
+                return rec
+            time.sleep(0.2)
+
     def url_session(self) -> str | None:
         from urllib.parse import parse_qs, urlparse
         return (parse_qs(urlparse(self.page.url).query).get("session") or [None])[0]
@@ -507,7 +527,7 @@ def check_list(r: Run) -> dict[str, str]:
     expect(page.get_by_text("Turn 1: the command ran.")).to_be_visible(timeout=10_000)
     assert r.url_session() == first
     r.send("And the hidden files?", 2)
-    assert [x["status"] for x in r.files()[first]["runs"]] == ["completed", "completed"]
+    assert [x["status"] for x in r.wait_runs(first, 2)["runs"]] == ["completed", "completed"]
     r.ok("opening a row restores its history, and a run continues it")
 
     for bad in ("not-a-uuid", str(uuid.uuid4()), first.upper()):
@@ -924,7 +944,8 @@ git commit -s -m "Chat UI: session sidebar with open, New chat and ?session=" \
 ### Task 2: the row menu
 
 **Files:** Modify: `CHAT/app/sidebar.tsx` (whole file below), `CHAT/lib/client.ts` (append),
-`platform/dev/e2e/sessions.py` (add `check_menu`). Test: `CHAT/lib/client.test.ts` (append), `check_menu`.
+`platform/dev/e2e/sessions.py` (add `check_menu`, `check_close_tab`). Test: `CHAT/lib/client.test.ts` (append),
+`check_menu`, `check_close_tab`.
 
 **Interfaces:** Consumes: `updateSession`, `removeSession` (task 1); `PATCH`/`DELETE /api/sessions/{id}` (slice 1:
 400 with `{"error": …}` for an invalid tag, 404 for a missing one). Produces: `renamePatch`, `withTag`,
@@ -933,7 +954,10 @@ git commit -s -m "Chat UI: session sidebar with open, New chat and ?session=" \
 `alertdialog` named `Delete session`).
 
 **Decisions:** 9 (row menu: rename inline with Enter/Esc, pin, tags with suggestions and chip ×, hide, delete with
-the confirmation text of spec §3), 14 (a title of an HTML tag renamed and deleted as text).
+the confirmation text of spec §3), 14 (a title of an HTML tag renamed and deleted as text), 4's end-to-end check
+(`check_close_tab`: a slow run on the hidden session, its tab closed after the first chunk, is on disk about ten
+seconds later with both runs, the last `completed` and its whole answer; slice 1's recorder already does this, so
+the check passes as soon as `check_menu` does).
 
 - [ ] **Step 1: Write the failing unit test**: append to `CHAT/lib/client.test.ts`
 
@@ -1055,6 +1079,29 @@ def check_menu(r: Run, ids: dict[str, str]) -> None:
                       ("Read the dataset", False, True, False),
                       ("Try the canary", False, False, True)], states
     r.ok("final: three sessions, tagged and pinned / hidden / deleted; reload shows both tool cards")
+
+
+def check_close_tab(r: Run, ids: dict[str, str]) -> None:
+    """A run goes on when its tab is closed: the server records all of it, completed.
+
+    Uses the hidden session, so the three sessions above keep their state and the first one its two runs.
+    """
+    page = r.page.context.new_page()
+    page.goto(f"{BASE}/?session={ids['second']}")
+    expect(page.get_by_text("Turn 1: the command ran.")).to_be_visible(timeout=10_000)
+    box = page.get_by_test_id("copilot-chat-textarea")
+    box.fill("Read it again, slow please")
+    box.press("Enter")
+    expect(page.get_by_text("Slow step 1 of 10.")).to_be_visible(timeout=20_000)
+    page.close()
+    assert len(r.files()[ids["second"]]["runs"]) == 1, "the slow run was saved before it could have ended"
+    rec = r.wait_runs(ids["second"], 2, seconds=15)
+    assert rec["runs"][-1]["status"] == "completed", rec["runs"]
+    answer = [m for m in rec["messages"] if m["role"] == "assistant" and isinstance(m.get("content"), str)][-1]
+    assert "Slow step 10 of 10." in answer["content"], answer["content"]
+    assert "Turn 2: the command ran." in answer["content"], answer["content"]
+    assert rec["hidden"] is True and rec["title"] == "Read the dataset", rec
+    r.ok("closing the tab mid-run: the whole run is on disk, completed")
 ````
 
 In `main()`, replace `            check_list(r)` with:
@@ -1062,11 +1109,13 @@ In `main()`, replace `            check_list(r)` with:
 ````python
             ids = check_list(r)
             check_menu(r, ids)
+            check_close_tab(r, ids)
 ````
 
 and in the module docstring replace `walks the sidebar (list, open, New chat, ?session=) and` with `walks the sidebar
 (list, open, New chat, ?session=, row menu) and`, and `checks the session files after each step.` with `checks the
-session files after each step. It ends with three sessions: one tagged and pinned, one hidden, one deleted.`
+session files after each step. It ends with three sessions: one tagged and pinned, one hidden, one deleted, and
+checks that a run whose tab is closed is still saved whole.`
 
 Run: `(cd platform/agui/copilotkit-chat && npm run build) && python3 platform/dev/e2e/sessions.py`
 Expected: the `check_list` lines pass, then FAIL: timeout on `.spe-row-menu` (no menu button yet).
@@ -1265,8 +1314,9 @@ function SessionRow({ session, active, menuOpen, onToggleMenu, onCloseMenu, onOp
 python3 platform/dev/e2e/sessions.py
 ```
 
-Expected: all `ok - …` lines, the last one `ok - final: three sessions, tagged and pinned / hidden / deleted; reload
-shows both tool cards`, exit 0. `grep -rn dangerouslySetInnerHTML platform/agui/copilotkit-chat/app` prints nothing.
+Expected: all `ok - …` lines, `ok - final: three sessions, tagged and pinned / hidden / deleted; reload shows both
+tool cards` and then, after about ten seconds, `ok - closing the tab mid-run: the whole run is on disk, completed`,
+exit 0. `grep -rn dangerouslySetInnerHTML platform/agui/copilotkit-chat/app` prints nothing.
 
 - [ ] **Step 6: Commit**
 
@@ -1279,8 +1329,8 @@ git commit -s -m "Chat UI: row menu (rename, pin, tags, hide, delete)"
 ### Task 3: the `SIGTERM` drain
 
 **Files:** Create: `CHAT/lib/shutdown.ts`, `CHAT/instrumentation.ts`, `CHAT/scripts/check-shutdown.mjs`. Modify:
-`CHAT/Dockerfile`, `CHAT/.dockerignore`, `CHAT/README.md` (the run command), the spec (§4 *Barrier* and a
-clarification). Test: `CHAT/lib/shutdown.test.ts`, `node scripts/check-shutdown.mjs` (standalone server and image).
+`CHAT/Dockerfile`, `CHAT/.dockerignore`, `CHAT/README.md` (the run command), the spec (§4 *Export*, steps 1 and 2,
+decision 11's acceptance check, clarifications 2 and 3), the plan README (header, *Proposed spec clarifications*). Test: `CHAT/lib/shutdown.test.ts`, `node scripts/check-shutdown.mjs` (standalone server and image).
 
 **Interfaces:** Consumes: `shared(): Shared` with `queue`, `running: Map<string, RunHandle>`, `closing` (slice 1;
 the recorder refuses new runs while `closing`, and `RunHandle.cancel()` finalises its run `cancelled`, writing under
@@ -1492,7 +1542,7 @@ In `CHAT/.dockerignore` add the line `!instrumentation.ts`. In `CHAT/README.md`,
 - [ ] **Step 4: Write the built-server check** `CHAT/scripts/check-shutdown.mjs`
 
 ````js
-// The SIGTERM drain against the built server (spec §4, Barrier): a slow run in progress, with the
+// The SIGTERM drain against the built server, the barrier the archive export relies on: a slow run in progress, with the
 // browser still reading and with the browser gone, is saved `cancelled` and the server exits by
 // itself well inside `docker stop -t 30`.
 //   node scripts/check-shutdown.mjs                     # node .next/standalone/server.js
@@ -1664,19 +1714,42 @@ docker image rm spe-chat-ui:check-shutdown
 
 Expected: the same two `ok` lines; `docker stop -t 30` returns long before 30 s, exit code 0.
 
-- [ ] **Step 7: Fold the finding into the spec.** In
-  `docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md`, §4 *Export*, step 1, replace "(a handler
-  registered in `instrumentation.ts`; the plan's task checks that Next.js's own `SIGTERM` handling leaves it time)"
-  with "(a handler registered in `instrumentation.ts`; the image sets `NEXT_MANUAL_SIG_HANDLE=true`, because Next.js's
-  own handler closes the server and exits without waiting for a detached run's save)". Append to the spec's
-  *Clarifications* (the section slice 1 created; take the next number, 2 if it holds only clarification 1):
+- [ ] **Step 7: Fold clarifications 2 and 3 into the spec.** Both change §4 *Export*: step 1 (*Barrier*), checked
+  by this task, and step 2 (the run log's copy), which task 4's export implements (ruling 4). They are added
+  together so the spec has one current text before task 4 is written. In
+  `docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md`:
+
+1. Header: `**Latest clarification:** 1.` → `**Latest clarification:** 3.`
+2. §4 *Export*, step 1 (*Barrier*): replace "(a handler registered in `instrumentation.ts`; the plan's task checks
+   that Next.js's own `SIGTERM` handling leaves it time)" with "(a handler registered in `instrumentation.ts`; the
+   image sets `NEXT_MANUAL_SIG_HANDLE=true`, because Next.js's own handler closes the server and exits without
+   waiting for a detached run's save)".
+3. §4 *Export*, step 2: replace "Only an absent run log is tolerated (no run reached the agent yet): the task checks
+   for the file first and skips that copy; any other copy error fails the export." with "Only an absent run log is
+   tolerated (no run reached the agent yet): the copy's own `Could not find the file` error is accepted, since the
+   stopped agent cannot be asked whether the file exists; any other copy error fails the export."
+4. Decision 11's acceptance check: "on a fresh instance with zero runs it succeeds with an empty `agui-sessions/`"
+   → "on a fresh instance with zero runs it succeeds with an empty `agui-sessions/` and no `agent-runs.jsonl` (the
+   run log's copy fails with `Could not find the file`, which the export accepts)".
+5. Append to *Clarifications* (the section slice 1 created with clarification 1):
 
 ```markdown
 2. **The chat UI's `SIGTERM` handler replaces Next.js's** (2026-MM-DD; slice 2/3). The image sets
    `NEXT_MANUAL_SIG_HANDLE=true` and `lib/shutdown.ts` drains the sessions and exits by itself. *Reason:* Next.js
    16.4.1's handler (`start-server.js`) closes the HTTP server and calls `process.exit(143)`; a run whose browser has
-   gone holds no response open, so its save would be cut off. *Amends:* §4 *Export*, step 1. *Status:* folded.
+   gone holds no response open, so its save would be cut off. *Amends:* §4 *Export*, step 1 (*Barrier*).
+   *Status:* folded.
+3. **An absent run log is recognised by the copy's own error, not by a check before it** (2026-MM-DD; slice 2/3).
+   The export copies `agent:/var/lib/spe-agent/runs.jsonl` from the stopped agent and accepts only `docker compose
+   cp`'s `Could not find the file` error; any other error fails the export. *Reason:* the agent is stopped by the
+   time of the copy, so nothing can be checked inside it, and a check before stopping it races with its last write
+   (Docker Compose 5.5.1: `cp` copies from a stopped container; a missing file fails with rc 1 and that message).
+   *Amends:* §4 *Export*, step 2; decision 11 (acceptance check). *Status:* folded.
 ```
+
+`2026-MM-DD` is the day of the commit. In the plan's `README.md`: the header line `(decisions 1–15; latest
+clarification: 1)` → `(decisions 1–15; latest clarification: 3)`, and *Proposed spec clarifications*, items 2 and 3
+each gain `Added by slice 2 (folded).` at their end.
 
 - [ ] **Step 8: Commit**
 
@@ -1684,17 +1757,19 @@ Expected: the same two `ok` lines; `docker stop -t 30` returns long before 30 s,
 git add platform/agui/copilotkit-chat/lib/shutdown.ts platform/agui/copilotkit-chat/lib/shutdown.test.ts \
   platform/agui/copilotkit-chat/instrumentation.ts platform/agui/copilotkit-chat/scripts/check-shutdown.mjs \
   platform/agui/copilotkit-chat/Dockerfile platform/agui/copilotkit-chat/.dockerignore \
-  platform/agui/copilotkit-chat/README.md docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md
+  platform/agui/copilotkit-chat/README.md docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md \
+  docs/superpowers/plans/2026-10-29-agui-chat-sessions/README.md
 git commit -s -m "Chat UI: on SIGTERM cancel and save every run, then exit" \
-  -m "Next.js's own handler is turned off in the image: it exits as soon as its server closes, before a detached run's session is written. Checked against the standalone server and the image within docker stop -t 30."
+  -m "Next.js's own handler is turned off in the image: it exits as soon as its server closes, before a detached run's session is written. Checked against the standalone server and the image within docker stop -t 30." \
+  -m "Spec clarifications 2 (the SIGTERM handler) and 3 (an absent run log is recognised by the copy's error), folded into §4 Export."
 ```
 
 ### Task 4: the archive export and `write_agui_run.py`
 
 **Files:** Create: `platform/ansible/roles/run_archive/files/write_agui_run.py`. Modify:
 `platform/ansible/roles/run_archive/files/write_run.py` (whole file below), `…/tasks/export.yml` (whole file),
-`…/tasks/write.yml` (from the *Overview without a chat export* task to the end), `platform/ansible/playbooks/archive.yml`,
-the spec §4 step 2. Test: `platform/dev/tests/test_write_agui_run.py`.
+`…/tasks/write.yml` (from the *Overview without a chat export* task to the end), `platform/ansible/playbooks/archive.yml`
+(the spec's §4 *Export*, step 2 already says what the export does: task 3, step 7). Test: `platform/dev/tests/test_write_agui_run.py`.
 
 **Interfaces:** Consumes: the session file schema (`version: 1`, README *Shared interfaces*); the volume and paths
 (`chat-ui:/data/sessions`, `agent:/var/lib/spe-agent/runs.jsonl`, compose project `spe-frontend`,
@@ -2504,11 +2579,6 @@ Expected: all pass (15 new). `uv run --with pytest pytest platform/dev/tests -k 
 the play `- name: Export OpenWebUI from the instance` becomes `- name: Export the frontend's chats`, and its include's
 `when: spe_frontend == 'openwebui'` becomes `when: spe_frontend in ['openwebui', 'agui']`.
 
-In the spec, §4 *Export* step 2, replace "Only an absent run log is tolerated (no run reached the agent yet): the
-task checks for the file first and skips that copy; any other copy error fails the export." with "Only an absent run
-log is tolerated (no run reached the agent yet): the copy's own `Could not find the file` error is accepted; any other
-copy error fails the export." (ruling 4; a wording change, no clarification needed beyond the handoff's ruling).
-
 - [ ] **Step 9: Check the playbook and exercise the export against a throwaway compose project** (never against
   `spe-frontend`: that is the dev VM's live stack)
 
@@ -2558,8 +2628,7 @@ Expected: syntax check passes; the first two runs end `failed=0` with the bundle
 ```bash
 git add platform/ansible/roles/run_archive/files/write_run.py platform/ansible/roles/run_archive/files/write_agui_run.py \
   platform/ansible/roles/run_archive/tasks/export.yml platform/ansible/roles/run_archive/tasks/write.yml \
-  platform/ansible/playbooks/archive.yml platform/dev/tests/test_write_agui_run.py \
-  docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md
+  platform/ansible/playbooks/archive.yml platform/dev/tests/test_write_agui_run.py
 git commit -s -m "run_archive: export and render the AG-UI chat sessions" \
   -m "Stop chat-ui (it saves every run in progress), then the agent; copy the session files and the run log; start both again. write_agui_run.py renders them like an Open WebUI run; fence() is now one backtick longer than any run inside, which also fixes write_run.py."
 ```
@@ -2712,8 +2781,12 @@ docker compose -p spe-frontend ps --format '{{.Service}} {{.State}}'; curl -s -o
 
 Expected: the play ends `failed=0`; `$R` has `run.yml`, `index.md` (three rows: active pinned with `exfil, dns`,
 hidden, deleted with its time), `chats/01-…` to `03-…` (`.md` and `.json`), `agui-sessions/` with three files
-(`ls $R/agui-sessions | wc -l` equals `ls /var/tmp/spe-e2e-sessions | wc -l`), and `agent-runs.jsonl` if the dev
-agent has ever been run (its line count in `index.md`); all three services `running`; the session API answers 200.
+(`ls $R/agui-sessions | wc -l` equals `ls /var/tmp/spe-e2e-sessions | wc -l`); all three services `running`; the
+session API answers 200. **This step checks the sessions only.** No run reaches the dev VM's agent here (the
+sessions were copied in, and a run would be a paid model call), so whether `$R` has `agent-runs.jsonl` depends only
+on the VM's history and is not checked. The run log's copy is checked in slice 3, task 4, against the fake agent in
+the compose stack (`fake-agent.compose.yml`, no model calls); here it was exercised only against task 4's
+throwaway compose project (step 9).
 Copy `$R/index.md` and `$R/chats/01-*.md` into `$E/` (fake-agent content only; never copy `agent-runs.jsonl`,
 `run.yml` or anything else from `$R`: they hold the instance's canaries).
 
@@ -2723,14 +2796,26 @@ Copy `$R/index.md` and `$R/chats/01-*.md` into `$E/` (fake-agent content only; n
 (cd platform/agui/copilotkit-chat && npm ci && npm test && npm run build)
 uv run --with pytest pytest platform/dev/tests -q
 python3 .methodology/shared/sync-agents.py --check
+git fetch origin && git diff -U0 origin/main...HEAD -- platform/agui/copilotkit-chat platform/ansible platform/dev \
+  ':!*.md' | grep '^+' | grep -v '^+++' \
+  | grep -E 'spec §|[Dd]ecision [0-9]|Review Focus|slice [0-9]|clarification [0-9]'
 ```
 
-Update the plan README's slices table: row 2/3's *Status* → `in review (#<PR>)`; and the `AGENTS.md` *Current work*
-line of the track: "**AG-UI chat sessions**: slice 2/3 in review (#<PR>), the early output. **Next: slice 3/3**
-`impl/agui-chat-sessions-3-complete` once it merges. Handoff: …" (same pointer as now). Write the handoff
+Expected: the suites pass, `sync-agents.py --check` is clean, and the last command prints nothing: no line this
+slice added to code (`lib/`, `app/`, `scripts/`, `instrumentation.ts`, the Dockerfile, Ansible, Python) cites the
+spec, a decision, a Review Focus item, a slice or a clarification; such files are upstream-bound, so a comment
+states the behaviour instead. A hit is rewritten and committed before the PR is marked ready.
+
+Update the plan README's slices table: row 2/3's *Status* → `merged #<this PR>` (set in the PR's last commit, so it
+is true once the PR is merged; the number is known from the draft claim); and the `AGENTS.md` *Current work* line of
+the track: its `**Next: …**` part → `**Next: slice 3/3** \`impl/agui-chat-sessions-3-complete\``, the handoff pointer
+(`ls docs/superpowers/plans/2026-10-29-agui-chat-sessions/handoffs | tail -1`) unchanged. Neither names the PR as
+open or in review. Write the handoff
 `handoffs/<YYYY-MM-DDTHHMMZ>-slice-2-done.md`: what was built, the commands run and their results, the six
 rulings above as *decision, why, cost if wrong* plus any made while implementing, links to `evidence/slice-2/`, the
-run directory's path, and slice 3's start (`ls handoffs | tail -1`, then `slice-3-complete.md`).
+run directory's path, a line saying that the dev-VM `archive.yml` run checked `sessions/` (`agui-sessions/`, the
+chats, `index.md`) only and that the run log's copy is checked in slice 3, task 4 (the fake-agent compose run), and
+slice 3's start (`ls handoffs | tail -1`, then `slice-3-complete.md`).
 
 ```bash
 git add README.md docs/getting-started.md docs/specs/2026-10-15-agui-frontend-design.md \

@@ -134,12 +134,18 @@ function toMeta(r: SessionRecord): SessionMeta {
   return { id: r.id, title: r.title, tags: r.tags, pinned: r.pinned, hidden: r.hidden, created_at: r.created_at, updated_at: r.updated_at };
 }
 
+// The one test of a soft-deleted session, for every reader: list, GET and run admission.
+export function isDeleted(record: SessionRecord): boolean {
+  return record.deleted_at !== null;
+}
+
 function checkRecord(value: unknown, id: string): SessionRecord {
   const r = value as SessionRecord;
   const ok =
     typeof r === "object" && r !== null && r.version === 1 && r.id === id &&
     typeof r.title === "string" && Array.isArray(r.tags) && Array.isArray(r.messages) &&
-    Array.isArray(r.runs) && typeof r.updated_at === "string";
+    Array.isArray(r.runs) && typeof r.updated_at === "string" && typeof r.pinned === "boolean" &&
+    typeof r.hidden === "boolean" && (r.deleted_at === null || typeof r.deleted_at === "string");
   if (!ok) throw new Error(`session file ${id}.json is not a version-1 session`);
   return r;
 }
@@ -214,7 +220,7 @@ export class SessionStore {
       if (!isSessionId(id)) continue; // also skips <id>.json.tmp-* leftovers
       try {
         const record = await this.read(id);
-        if (record && record.deleted_at === null) metas.push(toMeta(record));
+        if (record && !isDeleted(record)) metas.push(toMeta(record));
       } catch (error) {
         console.error(`sessions: skipping ${name}:`, error instanceof Error ? error.message : error);
       }
@@ -227,7 +233,7 @@ export class SessionStore {
     this.file(id); // throws ValidationError before anything is queued
     return withSession(id, async () => {
       const record = await this.read(id);
-      if (!record || record.deleted_at !== null) return null;
+      if (!record || isDeleted(record)) return null;
       if (patch.title !== undefined) {
         record.title = patch.title;
         record.title_source = "user";
@@ -245,7 +251,7 @@ export class SessionStore {
     this.file(id);
     return withSession(id, async () => {
       const record = await this.read(id);
-      if (!record || record.deleted_at !== null) return false;
+      if (!record || isDeleted(record)) return false;
       record.deleted_at = now.toISOString();
       record.updated_at = record.deleted_at;
       await this.write(record);

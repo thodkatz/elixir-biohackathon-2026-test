@@ -5,7 +5,7 @@ import { EventType, Middleware } from "@ag-ui/client";
 import type { AbstractAgent, BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
 import { Observable } from "rxjs";
 import type { Subscription } from "rxjs";
-import { isSessionId, shared, withSession } from "./sessions.ts";
+import { isDeleted, isSessionId, shared, withSession } from "./sessions.ts";
 import type { RunHandle, RunStatus, SessionStore } from "./sessions.ts";
 
 export const SAVE_FAILED = "spe.session_save_failed";
@@ -207,7 +207,7 @@ export class SessionRecorder extends Middleware {
         console.error(`sessions: reading ${id} failed:`, error instanceof Error ? error.message : error);
         return { refused: UNREADABLE };
       }
-      if (record?.deleted_at) return { refused: DELETED };
+      if (record && isDeleted(record)) return { refused: DELETED };
       running.set(id, handle);
       return { refused: null };
     });

@@ -8,7 +8,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Message } from "@ag-ui/client";
 import {
-  SessionStore, ValidationError, autoTitle, isSessionId, normaliseTags, parsePatch, shared,
+  SessionStore, ValidationError, autoTitle, isDeleted, isSessionId, normaliseTags, parsePatch, shared,
 } from "./sessions.ts";
 import type { RunEntry, SessionRecord } from "./sessions.ts";
 
@@ -239,4 +239,29 @@ test("softDelete keeps the file with deleted_at; patch and delete then find noth
 test("a missing sessions directory lists as empty", async () => {
   const store = new SessionStore(path.join(os.tmpdir(), `absent-${randomUUID()}`));
   assert.deepEqual(await store.list(), []);
+});
+
+test("read refuses a record whose pinned, hidden or deleted_at has the wrong type", async () => {
+  const store = await tmpStore();
+  for (const [key, value] of [
+    ["pinned", "yes"], ["pinned", undefined], ["hidden", 1], ["hidden", undefined],
+    ["deleted_at", false], ["deleted_at", 0], ["deleted_at", undefined],
+  ] as const) {
+    const id = await seeded(store);
+    const file = path.join(store.dir, `${id}.json`);
+    const record = JSON.parse(await fs.readFile(file, "utf8"));
+    if (value === undefined) delete record[key];
+    else record[key] = value;
+    await fs.writeFile(file, JSON.stringify(record));
+    await assert.rejects(store.read(id), /not a version-1 session/, `${key}: ${String(value)}`);
+  }
+});
+
+test("isDeleted: a deleted_at string is deleted, null is not", async () => {
+  const store = await tmpStore();
+  const id = await seeded(store);
+  const record = (await store.read(id)) as SessionRecord;
+  assert.equal(isDeleted(record), false);
+  await store.softDelete(id, at(2));
+  assert.equal(isDeleted((await store.read(id)) as SessionRecord), true);
 });

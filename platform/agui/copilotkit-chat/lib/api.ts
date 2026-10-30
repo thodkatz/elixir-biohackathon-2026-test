@@ -1,6 +1,6 @@
 // The session API's handlers, framework-free: the Next.js routes in
 // app/api/sessions/ only call these. Error bodies are generic; details go to the server log.
-import { ValidationError, isSessionId, parsePatch } from "./sessions.ts";
+import { ValidationError, isDeleted, isSessionId, parsePatch } from "./sessions.ts";
 import type { SessionStore, SessionView } from "./sessions.ts";
 
 const MAX_BODY = 16 * 1024;
@@ -49,7 +49,7 @@ export async function getSession(store: SessionStore, id: string): Promise<Respo
   if (!isSessionId(id)) return fail(400, "invalid session id");
   try {
     const record = await store.read(id);
-    if (!record || record.deleted_at !== null) return fail(404, "no such session");
+    if (!record || isDeleted(record)) return fail(404, "no such session");
     const { deleted_at: _deleted, runs: _runs, ...view } = record;
     return Response.json(view satisfies SessionView);
   } catch (error) {

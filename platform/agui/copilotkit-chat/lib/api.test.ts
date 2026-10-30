@@ -174,3 +174,28 @@ test("store failures give the generic 500 and log no message content", async () 
     logged.mock.restore();
   }
 });
+
+test("list, PATCH and DELETE: a store failure is the generic 500, logged without content", async () => {
+  const store = await tmpStore();
+  const broken = randomUUID();
+  await fs.writeFile(path.join(store.dir, `${broken}.json`), '{"version":1,"secret":canary-123}');
+  const notADir = new SessionStore(path.join(store.dir, `${broken}.json`)); // readdir: ENOTDIR
+  const logged = mock.method(console, "error", () => {});
+  try {
+    for (const [what, response] of [
+      ["list", await listSessions(notADir)],
+      ["PATCH", await patchSession(store, broken, patchRequest('{"title":"x"}'))],
+      ["DELETE", await deleteSession(store, broken)],
+    ] as const) {
+      assert.equal(response.status, 500, what);
+      const text = await response.text();
+      assert.deepEqual(JSON.parse(text), { error: "the session store failed; see the chat-ui logs" }, what);
+      assert.doesNotMatch(text, new RegExp(store.dir), what);
+    }
+    assert.equal(logged.mock.callCount(), 3);
+    assert.doesNotMatch(JSON.stringify(logged.mock.calls.map((c) => c.arguments)), /canary-123/);
+  } finally {
+    logged.mock.restore();
+  }
+  assert.equal(await fs.readFile(path.join(store.dir, `${broken}.json`), "utf8"), '{"version":1,"secret":canary-123}');
+});

@@ -12,7 +12,7 @@ directory for them on the dev VM, and a PR body that asks the user to look at bo
 
 Not in this slice (slice 3): title search, the tag filter, date groups, *Show hidden* (until then hidden rows are
 left out of the list but stay openable by URL), the chat header with title and tags, disabled controls during a
-run, and the list reconciliation after a stopped run.
+run, and the list reconciliation after a run (for a save that lands late).
 
 **Implements:** spec [`2026-10-29-agui-chat-sessions-design.md`](../../specs/2026-10-29-agui-chat-sessions-design.md)
 §3 (layout, row menu, URL, opening, New chat, refresh after a run and after a change, errors; the stale texts),

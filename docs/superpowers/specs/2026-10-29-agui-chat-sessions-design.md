@@ -1,6 +1,6 @@
 # AG-UI chat sessions — design
 
-**Status:** approved by the user (2026-10-29), PR #7. **Latest clarification:** none.
+**Status:** approved by the user (2026-10-29), PR #7. **Latest clarification:** 1.
 Read against this repo at `ff3acc3` (`main`, equal to `upstream/main` plus the fork's files and the
 optional token cap of upstream PR #9).
 
@@ -27,7 +27,7 @@ copies every session and the agent's run log into the run directory, rendered li
 | 1 | One JSON file per session, `/data/sessions/<uuid>.json` on volume `chat-sessions`, schema `version: 1`; the image creates `/data/sessions` owned by `node`, so a fresh volume starts writable; root filesystem stays read-only | [Storage](#1-storage-and-the-session-record) | `npm test`: a recorded run produces a file that validates against the schema; `docker build` of the image succeeds and, with a freshly created volume and the compose hardening, a first run is saved; `docker inspect` on an instance: `chat-ui` has `ReadonlyRootfs: true`, exactly one volume mount (`/data`) and tmpfs exactly `/tmp` and `/app/.next/cache` |
 | 2 | Session ids are canonical UUIDs; nothing else ever names a file | [Storage](#1-storage-and-the-session-record) | `npm test`: ids like `../x`, `a/b`, upper-case or non-v4 strings get 400 from every route and a refused run from the recorder; no file is created |
 | 3 | Writes are atomic (temp file + rename in the same directory) and serialised per session by one process-wide queue that every route bundle shares | [Storage](#1-storage-and-the-session-record) | `npm test`: a write interrupted before the rename leaves the previous file intact; 20 concurrent metadata updates to one session all land; against the built standalone server, `PATCH`es overlapping a run's finalisation all land and the run's messages too |
-| 4 | The conversation is recorded by the server from the run stream, once per run, whatever its outcome; at most one run per session at a time; finalisation merges into the latest record | [Recording](#2-recording-and-the-session-api) | `npm test` with scripted event sequences: finished, `RUN_ERROR`, agent HTTP error before streaming, stream error, EOF without a terminal event, stop (unsubscribed), and terminal event followed by unsubscription each leave `messages` and exactly one `runs[]` entry with the status of §2's table; a second run on a running session is refused and never reaches the agent; `DELETE` or `PATCH {title}` during a run survive its finalisation; end-to-end against `fake_agent.py`: closing the tab mid-run leaves the whole run on disk, status `completed` |
+| 4 | The conversation is recorded by the server from the run stream, once per run, whatever its outcome; at most one run per session at a time; finalisation merges into the latest record | [Recording](#2-recording-and-the-session-api) | `npm test` with scripted event sequences: finished, `RUN_ERROR`, agent HTTP error before streaming, stream error, EOF without a terminal event, the stop button (`RUN_ERROR` with `code: "abort"`), unsubscription before a terminal event, and terminal event followed by unsubscription each leave `messages` and exactly one `runs[]` entry with the status of §2's table; a second run on a running session is refused and never reaches the agent; `DELETE` or `PATCH {title}` during a run survive its finalisation; end-to-end against `fake_agent.py`: closing the tab mid-run leaves the whole run on disk, status `completed` |
 | 5 | The browser changes metadata only, through `/api/sessions` (`GET` list, `GET`/`PATCH`/`DELETE` one); no `POST`: a session exists once its first run is recorded | [Recording](#2-recording-and-the-session-api) | `npm test`: `PATCH` with `messages`, `runs`, `id` or any unknown key gets 400 and changes nothing; a new UUID is absent from `GET /api/sessions` until a run on it ends |
 | 6 | Delete is a soft delete: `deleted_at` set, the session gone from every API answer and refused for new runs, the file kept and archived; a run already in progress is not cancelled and is recorded into the deleted file | [Recording](#2-recording-and-the-session-api) | `npm test`: after `DELETE`, list omits it, `GET`/`PATCH`/`DELETE` give 404, a run on its id ends with `RUN_ERROR` and does not reach the agent; the file still exists with `deleted_at` |
 | 7 | Titles start as the first user message cut to 60 characters and are never overwritten once the user renames | [Storage](#1-storage-and-the-session-record) | `npm test`: auto title after the first run; after `PATCH {title}` (`title_source: "user"`) a later run leaves it unchanged |
@@ -155,9 +155,10 @@ For each run:
    | Termination | `status` |
    |---|---|
    | `RUN_FINISHED` | `completed` |
-   | `RUN_ERROR`, or the stream errors (including an HTTP error from the agent before any event) | `failed` |
+   | `RUN_ERROR` with `code: "abort"` (the stop button: the runner's `stop` aborts the agent's request) | `cancelled` |
+   | any other `RUN_ERROR`, or the stream errors (including an HTTP error from the agent before any event) | `failed` |
    | the stream completes without a terminal event | `failed` |
-   | unsubscribed before a terminal event (the stop button) | `cancelled` |
+   | unsubscribed before a terminal event | `cancelled` |
 
    On a terminal event or a stream error the write completes before that event is passed on; on
    unsubscription it runs after. A write error is logged on the server (`console.error`, no message
@@ -219,7 +220,12 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   This is a convenience: the server's one-run-per-session admission (§2) is what keeps two tabs from
   overwriting each other.
 - **Refresh:** the list is fetched on load, after each run ends and after each metadata change; no polling.
-  A stopped run is saved after the browser has unsubscribed, so its save can land after that fetch: after a
+  A run that ends with a terminal event, the stop button's included (clarification 1: it aborts the
+  agent's request, and the recorder records `RUN_ERROR` `code: "abort"`), is saved before that event
+  reaches the browser, so the fetch after it finds the run, or the `spe.session_save_failed` event has
+  already said it was not saved. Only a run whose stream to the browser ends early (the connection dropped
+  while the detached run goes on, §2) is saved after the browser's run has ended, and so can land after that
+  fetch: after a
   run ends, until the list shows the open session with an `updated_at` not older than the run's start, the
   page fetches it again, up to 5 times at 500 ms. If it still does not, the error bar says "this session
   could not be saved".
@@ -391,3 +397,12 @@ The same slice rewrites every current text that says the AG-UI chat is not archi
   which adds the volume, adds `spe-frontend_chat-sessions` to `isolation.NOT_RESTORED` if
   `isolation.py` is on `main` by then; the ladder's slice-2 task text and spec part 05 already name it
   (rewritten in PR #7).
+
+## Clarifications
+
+1. **The stop button arrives as `RUN_ERROR` with `code: "abort"` and is recorded `cancelled`** (2026-10-30;
+   slice 1/3). The runner's `stop` calls `HttpAgent.abortRun()`, which aborts the agent's request; the HTTP
+   transform of `@ag-ui/client` 1.0.2 turns the `AbortError` into a `RUN_ERROR` event with `code: "abort"` and
+   ends the stream, rather than the client unsubscribing. Unsubscription before a terminal event stays
+   `cancelled`. *Reason:* read in `@ag-ui/client` 1.0.2 and pinned by `lib/clone.test.ts`. *Amends:* §2
+   (termination table), decision 4, §3 *Refresh* (which run can be saved after the fetch). *Status:* folded.

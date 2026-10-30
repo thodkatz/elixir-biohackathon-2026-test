@@ -10,8 +10,7 @@ standing in for the agent, and the one paid check. The last task closes the trac
 **Implements:** spec [`2026-10-29-agui-chat-sessions-design.md`](../../specs/2026-10-29-agui-chat-sessions-design.md),
 §3 *The sidebar* (Layout, Chat header, During a run, Refresh), §5 *Key scan as a detector*, §6 *On an instance* and
 *One paid check*. Decisions **1** (its `docker inspect` acceptance check: task 3), **9** (the rest of it: task 1,
-`lib/sidebar-view.test.ts` and `check_view`; task 2, `check_header`), **10** (task 2, `lib/reconcile.test.ts` and `check_stop` in the runs `all`, `stop` and
-`stop-unsaved`), **11** (task 4, the `archive.yml` runs on the dev VM), **13** (task 3, the key scan), **14**
+`lib/sidebar-view.test.ts` and `check_view`; task 2, `check_header`), **10** (task 2, `lib/reconcile.test.ts` and `check_stop` in the runs `all` and `stop`), **11** (task 4, the `archive.yml` runs on the dev VM), **13** (task 3, the key scan), **14**
 (task 1: search treats HTML as text, `check_view` searches a seeded `<img …>` title), **15** (task 3, "Session API
 answers").
 
@@ -798,8 +797,9 @@ Expected: FAIL, `ERR_MODULE_NOT_FOUND` for `lib/reconcile.ts`.
 - [ ] **Step 3: Write `CHAT/lib/reconcile.ts`**
 
 ```ts
-// After a run ends, fetch the session list until it shows that run: a stopped run is saved
-// after the browser has unsubscribed, so its save can land after the first fetch. Pure apart
+// After a run ends, fetch the session list until it shows that run: a run the server saw
+// unsubscribed (the stream dropped before its end) is saved after the client has gone, so its
+// save can land after the first fetch. Pure apart
 // from the injected fetch and sleep, so `node --test` covers it. Browser code: it must not
 // import recorder.ts (Node-only); reconcile.test.ts checks the copies below against it.
 import type { Fetch } from "./client.ts";
@@ -1266,7 +1266,7 @@ prints nothing (slice 2's effect is gone).
 
 1. In the imports, after `import uuid`, add `from datetime import datetime, timedelta, timezone`.
 2. In the module docstring, after the usage line, add:
-   `    python3 platform/dev/e2e/sessions.py --scenario stop --save-delay-ms 1500   (also: stop-unsaved, 4000)` and
+   `    python3 platform/dev/e2e/sessions.py --scenario stop --save-delay-ms 1500` and
    `    python3 platform/dev/e2e/sessions.py --url http://127.0.0.1:3000 --compose-file F --scenario stop|slow-loop|two-turn`.
 3. Insert before `def main()`:
 
@@ -1380,10 +1380,10 @@ def check_header(r: Run, ids: dict[str, str]) -> None:
     r.ok("header: rename and tags saved to the file; reload reopens it with its tool cards; New chat header")
 
 
-def check_stop(r: Run, expect_saved: bool) -> str:
+def check_stop(r: Run) -> str:
     """A slow run (fake agent: "slow" in the message) stopped from the chat: controls disabled during
-    it, enabled after; the row appears (reconciliation) or the error bar says it was not saved; the
-    file ends with a `cancelled` run either way. Returns the session id."""
+    it, enabled after; the row appears, also with the save delayed (the recorder saves before the
+    stop's RUN_ERROR reaches the browser); the file ends with a `cancelled` run. Returns the session id."""
     page = r.page
     title = f"slow run to stop {uuid.uuid4().hex[:8]}"
     page.get_by_role("button", name="New chat").click()
@@ -1398,11 +1398,8 @@ def check_stop(r: Run, expect_saved: bool) -> str:
     expect(page.get_by_role("button", name="New chat")).to_be_enabled(timeout=15_000)
     for button in page.locator(".spe-row-open").all():
         expect(button).to_be_enabled()
-    if expect_saved:
-        expect(r.row(title)).to_have_count(1, timeout=5_000)
-        assert SAVE_FAILED not in "".join(page.locator(".spe-error").all_inner_texts())
-    else:
-        expect(page.locator(".spe-error")).to_contain_text(SAVE_FAILED, timeout=8_000)
+    expect(r.row(title)).to_have_count(1, timeout=5_000)
+    assert SAVE_FAILED not in "".join(page.locator(".spe-error").all_inner_texts())
     r.shot("after-stop")
     until = time.time() + 15
     while time.time() < until:
@@ -1410,8 +1407,7 @@ def check_stop(r: Run, expect_saved: bool) -> str:
         if found and found[0][1]["runs"]:
             sid, rec = found[0]
             assert rec["runs"][-1]["status"] == "cancelled", rec["runs"]
-            r.ok(f"stopped run: controls disabled then enabled, recorded cancelled "
-                 f"({'row shown' if expect_saved else 'error bar shown, file saved later'})")
+            r.ok("stopped run: controls disabled then enabled, recorded cancelled (row shown)")
             return sid
         time.sleep(0.5)
     sys.exit(f"FAIL: no session file titled {title!r} with a run")
@@ -1510,7 +1506,7 @@ class InstanceRun(Run):
 4. Replace `def main()` (the whole function) with:
 
 ```python
-LOCAL = ("all", "stop", "stop-unsaved")
+LOCAL = ("all", "stop")
 INSTANCE = ("stop", "slow-loop", "two-turn")
 
 
@@ -1520,8 +1516,8 @@ def main() -> None:
     ap.add_argument("--shots", type=Path, help="write numbered screenshots here")
     ap.add_argument("--sessions", type=Path, help="sessions directory to use and keep (default: a temporary one)")
     ap.add_argument("--scenario", default="all", choices=sorted(set(LOCAL + INSTANCE)),
-                    help="all: every check (save-failed last); stop / stop-unsaved: a stopped run whose save is delayed "
-                         "(--save-delay-ms) within / past the reconciliation; slow-loop, two-turn: --url only")
+                    help="all: every check (save-failed last); stop: a stopped run whose save is delayed "
+                         "(--save-delay-ms); slow-loop, two-turn: --url only")
     ap.add_argument("--save-delay-ms", type=int, default=0,
                     help="SPE_SESSIONS_TEST_SAVE_DELAY_MS for the local chat UI")
     ap.add_argument("--url", help="an instance's chat UI (e.g. http://127.0.0.1:3000) instead of local servers")
@@ -1539,7 +1535,7 @@ def main() -> None:
             r = InstanceRun(page, args.compose_file, args.shots)
             if args.scenario == "stop":
                 page.goto(BASE + "/")
-                print(f"session {check_stop(r, expect_saved=True)}")
+                print(f"session {check_stop(r)}")
             elif args.scenario == "slow-loop":
                 slow_loop(r)
             else:
@@ -1573,11 +1569,11 @@ def main() -> None:
                 check_close_tab(r, ids)
                 check_view(r)
                 check_header(r, ids)
-                check_stop(r, expect_saved=True)
+                check_stop(r)
                 check_save_failed(r)
             else:
                 page.goto(BASE + "/")
-                check_stop(r, expect_saved=args.scenario == "stop")
+                check_stop(r)
             browser.close()
         print(f"sessions: {data}")
     finally:
@@ -1593,19 +1589,15 @@ E=docs/superpowers/plans/2026-10-29-agui-chat-sessions/evidence/slice-3; mkdir -
 (cd platform/agui/copilotkit-chat && npm ci && npm run build)
 python3 platform/dev/e2e/sessions.py --shots $E
 python3 platform/dev/e2e/sessions.py --scenario stop --save-delay-ms 1500
-python3 platform/dev/e2e/sessions.py --scenario stop-unsaved --save-delay-ms 4000
 ```
 
 Expected: the first run prints slice 2's `ok - …` lines, then `ok - groups: …`, `ok - search: …`, `ok - tag
 filter: …`, `ok - Show hidden: …`, `ok - header: …`, `ok - stopped run: … (row shown)`, `ok - failed save: …`; the second `ok - stopped
-run: … (row shown)` (the save landed during the reconciliation); the third `ok - stopped run: … (error bar shown,
-file saved later)`. Look at every screenshot in `$E` (Read tool): `groups`, `search`, `tag-filter`, `show-hidden`,
-`header`, `during-run`, `after-stop`, `save-failed`, beside slice 2's.
-
-If `stop-unsaved` never shows the error bar because the browser's run ends only after the server's delayed save
-(the stop waits for the save, and the reconciliation always finds it): decision 10 holds in a stronger way. Record
-a ruling (decision, why, cost if wrong: the error-bar path is then covered by `reconcile.test.ts` only) and leave
-that run out of the evidence; keep `stop`.
+run: … (row shown)`: the browser's run ends only after the delayed save (the recorder saves before the stop's
+`RUN_ERROR` is passed on, spec clarification 1), so the first fetch finds it. A stop therefore never reaches the
+error bar after the retries; that path (a save landing late after an unsubscription) is covered by
+`reconcile.test.ts` only. Look at every screenshot in `$E` (Read tool): `groups`, `search`, `tag-filter`,
+`show-hidden`, `header`, `during-run`, `after-stop`, `save-failed`, beside slice 2's.
 
 - [ ] **Step 11: Docs.** In `CHAT/README.md`, *Sessions* (slice 2's section), add after its sidebar sentence:
 

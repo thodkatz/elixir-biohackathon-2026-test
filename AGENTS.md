@@ -53,8 +53,8 @@ So a session does one bounded piece of work and hands off:
   all along. Finish the current step, write the handoff (a new file in the plan's `handoffs/`, a knowledge note or
   the investigation's output), commit, and end the session, **even in the middle of a unit**. The next session
   starts fresh from the handoff; with `AGENT_AUTO_CONTINUE=1`, start it yourself with
-  `.methodology/shared/claude/continue.sh <handoff path>` (in this terminal under `chain.sh`, else in the
-  background), then stop.
+  `.methodology/shared/claude/continue.sh <handoff path>` (in this terminal under `chain.sh`, else detached
+  under `dtach`), then stop.
 - **A fresh session starts the same way every time:** read the handoff (only the newest:
   `ls <plan>/handoffs | tail -1`), `git status`, `git log --oneline -5`, run the unit's check command, then work.
 - **Investigations and audits are scoped.** Each one answers a written question into a file. Wide reading

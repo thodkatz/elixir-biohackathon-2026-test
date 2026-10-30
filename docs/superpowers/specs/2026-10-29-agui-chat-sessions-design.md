@@ -223,8 +223,9 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   A run that ends with a terminal event, the stop button's included (clarification 1: it aborts the
   agent's request, and the recorder records `RUN_ERROR` `code: "abort"`), is saved before that event
   reaches the browser, so the fetch after it finds the run, or the `spe.session_save_failed` event has
-  already said it was not saved. Only a run the server sees unsubscribed (the tab closed or reloaded, or
-  the stream dropped on the way) is saved after the client has gone, and so can land after that fetch: after a
+  already said it was not saved. Only a run whose stream to the browser ends early (the connection dropped
+  while the detached run goes on, §2) is saved after the browser's run has ended, and so can land after that
+  fetch: after a
   run ends, until the list shows the open session with an `updated_at` not older than the run's start, the
   page fetches it again, up to 5 times at 500 ms. If it still does not, the error bar says "this session
   could not be saved".
@@ -404,4 +405,4 @@ The same slice rewrites every current text that says the AG-UI chat is not archi
    transform of `@ag-ui/client` 1.0.2 turns the `AbortError` into a `RUN_ERROR` event with `code: "abort"` and
    ends the stream, rather than the client unsubscribing. Unsubscription before a terminal event stays
    `cancelled`. *Reason:* read in `@ag-ui/client` 1.0.2 and pinned by `lib/clone.test.ts`. *Amends:* §2
-   (termination table), decision 4. *Status:* folded.
+   (termination table), decision 4, §3 *Refresh* (which run can be saved after the fetch). *Status:* folded.

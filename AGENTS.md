@@ -222,6 +222,7 @@ uv run --with pytest pytest platform/dev/tests -q    # dataset generator, host p
 (cd platform/agui/pydantic-ai-agent && uv run --group dev pytest -q)   # agent
 (cd platform/promptfoo-evals && uv run --group dev pytest -q)          # promptfoo provider and assertions
 (cd platform/agui/copilotkit-chat && npm ci && npm run build)          # chat UI (type check)
+(cd platform/agui/copilotkit-chat && npm ci && npm test)               # chat UI (sessions, recorder, API)
 cd platform/ansible && ansible-playbook playbooks/create.yml -e @instances/NAME.yml </dev/null
 ```
 

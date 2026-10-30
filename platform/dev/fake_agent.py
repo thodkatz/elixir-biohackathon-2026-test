@@ -4,12 +4,15 @@
 For exercising the chat UI and AG-UI clients without an LLM or a sandbox:
   cd platform/agui/pydantic-ai-agent && uv run --group dev python ../../dev/fake_agent.py --port 18100 --key <test key>
 The model runs one `run_command` per turn and then answers; a message containing
-"fail" makes the model raise, so the run ends in RUN_ERROR. The run log goes to a
+"fail" makes the model raise, so the run ends in RUN_ERROR; a message containing
+"slow" streams its answer in SLOW_STEPS chunks, SLOW_STEP_SECONDS apart (about 10 s),
+for stopping, closing or archiving a run in progress. The run log goes to a
 temporary directory.
 """
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import tempfile
 from pathlib import Path
@@ -24,6 +27,9 @@ from spe_agent.config import Config, Secrets
 from spe_agent.sandbox import SandboxClient
 
 FIXTURE = Path(__file__).resolve().parents[1] / "agui" / "pydantic-ai-agent" / "tests" / "fixtures" / "open-terminal-0.12.4-openapi.json"
+
+SLOW_STEPS = 10
+SLOW_STEP_SECONDS = 1.0
 
 
 def fake_sandbox(request: httpx.Request) -> httpx.Response:
@@ -49,6 +55,10 @@ async def scripted(messages, info):
         raise RuntimeError("scripted model failure (the message asked for it)")
     last = messages[-1].parts[-1]
     if isinstance(last, ToolReturnPart):
+        if "slow" in last_user.lower():
+            for step in range(1, SLOW_STEPS + 1):
+                await asyncio.sleep(SLOW_STEP_SECONDS)
+                yield f"Slow step {step} of {SLOW_STEPS}. "
         for chunk in (f"Turn {len(users)}: ", "the command ran. ", "Its output was:\n\n", str(last.content)):
             yield chunk
     else:

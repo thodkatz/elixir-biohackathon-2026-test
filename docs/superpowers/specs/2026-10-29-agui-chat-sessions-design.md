@@ -1,6 +1,6 @@
 # AG-UI chat sessions — design
 
-**Status:** approved by the user (2026-10-29), PR #7. **Latest clarification:** 1.
+**Status:** approved by the user (2026-10-29), PR #7. **Latest clarification:** 3.
 Read against this repo at `ff3acc3` (`main`, equal to `upstream/main` plus the fork's files and the
 optional token cap of upstream PR #9).
 
@@ -34,7 +34,7 @@ copies every session and the agent's run log into the run directory, rendered li
 | 8 | Tags are normalised (trim, lower-case, `[a-z0-9._-]`, ≤ 32 chars, ≤ 20 per session, de-duplicated) | [Storage](#1-storage-and-the-session-record) | `npm test`: table of inputs → stored tags or 400 |
 | 9 | The sidebar: new chat, title search, tag filter (all selected tags must match), pinned first then date groups, row menu (rename, pin, tags, hide, delete with confirmation), show-hidden toggle; the open session is in the URL (`?session=`) | [Sidebar](#3-the-sidebar) | Playwright run against `fake_agent.py`: each action, then a reload reopens the same session with its tool cards; screenshots in the slice's handoff |
 | 10 | Switching session and New chat are disabled while a run is in progress; after a run ends the list is reconciled until it shows that run | [Sidebar](#3-the-sidebar) | Playwright: during a scripted slow run both controls are disabled; after stop they are enabled, the stopped run is recorded as `cancelled` and a new session's row appears, also with the save delayed by a test hook |
-| 11 | `archive.yml` exports, for `spe_frontend: agui`, every session file (hidden and deleted included) and the agent's `runs.jsonl`, after stopping `chat-ui` and then `agent` so no run is in progress or unsaved; an absent run log is allowed, a missing `chat-ui` container fails the export | [Archive](#4-the-archive) | On the dev VM: `archive.yml` after the Playwright run gives a run directory with one `agui-sessions/<id>.json` per file on the volume and `agent-runs.jsonl`; `archive.yml` during a slow run has that run, `cancelled`, in both; on a fresh instance with zero runs it succeeds with an empty `agui-sessions/`; with `chat-ui` removed, `archive.yml` fails and `destroy.yml` deletes nothing |
+| 11 | `archive.yml` exports, for `spe_frontend: agui`, every session file (hidden and deleted included) and the agent's `runs.jsonl`, after stopping `chat-ui` and then `agent` so no run is in progress or unsaved; an absent run log is allowed, a missing `chat-ui` container fails the export | [Archive](#4-the-archive) | On the dev VM: `archive.yml` after the Playwright run gives a run directory with one `agui-sessions/<id>.json` per file on the volume and `agent-runs.jsonl`; `archive.yml` during a slow run has that run, `cancelled`, in both; on a fresh instance with zero runs it succeeds with an empty `agui-sessions/` and no `agent-runs.jsonl` (the run log's copy fails with `Could not find the file`, which the export accepts); with `chat-ui` removed, `archive.yml` fails and `destroy.yml` deletes nothing |
 | 12 | `write_agui_run.py` renders the bundle in the Open WebUI run layout: `index.md`, `chats/NN-<title>.md` and `.json`, plus the raw files; re-runnable on an archived run; no run log or no sessions is a valid bundle | [Archive](#4-the-archive) | `pytest platform/dev/tests -k agui_run`: a fixture with active, hidden and deleted sessions renders the expected index rows and state, a deleted marker, fenced tool calls; a bundle with no sessions and no run log renders an index saying so; a second run on the output directory gives identical files |
 | 13 | Session files and the archive never hold what comes from the request headers or the chat UI's configuration (the agent key); message content is stored unchanged, not redacted | [Security](#5-security-and-limits) | `npm test`: a run whose request carries `Authorization: Bearer <k1>` and whose runtime is configured with agent key `<k2>`, neither in the messages, leaves neither in the file; `checks.yml`'s key scan extended to the volume as a detector |
 | 14 | Model text is rendered as text in the sidebar and fenced in the archive with a fence longer than any backtick run inside | [Security](#5-security-and-limits) | `npm test`/Playwright: a title of `<img src=x onerror=…>` shows as literal text; pytest: tool results containing a line of three, four and six backticks each render inside a longer fence (`write_run.py` too) |
@@ -251,13 +251,15 @@ becomes "Export the frontend's chats"):
    session was copied would be missing from the archive and then destroyed with the volume. So first
    `docker compose -p spe-frontend stop -t 30 chat-ui`, then `… stop -t 30 agent`. On `SIGTERM` the chat
    UI refuses new runs, stops every run in progress (each is finalised `cancelled`), waits for the session
-   queue to drain and exits (a handler registered in `instrumentation.ts`; the plan's task checks that
-   Next.js's own `SIGTERM` handling leaves it time). The agent, stopped second, has then seen its last
+   queue to drain and exits (a handler registered in `instrumentation.ts`; the image sets
+   `NEXT_MANUAL_SIG_HANDLE=true`, because Next.js's own handler closes the server and exits without
+   waiting for a detached run's save). The agent, stopped second, has then seen its last
    request and closed its run log. A missing `chat-ui` container fails here.
 2. **Copy** from the stopped containers: `docker compose -p spe-frontend cp chat-ui:/data/sessions
    <tmp>/sessions` (always present: the image creates it, §1) and `… cp agent:/var/lib/spe-agent/runs.jsonl
-   <tmp>/agent-runs.jsonl`. Only an absent run log is tolerated (no run reached the agent yet): the task
-   checks for the file first and skips that copy; any other copy error fails the export.
+   <tmp>/agent-runs.jsonl`. Only an absent run log is tolerated (no run reached the agent yet): the copy's own
+   `Could not find the file` error is accepted, since the stopped agent cannot be asked whether the file
+   exists; any other copy error fails the export.
 3. **Restart** both (`docker compose -p spe-frontend start agent chat-ui`), so `archive.yml` run on its
    own leaves a working instance; under `destroy.yml` they are removed right after.
 4. Pack `<tmp>` into `/tmp/spe-agui-export.tar.gz`, fetch it to
@@ -406,3 +408,14 @@ The same slice rewrites every current text that says the AG-UI chat is not archi
    ends the stream, rather than the client unsubscribing. Unsubscription before a terminal event stays
    `cancelled`. *Reason:* read in `@ag-ui/client` 1.0.2 and pinned by `lib/clone.test.ts`. *Amends:* §2
    (termination table), decision 4, §3 *Refresh* (which run can be saved after the fetch). *Status:* folded.
+2. **The chat UI's `SIGTERM` handler replaces Next.js's** (2026-10-30; slice 2/3). The image sets
+   `NEXT_MANUAL_SIG_HANDLE=true` and `lib/shutdown.ts` drains the sessions and exits by itself. *Reason:* Next.js
+   16.4.1's handler (`start-server.js`) closes the HTTP server and calls `process.exit(143)`; a run whose browser has
+   gone holds no response open, so its save would be cut off. *Amends:* §4 *Export*, step 1 (*Barrier*).
+   *Status:* folded.
+3. **An absent run log is recognised by the copy's own error, not by a check before it** (2026-10-30; slice 2/3).
+   The export copies `agent:/var/lib/spe-agent/runs.jsonl` from the stopped agent and accepts only `docker compose
+   cp`'s `Could not find the file` error; any other error fails the export. *Reason:* the agent is stopped by the
+   time of the copy, so nothing can be checked inside it, and a check before stopping it races with its last write
+   (Docker Compose 5.5.1: `cp` copies from a stopped container; a missing file fails with rc 1 and that message).
+   *Amends:* §4 *Export*, step 2; decision 11 (acceptance check). *Status:* folded.

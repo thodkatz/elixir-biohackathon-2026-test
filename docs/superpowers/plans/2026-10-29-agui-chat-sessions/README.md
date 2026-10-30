@@ -7,7 +7,7 @@
 agent's AG-UI stream, kept on a `chat-sessions` volume and exported by `archive.yml` like an Open WebUI run.
 
 **Spec:** [`docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md`](../../specs/2026-10-29-agui-chat-sessions-design.md)
-(decisions 1–15; latest clarification: 1). Each slice file links the sections it implements.
+(decisions 1–15; latest clarification: 3). Each slice file links the sections it implements.
 
 **Architecture.** All new chat-UI logic lives in `platform/agui/copilotkit-chat/lib/` as plain TypeScript that
 `node --test` runs without Next.js: the store (`sessions.ts`), the recorder middleware (`recorder.ts`) and the
@@ -203,9 +203,10 @@ Each is added by the slice that verifies it, with status `folded`, and §2's tex
    Added by slice 1 (folded).
 2. **Next.js's own `SIGTERM` handler exits before the drain**, so the image sets `NEXT_MANUAL_SIG_HANDLE=true`
    and `instrumentation.ts` installs the only handler. §4 *Export*, step 1 (*Barrier*) gains that. Slice 2, task 3.
+   Added by slice 2 (folded).
 3. **An absent run log is recognised from `docker compose cp`'s own error** (`Could not find the file`), not by a
    check before the copy. §4 *Export*, step 2 and decision 11's acceptance check are rewritten to match. Slice 2,
-   task 4.
+   task 4. Added by slice 2 (folded).
 
 ## Handoffs
 

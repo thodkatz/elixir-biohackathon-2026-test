@@ -144,6 +144,13 @@ function checkRecord(value: unknown, id: string): SessionRecord {
   return r;
 }
 
+// Test-only: SPE_SESSIONS_TEST_SAVE_DELAY_MS holds each recorded run's write that long, under the
+// session's queue, so end-to-end checks can make a save land late. Unset in production.
+function testSaveDelay(): Promise<void> {
+  const ms = Number(process.env.SPE_SESSIONS_TEST_SAVE_DELAY_MS) || 0;
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
 export class SessionStore {
   readonly dir: string;
 
@@ -257,6 +264,7 @@ export class SessionStore {
         version: 1, id, title: autoTitle(messages), title_source: "auto", tags: [], pinned: false,
         hidden: false, created_at: run.started_at, updated_at: stamp, deleted_at: null, messages: [], runs: [],
       };
+      await testSaveDelay();
       record.messages = messages;
       record.runs.push(run);
       record.updated_at = stamp;

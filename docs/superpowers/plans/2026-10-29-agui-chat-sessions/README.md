@@ -142,6 +142,8 @@ handler exits before the drain (proposed clarification 2).
 | `ansible/roles/run_archive/tasks/export.yml`, `tasks/write.yml`, `files/write_agui_run.py`, `files/write_run.py` | 2 | agui export and writer; `fence()` |
 | `platform/dev/tests/test_write_agui_run.py` | 2 | writer tests |
 | `platform/dev/e2e/sessions.py` | 2, 3 | Playwright (Python, the only Playwright on the dev VM) run against `fake_agent.py` |
+| `copilotkit-chat/lib/sidebar-view.ts`, `lib/reconcile.ts` (+ tests), `app/session-filters.tsx`, `app/chat-header.tsx`, `app/use-run-reconcile.ts` | 3 | view helpers, reconciliation, filters, header |
+| `platform/dev/fake_agent.py` (`--run-log`), `platform/dev/fake-agent.compose.yml` | 3 | the fake agent on the dev VM for the archive checks, no model calls |
 | `ansible/roles/agui/tasks/checks.yml` | 3 | "Session API answers"; key scan over the volume |
 | docs (§3 and §4 lists) | 2, 3 | each in the slice that changes the behaviour |
 

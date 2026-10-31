@@ -56,7 +56,8 @@ So a session does one bounded piece of work and hands off:
   `.methodology/shared/claude/continue.sh <handoff path>` (in this terminal under `chain.sh`, else detached
   under `dtach`), then stop.
 - **A fresh session starts the same way every time:** read the handoff (only the newest:
-  `ls <plan>/handoffs | tail -1`), `git status`, `git log --oneline -5`, run the unit's check command, then work.
+  `ls <plan>/handoffs | tail -1`), `git status`, `git log --oneline -5`,
+  `.methodology/shared/claude/prune-worktrees.sh` (merged units' worktrees), run the unit's check command, then work.
 - **Investigations and audits are scoped.** Each one answers a written question into a file. Wide reading
   goes to subagents, which return short summaries; a repo-wide audit is a fan-out of scoped subagent tasks
   plus one synthesis session.
@@ -269,8 +270,10 @@ Pick the lightest mode that fits, and move up when the work turns out bigger:
 
 The rules that bite most often:
 
-- **Claim before you work**: the unit's branch pushed to `origin` plus a draft PR. **One PR open at a time per
-  track**, and dependent work waits until that PR has merged.
+- **Claim before you work**: the unit's branch pushed to `origin` plus a draft PR, worked on in its own worktree,
+  `.claude/worktrees/<branch, / as ->` of the main checkout (`.methodology/shared/claude/worktree.sh <branch>`
+  makes it; `git worktree list` shows them all). **One PR open at a time per track**, and dependent work waits
+  until that PR has merged.
 - **One review round, by the reviewer in *Reviewers***: local reviewer subagents, or a CI reviewer and, if it's
   out, the fallbacks there, in order. Address every finding, then **merge it yourself**
   (*Merge*) once every check the forge sheet lists under *Before a merge* passes (and, for a spec, once the

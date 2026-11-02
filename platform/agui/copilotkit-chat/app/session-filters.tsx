@@ -36,7 +36,9 @@ export function SearchBox({ query, knownTags, onChange }: SearchProps) {
         aria-controls={suggestions.length > 0 ? "spe-search-suggestions" : undefined}
         aria-activedescendant={picked >= 0 ? `spe-search-suggestion-${picked}` : undefined}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        // Escape's dismissal is for this focus only: refocusing the box (a click, or Tab back to
+        // it) should show the suggestions again rather than stay dismissed from an earlier visit.
+        onBlur={() => { setFocused(false); setDismissed(false); }}
         onChange={(e) => {
           setDismissed(false);
           onChange(e.target.value);

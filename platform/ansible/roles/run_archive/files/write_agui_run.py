@@ -91,14 +91,16 @@ def render_messages(messages):
     """User and assistant text; each tool call with its arguments and result, fenced."""
     results = {m.get("toolCallId"): m for m in messages
                if isinstance(m, dict) and m.get("role") == "tool"}
-    shown = set()
+    # A result is shown at its call, wherever the call is; only one with no call stands alone.
+    call_ids = {call.get("id") for m in messages if isinstance(m, dict)
+                for call in m.get("toolCalls") or [] if isinstance(call, dict)}
     out = []
     for m in messages:
         if not isinstance(m, dict):
             continue
         role = m.get("role", "?")
         if role == "tool":
-            if m.get("toolCallId") in shown:
+            if m.get("toolCallId") in call_ids:
                 continue
             out += ["## tool result (no matching call)", "", fence(text_of(m.get("content"))), ""]
             continue
@@ -113,7 +115,6 @@ def render_messages(messages):
                         fence(pretty_args(fn.get("arguments")), "json"), ""]
                 result = results.get(call.get("id"))
                 if result is not None:
-                    shown.add(call.get("id"))
                     label = "Tool error" if result.get("error") else "Tool result"
                     body = text_of(result.get("content"))
                     if result.get("error"):
@@ -202,6 +203,9 @@ def main(argv):
         shutil.copyfile(log_src, log_dst)
 
     records, unreadable = load_sessions(raw_dir)
+    chats_dir = os.path.join(run_dir, "chats")
+    if os.path.isdir(chats_dir) and not same(src, chats_dir):
+        shutil.rmtree(chats_dir)  # a re-render leaves no chat of a session that is gone
     rows = []
     for i, (name, rec) in enumerate(records, 1):
         stem = f"{i:02d}-{slug(title_of(rec))}"

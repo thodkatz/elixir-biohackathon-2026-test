@@ -86,14 +86,20 @@
             argv: "{{ agui_compose + ['start', 'agent', 'chat-ui'] }}"
           changed_when: true
 
+    - name: Archive directory on the VM
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: spe-agui-archive-
+      register: agui_archive_dir
+
     - name: Pack the bundle
       ansible.builtin.command:
-        argv: [tar, -czf, /tmp/spe-agui-export.tar.gz, -C, "{{ agui_export_dir.path }}", .]
+        argv: [tar, -czf, "{{ agui_archive_dir.path }}/spe-agui-export.tar.gz", -C, "{{ agui_export_dir.path }}", .]
       changed_when: true
 
     - name: Fetch the bundle
       ansible.builtin.fetch:
-        src: /tmp/spe-agui-export.tar.gz
+        src: "{{ agui_archive_dir.path }}/spe-agui-export.tar.gz"
         dest: "{{ spe_output_dir }}/archive-bundle-agui.tar.gz"
         flat: true
 
@@ -101,4 +107,4 @@
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
-      loop: ["{{ agui_export_dir.path }}", /tmp/spe-agui-export.tar.gz]
+      loop: ["{{ agui_export_dir.path }}", "{{ agui_archive_dir.path }}"]

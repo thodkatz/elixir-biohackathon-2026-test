@@ -407,9 +407,9 @@ def check_close_tab(r: Run, ids: dict[str, str]) -> None:
 
     Uses the hidden session, so the three sessions above keep their state and the first one its two runs.
     """
-    # Not `r.page.context.new_page()`: Python Playwright's sync API refuses a second page on a
-    # context created by `browser.new_page()` ("Please use browser.new_context()"); a fresh
-    # context gives an independent tab just as well here (docs/knowledge/playwright-new-page.md).
+    # Not `r.page.context.new_page()`: Playwright's sync API refuses new_page() on a context
+    # made by `browser.new_page()` ("Please use browser.new_context()"); a fresh context gives
+    # an independent tab just as well here.
     page = r.page.context.browser.new_context().new_page()
     page.goto(f"{BASE}/?session={ids['second']}")
     expect(page.get_by_text("Turn 1: the command ran.")).to_be_visible(timeout=10_000)

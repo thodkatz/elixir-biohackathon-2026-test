@@ -181,7 +181,7 @@ Routes under `app/api/sessions/`, beside `/api/copilotkit`:
 
 | Call | Answer |
 |---|---|
-| `GET /api/sessions` | `200`, a JSON list of metadata (`id`, `title`, `tags`, `pinned`, `hidden`, `created_at`, `updated_at`), deleted sessions left out, hidden ones included, newest `updated_at` first, at most 1000 |
+| `GET /api/sessions` | `200`, a JSON list of metadata (`id`, `title`, `tags`, `pinned`, `hidden`, `created_at`, `updated_at`, and `last_run_at`: the last run's `ended_at`, `null` before the first), deleted sessions left out, hidden ones included, newest `updated_at` first, at most 1000 |
 | `GET /api/sessions/{id}` | `200` with the full record minus `deleted_at` and `runs`; `404` if missing or deleted |
 | `PATCH /api/sessions/{id}` | body: any of `title`, `tags`, `pinned`, `hidden`; `200` with the new metadata; `400` for an unknown key, a wrong type or an invalid value (nothing changed); `404` if missing or deleted |
 | `DELETE /api/sessions/{id}` | sets `deleted_at`; `204`; `404` if missing or already deleted |
@@ -240,7 +240,7 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   already said it was not saved. Only a run whose stream to the browser ends early (the connection dropped
   while the detached run goes on, §2) is saved after the browser's run has ended, and so can land after that
   fetch: after a
-  run ends, until the list shows the open session with an `updated_at` not older than the run's start, the
+  run ends, until the list shows the open session with a `last_run_at` not older than the run's start, the
   page fetches it again, up to 5 times at 500 ms. If it still does not, the error bar says "this session
   could not be saved".
 - **Errors:** a failed API call shows in the existing error bar; the open chat is never cleared. A run
@@ -469,3 +469,8 @@ The same slice rewrites every current text that says the AG-UI chat is not archi
    lack the last run before `destroy.yml` drops the volume (§4: any failed step fails `archive.yml`). A service
    already stopped before the barrier keeps an old exit code, so it is not checked. *Amends:* §4 *Export*, step 1.
    *Status:* folded.
+6. **The list reconciles a run by `last_run_at`, not `updated_at`** (2026-11-02; `change/agui-chat-minors`). Each
+   list entry carries `last_run_at`, the session's last run's `ended_at`, and the page's reconciliation waits for
+   that instead of `updated_at`. *Reason:* a rename, pin, tag or hide made while a run is in progress also moves
+   `updated_at`, so a dropped stream plus a failed save could pass as saved (`BACKLOG.md`, from PR #11's local
+   review). *Amends:* §2 *Session API* (`GET /api/sessions`), §3 *Refresh*. *Status:* folded.

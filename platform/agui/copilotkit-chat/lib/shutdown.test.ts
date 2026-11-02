@@ -18,7 +18,9 @@ test("shutdown sets closing, cancels every run and exits 0 once the finalising w
     const handle: RunHandle = {
       cancel: () => {
         cancelled.push(id);
-        // As the recorder does: the cancelled run's write is queued, then the id leaves the running set.
+        // Unlike the recorder, which removes the id from the running set synchronously right
+        // after queuing the write: this stub removes it only once the write's promise settles,
+        // so the test still exercises shutdown() waiting on a write that outlives cancel().
         const write = later(30, undefined).then(() => {
           s.running.delete(id);
           if (s.queue.get(id) === write) s.queue.delete(id);

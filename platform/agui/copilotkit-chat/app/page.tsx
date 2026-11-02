@@ -107,9 +107,13 @@ function Chat() {
   const requestRef = useRef(0);
   const { agent, isReady } = useAgent({ agentId: "spe" });
   useDefaultRenderTool({ render: (props) => <ToolCard {...props} /> });
-  // One owner of "has React hydrated yet": passed down to every button that starts an action from
-  // the sidebar and header, so a click before handlers attach is disabled rather than dropped.
-  const ready = useHydrated();
+  // One owner of "safe to click": passed down to every button that starts an action from the
+  // sidebar and header, so a click before hydration is disabled rather than dropped. Hydration
+  // alone is not enough: the first-load effect below (startNew()/open(), gated on `isReady`) must
+  // also have run, or an early New chat/row-open call sets `active` itself and mounts the chat
+  // before the agent is ready to run anything, the same way a click that lands between hydration
+  // and `isReady` would, just without a dropped click to show for it.
+  const ready = useHydrated() && isReady;
 
   // After each run (finished, failed or stopped) the list, fetched until it shows that run; once the
   // open session is in it (its first run recorded), the URL names it.

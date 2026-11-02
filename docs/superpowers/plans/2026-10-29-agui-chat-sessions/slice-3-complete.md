@@ -1191,6 +1191,7 @@ export function ChatHeader({ session, knownTags, running, onPatch, onDelete, onE
   }
 
   const toggleMenu = (e: MouseEvent) => {
+    if (open?.mode === "rename") return; // `⋯` is aria-disabled while renaming
     if (open?.mode === "menu" || open?.mode === "tags") end();
     else setOpen({ mode: "menu", keyboard: e.detail === 0 });
   };
@@ -1240,7 +1241,10 @@ export function ChatHeader({ session, knownTags, running, onPatch, onDelete, onE
         aria-label="Chat actions"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        disabled={open?.mode === "rename"}
+        // Not `disabled`: a disabled button cannot take the focus that ending a rename returns to it
+        // (React applies `setOpen(null)` after the handler's `focus()`), as slice 2's rows do.
+        aria-disabled={open?.mode === "rename" || undefined}
+        tabIndex={open?.mode === "rename" ? -1 : undefined}
         onClick={toggleMenu}
       ><Ellipsis /></button>
 
@@ -1499,7 +1503,7 @@ only, light and dark; slice 2's `.spe-header` and `.spe-header-title` rules stay
 
 ```diff
 diff --git a/platform/agui/copilotkit-chat/app/globals.css b/platform/agui/copilotkit-chat/app/globals.css
-index fb266e3..a488092 100644
+index fb266e3..ad8a85b 100644
 --- a/platform/agui/copilotkit-chat/app/globals.css
 +++ b/platform/agui/copilotkit-chat/app/globals.css
 @@ -159,7 +159,7 @@ body {
@@ -1511,7 +1515,7 @@ index fb266e3..a488092 100644
    outline: 2px solid var(--focus-ring); outline-offset: 2px;
  }
  
-@@ -172,6 +172,16 @@ body {
+@@ -172,6 +172,17 @@ body {
    background: linear-gradient(var(--bg), transparent); pointer-events: none; }
  .spe-header-title { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
    font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text-secondary); }
@@ -1525,10 +1529,11 @@ index fb266e3..a488092 100644
 +.spe-header-rename:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--focus-ring); }
 +.spe-header-menu .spe-icon { width: 18px; height: 18px; }
 +.spe-header-menu[aria-expanded="true"] { background: var(--hover); color: var(--text); }
++.spe-header-menu[aria-disabled="true"] { opacity: 0.4; cursor: default; background: none; } /* while renaming */
  
  .spe-chat { flex: 1; min-height: 0; }
  .spe-loading { padding: 16px 20px; color: var(--text-muted); font-size: 13px; }
-@@ -266,6 +276,12 @@ body {
+@@ -266,6 +277,12 @@ body {
    color: var(--text-muted); cursor: pointer; }
  .spe-hidden-toggle input { margin: 0; accent-color: var(--button-strong-bg); }
  

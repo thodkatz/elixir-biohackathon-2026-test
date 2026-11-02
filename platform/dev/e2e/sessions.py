@@ -688,8 +688,8 @@ def two_turn(r: Run) -> None:
     """The paid check: two turns with the instance's real model; both runs recorded completed."""
     page = r.page
     page.goto(BASE + "/")
-    # Hydration wait (note 6, docs/knowledge/agui-chat-sessions.md): a click or keypress right after
-    # goto() can land before React attaches its handlers and do nothing.
+    # Hydration wait: a click or keypress right after goto() can land before React attaches its
+    # handlers and do nothing (as in check_stop).
     expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)
     page.get_by_role("button", name="New chat").click()
     first = "Run pwd and tell me the result in one sentence."

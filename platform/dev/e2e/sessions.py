@@ -591,8 +591,14 @@ def check_header(r: Run, ids: dict[str, str]) -> None:
 def check_stop(r: Run) -> str:
     """A slow run (fake agent: "slow" in the message) stopped from the chat: controls disabled during
     it, enabled after; the row appears, also with the save delayed (the recorder saves before the
-    stop's RUN_ERROR reaches the browser); the file ends with a `cancelled` run. Returns the session id."""
+    stop's RUN_ERROR reaches the browser); the file ends with a `cancelled` run. Returns the session id.
+
+    Called right after a `page.goto()` by two of its three callers (the standalone `stop` scenario,
+    local and against an instance): the hydration wait below covers them; the third (the "all"
+    scenario) already has it from an earlier check on the same page, so it costs nothing extra there.
+    """
     page = r.page
+    expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)
     title = f"slow run to stop {uuid.uuid4().hex[:8]}"
     page.get_by_role("button", name="New chat").click()
     box = page.get_by_test_id("copilot-chat-textarea")
@@ -602,11 +608,9 @@ def check_stop(r: Run) -> str:
     for button in page.locator(".spe-row-open").all():
         expect(button).to_be_disabled()
     r.shot("during-run")
-    # The client disables New chat (onRunInitialized) as soon as it starts the run, before the
-    # server has admitted it; stopping that early races the server's own admission and lands as a
-    # plain stream error ("failed") instead of the coded abort ("cancelled"). A quarter-second
-    # margin, measured empirically, is reliably past that window.
-    page.wait_for_timeout(250)
+    # A stop clicked here, however soon, is now always recorded cancelled: lib/recorder.ts's
+    # isAbort() covers both an abort after the agent's response headers (RUN_ERROR code "abort") and
+    # one before them (a raw AbortError) — see spec clarification 1. No wait needed before this click.
     page.get_by_test_id("copilot-send-button").click()  # the stop button while a run is in progress
     expect(page.get_by_role("button", name="New chat")).to_be_enabled(timeout=15_000)
     for button in page.locator(".spe-row-open").all():
@@ -784,12 +788,7 @@ def main() -> None:
                 check_save_failed(r)
             else:
                 page.goto(BASE + "/")
-                # Give the client time to hydrate before the first click: fresh from `goto`, a
-                # click on New chat can land before its handler is attached, so the message typed
-                # right after goes nowhere. check_stop's own callers (the "all" scenario) never hit
-                # this: their page is already hydrated from an earlier check on the same page.
-                expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)
-                check_stop(r)
+                check_stop(r)  # its own hydration wait covers the fresh `goto` above
             browser.close()
         print(f"sessions: {data}")
     finally:

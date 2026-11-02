@@ -87,25 +87,31 @@ reuses is already hydrated from an earlier `expect(...)` on the same page, so th
 
 **Fix.** Before the first interaction on a freshly loaded page, wait for something that only exists once
 hydrated and interactive, e.g. `expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)`.
-`sessions.py`'s `main()` does this before calling `check_stop` standalone (`--scenario stop`).
+`check_stop` itself does this now, first thing, since two of its three callers go straight from `page.goto()`
+into it.
 
-## 7. Stopping a run too soon after it shows as running records it `failed`, not `cancelled`
+## 7. A stop clicked very soon after a run starts used to record it `failed`, not `cancelled`
 
-**Symptom.** `check_stop`'s flow (type a "slow" message, wait for *New chat* to disable, click the composer's
-stop button) occasionally (roughly 1 run in 4–6, worse on a cold server) ends with the session's last run
-`status: "failed"` instead of `"cancelled"`, with `started_at`/`ended_at` only ~50 ms apart — far too short for
-the fake agent's first streamed chunk (1 s in).
+**Symptom (now fixed at the source, kept here for how it was found).** `check_stop`'s flow (type a "slow"
+message, wait for *New chat* to disable, click the composer's stop button) occasionally (roughly 1 run in
+4–6, worse on a cold server) ended with the session's last run `status: "failed"` instead of `"cancelled"`,
+with `started_at`/`ended_at` only ~50 ms apart — far too short for the fake agent's first streamed chunk
+(1 s in).
 
-**Cause.** The sidebar's *New chat* disables as soon as the client locally starts the run
-(`onRunInitialized`), which can fire before the request has actually reached the server's admission
-(`lib/recorder.ts`'s `withSession`/admission wrapper). `HttpAgent.abortRun()` only maps to the recorder's
-`cancelled` status when the server has gotten far enough to start its own request and set up its abort
-controller; an abort that races ahead of that lands as a plain dropped-connection error, which the recorder
-records as `failed` (the same path as "a stream error (connection lost): failed" in `recorder.test.ts`).
-Confirmed empirically: inserting any delay before the stop click (even an incidental one, like
-`r.shot("during-run")` writing a screenshot file) made the race disappear; waiting for the outgoing
-`POST .../agent/spe/run` request to be *issued* (`page.expect_request`) was not enough — the race is about
-server-side admission, not the client sending the request.
+**Cause.** `@ag-ui/client` 1.0.2 only turns an aborted fetch into `RUN_ERROR{code:"abort"}` inside its SSE
+parser, which subscribes once the agent's response HEADERS frame has arrived. A stop clicked before that —
+and the sidebar's *New chat* disables as soon as the client locally starts the run (`onRunInitialized`),
+well before the agent's response headers can arrive — reaches `lib/recorder.ts`'s stream `error:` callback
+as a raw `AbortError` instead of a `RUN_ERROR` event, and that callback always recorded `"failed"`. Not,
+as first suspected, a race with the recorder's own admission: waiting for the outgoing
+`POST .../agent/spe/run` request to be *issued* (`page.expect_request`) did not help, because the request
+being sent is not the same as its response headers having arrived. Any incidental delay before the stop
+click (even `r.shot("during-run")` writing a screenshot) happened to move it past the delay-free test
+agent's near-instant headers, hiding the bug rather than fixing it.
 
-**Fix.** `check_stop` waits `page.wait_for_timeout(250)` between confirming *New chat* is disabled and
-clicking the stop button — enough margin in testing (0/14 failures) where the bare click flaked.
+**Fix.** `lib/recorder.ts`'s stream `error:` handler now checks `error.name === "AbortError"` and records
+`cancelled` for that case, same as the post-headers `RUN_ERROR{code:"abort"}` path (spec clarification 1,
+`docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md`). `lib/recorder.test.ts` pins it with
+`lib/test-agent.ts`'s new `headerDelayMs`, which holds the test agent's response headers back so the test
+can abort before them reliably. `check_stop` needs no wait any more: 20/20 standalone `--scenario stop`
+runs passed without one.

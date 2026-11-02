@@ -7,11 +7,15 @@
 // or another row's menu ends it. The close and focus rules follow Open WebUI's sidebar: the menu
 // closes on a press outside it, Escape or a choice, and gives focus back to its ⋯; a rename is saved
 // by Enter or a press outside the row and cancelled by Escape; a tag typed but not added is dropped.
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent, ReactNode, RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, MouseEvent } from "react";
 import { removeSession, renamePatch, tagSuggestions, updateSession, withTag, withoutTag } from "../lib/client.ts";
-import { menuIndex, popoverPosition } from "../lib/menu.ts";
+import { menuIndex } from "../lib/menu.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
+import { DeleteDialog } from "./delete-dialog";
+import { composing } from "./keys.ts";
+import { Popover } from "./popover";
+import { TagEditor } from "./tag-editor";
 
 type SidebarProps = {
   sessions: SessionMeta[];
@@ -34,8 +38,6 @@ type Busy =
 
 const errorText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 
-// IME composition (e.g. a CJK input method) uses Enter and Escape itself.
-const composing = (e: KeyboardEvent) => e.nativeEvent.isComposing || e.keyCode === 229;
 
 export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChanged, onDeleted, onError }: SidebarProps) {
   const [busy, setBusy] = useState<Busy | null>(null);
@@ -258,42 +260,6 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   );
 }
 
-// Floats over the list (fixed, so it never moves the rows), under its anchor or above it when it
-// would leave the viewport; follows the anchor on scroll and resize.
-function Popover({ anchor, box, children }:
-  { anchor: HTMLElement | undefined; box: RefObject<HTMLDivElement | null>; children: ReactNode }) {
-  const [place, setPlace] = useState<{ top: number; left: number; above: boolean } | null>(null);
-  useLayoutEffect(() => {
-    const el = box.current;
-    if (!el || !anchor) return;
-    const update = () => {
-      const next = popoverPosition(anchor.getBoundingClientRect(), { width: el.offsetWidth, height: el.offsetHeight },
-        { width: window.innerWidth, height: window.innerHeight });
-      setPlace((p) => (p && p.top === next.top && p.left === next.left && p.above === next.above ? p : next));
-    };
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
-    };
-  }, [anchor, box]);
-  // Unmeasured: transparent, not hidden, so its first item can take focus before it is placed.
-  return (
-    <div
-      ref={box}
-      className={place?.above ? "spe-popover spe-popover-above" : "spe-popover"}
-      style={place ? { top: place.top, left: place.left } : { top: 0, left: 0, opacity: 0 }}
-    >
-      {children}
-    </div>
-  );
-}
-
 type RowMenuProps = {
   session: SessionMeta;
   keyboard: boolean;
@@ -353,103 +319,5 @@ function RenameInput({ value, onChange, onSave, onCancel }:
         if (e.key === "Escape") { e.preventDefault(); onCancel(); }
       }}
     />
-  );
-}
-
-type TagEditorProps = {
-  tags: string[];
-  draft: string;
-  suggestions: string[];
-  error: string | null;
-  onDraft: (text: string) => void;
-  onAdd: (text: string) => void;
-  onRemove: (tag: string) => void;
-};
-
-// Open WebUI's tag editor: the tags as pills, each removed by its ×, and an input whose suggestions
-// are the tags in use. Enter adds the suggestion picked with the arrow keys, else the typed text; a
-// click on a suggestion adds it; leaving the editor adds nothing.
-function TagEditor({ tags, draft, suggestions, error, onDraft, onAdd, onRemove }: TagEditorProps) {
-  const input = useRef<HTMLInputElement>(null);
-  const [picked, setPicked] = useState(-1);
-  useEffect(() => input.current?.focus(), []);
-  useEffect(() => setPicked(-1), [draft, suggestions.length]);
-  return (
-    <div className="spe-tag-editor" role="group" aria-label="Tags">
-      {tags.length > 0 && (
-        <div className="spe-tag-list">
-          {tags.map((t) => (
-            <span key={t} className="spe-chip">
-              {t}
-              <button type="button" aria-label={`Remove tag ${t}`} onClick={() => onRemove(t)}>×</button>
-            </span>
-          ))}
-        </div>
-      )}
-      <input
-        ref={input}
-        className="spe-tag-input"
-        aria-label="Add a tag"
-        placeholder="Add a tag…"
-        maxLength={32}
-        value={draft}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? "spe-tag-error" : undefined}
-        aria-activedescendant={picked >= 0 ? `spe-tag-suggestion-${picked}` : undefined}
-        onChange={(e) => onDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (composing(e)) return;
-          if (e.key === "Enter") {
-            e.preventDefault();
-            onAdd(suggestions[picked] ?? draft);
-          } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && suggestions.length > 0) {
-            e.preventDefault();
-            setPicked((i) => menuIndex(e.key, i, suggestions.length) ?? -1);
-          }
-        }}
-      />
-      {suggestions.length > 0 && (
-        <ul className="spe-tag-suggestions" role="listbox" aria-label="Tags in use">
-          {suggestions.map((t, i) => (
-            // mousedown, and its default prevented: the input keeps focus.
-            <li key={t} id={`spe-tag-suggestion-${i}`} role="option" aria-selected={i === picked}
-              className={i === picked ? "spe-tag-suggestion-picked" : undefined}
-              onMouseDown={(e) => { e.preventDefault(); onAdd(t); }}>{t}</li>
-          ))}
-        </ul>
-      )}
-      {error && <p className="spe-tag-error" id="spe-tag-error">{error}</p>}
-    </div>
-  );
-}
-
-// Modal: focus starts on Cancel and stays inside; Escape or the backdrop cancels.
-function DeleteDialog({ onCancel, onDelete }: { onCancel: () => void; onDelete: () => void }) {
-  const dialog = useRef<HTMLDivElement>(null);
-  const cancel = useRef<HTMLButtonElement>(null);
-  useEffect(() => cancel.current?.focus(), []);
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      onCancel();
-    } else if (e.key === "Tab") {
-      const buttons = [...(dialog.current?.querySelectorAll<HTMLElement>("button") ?? [])];
-      const at = buttons.indexOf(document.activeElement as HTMLElement);
-      e.preventDefault();
-      buttons[(at + (e.shiftKey ? buttons.length - 1 : 1)) % buttons.length]?.focus();
-    }
-  };
-  return (
-    <div className="spe-dialog-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="spe-dialog" role="alertdialog" aria-modal="true" aria-labelledby="spe-delete-title"
-        aria-describedby="spe-delete-text" ref={dialog} onKeyDown={onKeyDown}>
-        <h2 id="spe-delete-title">Delete chat?</h2>
-        <p id="spe-delete-text">This removes it from your list. It is kept in the run archive.</p>
-        <div className="spe-dialog-actions">
-          <button type="button" ref={cancel} onClick={onCancel}>Cancel</button>
-          <button type="button" className="spe-danger" onClick={onDelete}>Delete</button>
-        </div>
-      </div>
-    </div>
   );
 }

@@ -155,8 +155,9 @@ For each run:
    | Termination | `status` |
    |---|---|
    | `RUN_FINISHED` | `completed` |
-   | `RUN_ERROR` with `code: "abort"` (the stop button: the runner's `stop` aborts the agent's request) | `cancelled` |
-   | any other `RUN_ERROR`, or the stream errors (including an HTTP error from the agent before any event) | `failed` |
+   | `RUN_ERROR` with `code: "abort"` (the stop button, once the agent's response headers have arrived) | `cancelled` |
+   | the stream errors with a raw `AbortError` (the stop button, before the agent's response headers arrive: clarification 1) | `cancelled` |
+   | any other `RUN_ERROR`, or the stream errors with any other error (including an HTTP error from the agent before any event) | `failed` |
    | the stream completes without a terminal event | `failed` |
    | unsubscribed before a terminal event | `cancelled` |
 
@@ -416,12 +417,26 @@ The same slice rewrites every current text that says the AG-UI chat is not archi
 
 ## Clarifications
 
-1. **The stop button arrives as `RUN_ERROR` with `code: "abort"` and is recorded `cancelled`** (2026-10-30;
-   slice 1/3). The runner's `stop` calls `HttpAgent.abortRun()`, which aborts the agent's request; the HTTP
-   transform of `@ag-ui/client` 1.0.2 turns the `AbortError` into a `RUN_ERROR` event with `code: "abort"` and
-   ends the stream, rather than the client unsubscribing. Unsubscription before a terminal event stays
-   `cancelled`. *Reason:* read in `@ag-ui/client` 1.0.2 and pinned by `lib/clone.test.ts`. *Amends:* §2
-   (termination table), decision 4, §3 *Refresh* (which run can be saved after the fetch). *Status:* folded.
+1. **The stop button arrives as `RUN_ERROR` with `code: "abort"`, or a raw `AbortError` before the agent's
+   response headers, and either way is recorded `cancelled`** (2026-10-30, amended 2026-11-02; slice 1/3,
+   then slice 3/3's header task). The runner's `stop` calls `HttpAgent.abortRun()`, which aborts the agent's
+   request. `@ag-ui/client` 1.0.2's HTTP transform converts the resulting `AbortError` into a `RUN_ERROR`
+   event with `code: "abort"` only inside its SSE parser, which subscribes once the HEADERS frame has
+   arrived (read from the package's minified bundle, `dist/index.mjs`: the outer byte-stream subscription's
+   own `error:` handler passes anything through unconverted until a HEADERS frame has been seen); a stop
+   clicked earlier — during admission, or after the request was sent but before the agent's response headers
+   arrive — surfaces instead as the fetch's own raw `AbortError`, reaching the recorder's stream through its
+   `error:` callback (never as a `RUN_ERROR` next() event). `lib/recorder.ts`'s `isAbort()` tells this apart
+   from an actual failure (a dropped connection, a malformed frame) by `error.name === "AbortError"`, the one
+   name the Fetch/DOM spec gives this case and nothing else in the chain produces; the Fetch/DOM spec gives a
+   *timeout* its own different name (`TimeoutError`, from `AbortSignal.timeout()`), and neither
+   `@ag-ui/client` 1.0.2 nor this project's fetch calls use one, so there is no name clash to confuse a stop
+   with. Unsubscription before a terminal event stays `cancelled`, as before. *Reason:* read in
+   `@ag-ui/client` 1.0.2 and pinned by `lib/clone.test.ts` (post-headers) and `lib/recorder.test.ts`
+   (pre-headers, with `lib/test-agent.ts`'s `headerDelayMs`); the pre-headers gap was found by
+   `platform/dev/e2e/sessions.py`'s `check_stop` recording `failed` on a stop clicked very soon after the
+   sidebar showed the run as started. *Amends:* §2 (termination table), decision 4, §3 *Refresh* (which run
+   can be saved after the fetch). *Status:* folded.
 2. **The chat UI's `SIGTERM` handler replaces Next.js's** (2026-10-30; slice 2/3). The image sets
    `NEXT_MANUAL_SIG_HANDLE=true` and `lib/shutdown.ts` drains the sessions and exits by itself. *Reason:* Next.js
    16.4.1's handler (`start-server.js`) closes the HTTP server and calls `process.exit(143)`; a run whose browser has

@@ -77,3 +77,11 @@ export function withTag(tags: string[], input: string): MetaPatch | null {
 export function withoutTag(tags: string[], tag: string): MetaPatch {
   return { tags: tags.filter((t) => t !== tag) };
 }
+
+// The tag editor's suggestions for what is typed: tags in use (`known`) that contain it, ignoring case,
+// leaving out those the session already has; at most `max` (Open WebUI shows 8).
+export function tagSuggestions(known: string[], current: string[], input: string, max = 8): string[] {
+  const typed = input.trim().toLowerCase();
+  if (!typed) return [];
+  return known.filter((t) => !current.includes(t) && t.toLowerCase().includes(typed)).slice(0, max);
+}

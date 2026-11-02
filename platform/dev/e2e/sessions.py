@@ -5,8 +5,8 @@
 
 Run `npm ci && npm run build` in platform/agui/copilotkit-chat first. The script starts
 platform/dev/fake_agent.py (with uv, in platform/agui/pydantic-ai-agent) and the standalone chat UI
-with its own sessions directory, walks the sidebar (list, open, New chat, ?session=, row menu) and
-checks the session files after each step. It ends with three sessions: one tagged and pinned, one hidden, one
+with its own sessions directory, walks the sidebar (list, open, New chat, ?session=, the row menu's
+close and focus rules, the row menu) and checks the session files after each step. It ends with three sessions: one tagged and pinned, one hidden, one
 deleted, and checks that a run whose tab is closed is still saved whole. Needs Python Playwright with Chromium
 (`pip install playwright` and `playwright install chromium`). Exits nonzero on the first failed check.
 """
@@ -154,6 +154,171 @@ def check_list(r: Run) -> dict[str, str]:
     return {"first": first, "second": second, "third": third}
 
 
+def focused_label(page: Page) -> str | None:
+    return page.evaluate("document.activeElement && document.activeElement.getAttribute('aria-label')")
+
+
+def focused_text(page: Page) -> str:
+    return page.evaluate("document.activeElement ? document.activeElement.textContent : ''")
+
+
+def check_focus(r: Run, ids: dict[str, str]) -> None:
+    """The row menu closes, saves and gives focus back as Open WebUI's does. Leaves the sessions as it found them."""
+    page = r.page
+    a, b = "List the home directory", "Read the dataset"
+    page.goto(f"{BASE}/?session={ids['first']}")
+    expect(page.get_by_text("Turn 2: the command ran.")).to_be_visible(timeout=10_000)
+    menus = page.locator(".spe-menu")
+
+    before = r.row(b).bounding_box()
+    r.row(a).locator(".spe-row-menu").click()
+    expect(menus).to_have_count(1)
+    assert r.row(b).bounding_box() == before, "the popover moved the rows"
+    page.locator(".spe-note").click()
+    expect(menus).to_have_count(0)
+    r.ok("menu: floats over the list; a click on empty sidebar space closes it")
+
+    r.row(a).locator(".spe-row-menu").click()
+    page.keyboard.press("Escape")
+    expect(menus).to_have_count(0)
+    assert focused_label(page) == f"Menu for {a}", focused_label(page)
+    r.ok("menu: Escape closes it and focus is back on its ⋯")
+
+    # The popover covers the rows under its ⋯, so the second ⋯ is the top row's, with the bottom row's menu open.
+    top, bottom = r.rows().first, r.rows().last
+    top_title = top.locator(".spe-row-title").inner_text()
+    bottom.locator(".spe-row-menu").click()
+    top.locator(".spe-row-menu").click()
+    expect(menus).to_have_count(1)
+    expect(menus).to_have_attribute("aria-label", f"Menu for {top_title}")
+    page.get_by_role("button", name="New chat").click()
+    expect(menus).to_have_count(0)
+    r.row(a).locator(".spe-row-menu").click()
+    page.get_by_role("button", name="Hide sessions").click()
+    page.get_by_role("button", name="Show sessions").click()
+    expect(menus).to_have_count(0)
+    r.ok("menu: another row's ⋯ leaves exactly one menu, that row's; New chat and collapsing close it")
+
+    r.row(a).locator(".spe-row-menu").click()
+    page.keyboard.press("ArrowDown")
+    assert focused_text(page) == "Rename", focused_text(page)
+    page.keyboard.press("ArrowDown")
+    assert focused_text(page) == "Pin", focused_text(page)
+    page.keyboard.press("End")
+    assert focused_text(page) == "Delete", focused_text(page)
+    page.keyboard.press("ArrowDown")
+    assert focused_text(page) == "Rename", focused_text(page)
+    page.keyboard.press("ArrowUp")
+    assert focused_text(page) == "Delete", focused_text(page)
+    page.keyboard.press("Home")
+    assert focused_text(page) == "Rename", focused_text(page)
+    texts = [t.strip() for t in menus.locator('[role="menuitem"]').all_text_contents()]
+    assert texts == ["Rename", "Pin", "Tags", "Hide", "Delete"], texts
+    expect(menus.locator('[role="separator"]')).to_have_count(1)
+    page.keyboard.press("Escape")
+    page.keyboard.press("Enter")  # the ⋯ has focus: opened from the keyboard, the first item takes it
+    expect(menus).to_have_count(1)
+    assert focused_text(page) == "Rename", focused_text(page)
+    page.keyboard.press("Escape")
+    r.ok("menu: Rename, Pin, Tags, Hide, separator, Delete; arrows, Home and End move focus; from the keyboard the first item has it")
+
+    height = r.row(b).bounding_box()["height"]
+    r.menu(b, "Rename")
+    title = page.get_by_label("Session title")
+    expect(title).to_be_focused()
+    assert page.evaluate("(() => { const i = document.activeElement; return i.value.slice(i.selectionStart, i.selectionEnd); })()") == b
+    assert page.locator(".spe-row-renaming").bounding_box()["height"] == height, "the rename changed the row's height"
+    title.fill("Discarded title")
+    title.press("Escape")
+    expect(page.locator(".spe-rename")).to_have_count(0)
+    assert focused_label(page) == f"Menu for {b}", focused_label(page)
+    assert r.files()[ids["second"]]["title"] == b
+    r.ok("rename: in place, focused, text selected, same height; Escape cancels and focus is back on the ⋯")
+
+    r.menu(b, "Rename")
+    page.locator(".spe-row-renaming .spe-row-menu").click(force=True)  # inert while renaming
+    expect(page.locator(".spe-rename")).to_have_count(1)
+    expect(menus).to_have_count(0)
+    page.get_by_label("Session title").fill(f"{b} (renamed)")
+    r.row(a).locator(".spe-row-open").click()
+    page.wait_for_url(f"**session={ids['first']}**")
+    expect(page.locator(".spe-rename")).to_have_count(0)
+    expect(r.row(f"{b} (renamed)")).to_have_count(1, timeout=5_000)
+    page.reload()
+    expect(r.row(f"{b} (renamed)")).to_have_count(1, timeout=10_000)
+    assert r.files()[ids["second"]]["title"] == f"{b} (renamed)"
+    r.ok("rename: the ⋯ is inert; a click on another row saves the title (a reload shows it) and opens that row")
+
+    r.row(b).locator(".spe-row-open").dblclick()
+    expect(page.get_by_label("Session title")).to_be_focused()
+    page.get_by_label("Session title").fill(b)
+    page.get_by_label("Session title").press("Enter")
+    expect(page.locator(".spe-rename")).to_have_count(0)
+    expect(r.row(f"{b} (renamed)")).to_have_count(0, timeout=5_000)
+    assert r.files()[ids["second"]]["title"] == b
+    r.ok("rename: a double-click on the title starts it, Enter saves")
+
+    tag_input = page.get_by_label("Add a tag")
+    chips = page.locator(".spe-popover .spe-chip")
+    r.menu(b, "Tags")
+    expect(tag_input).to_be_focused()
+    expect(tag_input).to_have_attribute("placeholder", "Add a tag…")
+    tag_input.fill("canary-probe")
+    tag_input.press("Enter")
+    expect(chips.filter(has_text="canary-probe")).to_have_count(1, timeout=5_000)
+    tag_input.fill("Bad Tag!")
+    tag_input.press("Enter")
+    expect(page.locator(".spe-tag-error")).to_contain_text("400", timeout=5_000)
+    expect(tag_input).to_have_value("Bad Tag!")
+    tag_input.press("Escape")
+    expect(page.locator(".spe-popover")).to_have_count(0)
+    assert r.files()[ids["second"]]["tags"] == ["canary-probe"]
+    r.ok("tags: Enter adds the typed tag; an invalid one shows the server's 400 under the input and keeps the text")
+
+    r.menu(a, "Tags")
+    suggestions = page.locator(".spe-tag-suggestions [role=option]")
+    tag_input.fill("PROBE")
+    expect(suggestions).to_have_text(["canary-probe"])
+    tag_input.press("Escape")
+    expect(suggestions).to_have_count(0)
+    expect(page.locator(".spe-popover")).to_have_count(1)
+    tag_input.fill("canary")
+    expect(suggestions).to_have_text(["canary-probe"])
+    tag_input.press("ArrowDown")
+    tag_input.press("Enter")
+    expect(chips).to_have_text(["canary-probe×"], timeout=5_000)
+    assert r.files()[ids["first"]]["tags"] == ["canary-probe"]
+    page.get_by_role("button", name="Remove tag canary-probe").click()
+    expect(chips).to_have_count(0, timeout=5_000)
+    assert r.files()[ids["first"]]["tags"] == []
+    tag_input.fill("leftover")
+    page.locator(".spe-note").click()
+    expect(page.locator(".spe-popover")).to_have_count(0)
+    time.sleep(0.5)
+    assert r.files()[ids["first"]]["tags"] == []
+    r.menu(b, "Tags")
+    page.get_by_role("button", name="Remove tag canary-probe").click()
+    expect(chips).to_have_count(0, timeout=5_000)
+    tag_input.press("Escape")
+    assert r.files()[ids["second"]]["tags"] == []
+    r.ok("tags: a prefix shows the tag in use (Escape hides it first), Enter adds it, x removes it, a click outside adds nothing")
+
+    r.menu(b, "Delete")
+    dialog = page.get_by_role("alertdialog")
+    expect(dialog).to_contain_text("Delete chat?")
+    expect(dialog).to_contain_text("This removes it from your list. It is kept in the run archive.")
+    expect(dialog.get_by_role("button", name="Cancel")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(dialog).to_have_count(0)
+    expect(r.row(b)).to_have_count(1)
+    assert focused_label(page) == f"Menu for {b}", focused_label(page)
+    r.menu(b, "Delete")
+    page.locator(".spe-dialog-backdrop").click(position={"x": 5, "y": 5})
+    expect(dialog).to_have_count(0)
+    assert r.files()[ids["second"]]["deleted_at"] is None
+    r.ok("delete: the dialog opens on Cancel; Escape and the backdrop cancel, focus back on the ⋯, the row stays")
+
+
 def check_menu(r: Run, ids: dict[str, str]) -> None:
     page = r.page
     page.goto(f"{BASE}/?session={ids['first']}")
@@ -179,13 +344,15 @@ def check_menu(r: Run, ids: dict[str, str]) -> None:
     for tag in ("Exfil", "dns", "scratch"):
         page.get_by_label("Add a tag").fill(tag)
         page.get_by_label("Add a tag").press("Enter")
-        expect(r.row(title).locator(".spe-row-open .spe-chip", has_text=tag.lower())).to_have_count(1, timeout=5_000)
+        expect(page.locator(".spe-popover .spe-chip", has_text=tag.lower())).to_have_count(1, timeout=5_000)
     r.shot("tags")
-    r.row(title).get_by_role("button", name="Remove tag scratch").click()
-    expect(r.row(title).locator(".spe-row-open .spe-chip")).to_have_count(2, timeout=5_000)
+    page.get_by_role("button", name="Remove tag scratch").click()
+    expect(page.locator(".spe-popover .spe-chip")).to_have_count(2, timeout=5_000)
     page.get_by_label("Add a tag").press("Escape")
+    expect(page.locator(".spe-popover")).to_have_count(0)
+    expect(r.row(title).locator(".spe-chip")).to_have_count(0)
     assert r.files()[ids["first"]]["tags"] == ["exfil", "dns"]
-    r.ok("tags: added (lower-cased), one removed with its x")
+    r.ok("tags: added (lower-cased), one removed with its x; rows show no tags")
 
     r.menu("Read the dataset", "Pin")
     r.menu("Read the dataset", "Unpin")
@@ -286,6 +453,7 @@ def main() -> None:
             page = browser.new_page(viewport={"width": 1280, "height": 800})
             r = Run(page, data, args.shots)
             ids = check_list(r)
+            check_focus(r, ids)
             check_menu(r, ids)
             check_close_tab(r, ids)
             browser.close()

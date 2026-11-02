@@ -15,23 +15,50 @@ body { font-family: system-ui, sans-serif; }
 .spe-new { flex: 1; padding: 6px 10px; font-weight: 600; cursor: pointer; }
 .spe-collapse { padding: 4px 8px; cursor: pointer; }
 .spe-list { list-style: none; margin: 0; padding: 0; flex: 1; }
-.spe-row { display: flex; flex-wrap: wrap; align-items: flex-start; border-radius: 6px; }
-.spe-row:hover { background: #f0f0f0; }
+.spe-row { position: relative; display: flex; align-items: center; border-radius: 6px; }
+.spe-row:hover, .spe-row-menu-open { background: #f0f0f0; }
 .spe-row-active, .spe-row-active:hover { background: #e3ebfb; }
-.spe-row-open { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 6px;
-  cursor: pointer; font: inherit; color: inherit; }
+/* The title button and the rename input are the same height, so a rename does not move the rows. */
+.spe-row-open { flex: 1; min-width: 0; height: 32px; box-sizing: border-box; text-align: left; background: none;
+  border: 0; padding: 6px; cursor: pointer; font: inherit; line-height: 20px; color: inherit; }
+.spe-rename { flex: 1; min-width: 0; height: 32px; box-sizing: border-box; margin: 0; padding: 5px;
+  border: 1px solid #999; border-radius: 6px; font: inherit; line-height: 20px; }
 .spe-row-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.spe-row-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
-.spe-chip { font-size: 11px; padding: 0 6px; border-radius: 8px; background: #e2e2e2; white-space: nowrap; }
-.spe-chip button { border: 0; background: none; padding: 0 0 0 4px; cursor: pointer; font-size: 11px; }
 .spe-row-menu { background: none; border: 0; cursor: pointer; padding: 6px 8px; font-size: 16px; line-height: 1; }
-.spe-menu { flex-basis: 100%; display: flex; flex-direction: column; gap: 4px; margin: 0 6px 6px; padding: 6px;
-  border: 1px solid #ccc; border-radius: 6px; background: #fff; }
-.spe-menu > button { text-align: left; background: none; border: 0; padding: 4px 6px; cursor: pointer; font: inherit; }
-.spe-menu > button:hover { background: #f0f0f0; }
-.spe-menu p { margin: 0 0 4px; font-size: 13px; }
-.spe-menu input { font: inherit; padding: 3px 6px; }
-.spe-rename { flex: 1; min-width: 0; margin: 4px; font: inherit; padding: 3px 6px; }
+.spe-row-renaming .spe-row-menu { pointer-events: none; opacity: 0.4; }
+/* The row popover floats over the list (fixed, placed by the sidebar under or above its ⋯). */
+.spe-popover { position: fixed; z-index: 50; min-width: 180px; max-width: 260px; padding: 4px;
+  border: 1px solid #ccc; border-radius: 8px; background: #fff; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  box-sizing: border-box; font-size: 14px; }
+.spe-menu { display: flex; flex-direction: column; outline: none; }
+.spe-menu > button { text-align: left; background: none; border: 0; padding: 6px 8px; border-radius: 6px;
+  cursor: pointer; font: inherit; color: inherit; }
+.spe-menu > button:hover, .spe-menu > button:focus-visible { background: #f0f0f0; outline: none; }
+.spe-menu-separator { height: 1px; margin: 4px 0; background: #e5e5e5; }
+.spe-menu-danger { color: #b42318; }
+.spe-tag-editor { display: flex; flex-direction: column; gap: 6px; padding: 4px; width: 232px; }
+.spe-tag-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.spe-chip { display: inline-flex; align-items: center; font-size: 12px; padding: 1px 8px; border-radius: 999px;
+  background: #e8e8e8; white-space: nowrap; }
+.spe-chip button { border: 0; background: none; padding: 0 0 0 4px; cursor: pointer; font-size: 12px; color: inherit; }
+.spe-tag-input { font: inherit; padding: 4px 6px; border: 1px solid #ccc; border-radius: 6px; }
+.spe-tag-suggestions { list-style: none; margin: 0; padding: 4px; max-height: 192px; overflow-y: auto;
+  border: 1px solid #e5e5e5; border-radius: 8px; }
+.spe-tag-suggestions li { padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.spe-tag-suggestions li:hover, .spe-tag-suggestion-picked { background: #f0f0f0; }
+.spe-tag-error { margin: 0; font-size: 12px; color: #b42318; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+/* The delete confirmation: modal, centred over a backdrop. */
+.spe-dialog-backdrop { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center;
+  justify-content: center; background: rgba(0, 0, 0, 0.4); }
+.spe-dialog { width: min(400px, calc(100vw - 32px)); box-sizing: border-box; padding: 20px; border-radius: 12px;
+  background: #fff; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2); font-size: 14px; }
+.spe-dialog h2 { margin: 0 0 8px; font-size: 16px; }
+.spe-dialog p { margin: 0 0 16px; color: #444; }
+.spe-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.spe-dialog-actions button { font: inherit; padding: 6px 14px; border-radius: 8px; border: 1px solid #ccc;
+  background: #fff; cursor: pointer; }
+.spe-dialog-actions .spe-danger { color: #b42318; }
 .spe-empty, .spe-note { color: #555; font-size: 12px; margin: 0; }
 .spe-tool { margin: 6px 0; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; max-width: 100%; }
 .spe-tool > summary { cursor: pointer; padding: 6px 10px; display: flex; gap: 8px; align-items: baseline; }

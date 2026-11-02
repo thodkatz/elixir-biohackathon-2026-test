@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ApiError, fetchSession, fetchSessions, listOrder, removeSession, updateSession } from "./client.ts";
+import { ApiError, fetchSession, fetchSessions, listOrder, removeSession, tagSuggestions, updateSession } from "./client.ts";
 import type { Fetch } from "./client.ts";
 import type { SessionMeta } from "./sessions.ts";
 
@@ -60,4 +60,14 @@ test("row menu patches: rename, add and remove a tag", async () => {
   assert.equal(withTag(["dns"], "DNS"), null);
   assert.equal(withTag(["dns"], "  "), null);
   assert.deepEqual(withoutTag(["dns", "exfil"], "dns"), { tags: ["exfil"] });
+});
+
+test("tagSuggestions: case-insensitive substring of tags in use, not those already on the session, at most 8", () => {
+  const known = ["dns", "exfil", "exfil-try", "canary", "DNS-tunnel"];
+  assert.deepEqual(tagSuggestions(known, [], "ex"), ["exfil", "exfil-try"]);
+  assert.deepEqual(tagSuggestions(known, ["exfil"], "EX"), ["exfil-try"]);
+  assert.deepEqual(tagSuggestions(known, [], "dns"), ["dns", "DNS-tunnel"]);
+  assert.deepEqual(tagSuggestions(known, [], "  "), []);
+  const many = Array.from({ length: 12 }, (_, i) => `t${i}`);
+  assert.equal(tagSuggestions(many, [], "t").length, 8);
 });

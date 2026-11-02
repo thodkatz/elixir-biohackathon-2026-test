@@ -1,9 +1,16 @@
 "use client";
 // The sessions sidebar: New chat, the list (pinned first, then newest) and each row's menu.
 // Titles and tags are model or participant text: rendered as React text only, never as HTML.
-import { useState } from "react";
-import type { KeyboardEvent } from "react";
-import { removeSession, renamePatch, updateSession, withTag, withoutTag } from "../lib/client.ts";
+//
+// One owner for what a row is doing: `Sidebar` holds which row has its menu, rename, tag editor or
+// delete dialog open, so at most one row is ever busy, and opening a session, New chat, collapsing
+// or another row's menu ends it. The close and focus rules follow Open WebUI's sidebar: the menu
+// closes on a press outside it, Escape or a choice, and gives focus back to its ⋯; a rename is saved
+// by Enter or a press outside the row and cancelled by Escape; a tag typed but not added is dropped.
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { KeyboardEvent, MouseEvent, ReactNode, RefObject } from "react";
+import { removeSession, renamePatch, tagSuggestions, updateSession, withTag, withoutTag } from "../lib/client.ts";
+import { menuIndex, popoverPosition } from "../lib/menu.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
 
 type SidebarProps = {
@@ -17,9 +24,146 @@ type SidebarProps = {
   onError: (message: string) => void;
 };
 
+// What the one busy row is doing. `keyboard`: the menu was opened from the keyboard, so its first
+// item takes focus. `suggest`: the tag suggestions are shown for what is typed.
+type Busy =
+  | { id: string; mode: "menu"; keyboard: boolean }
+  | { id: string; mode: "rename"; draft: string }
+  | { id: string; mode: "tags"; draft: string; suggest: boolean; error: string | null }
+  | { id: string; mode: "delete" };
+
+const errorText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
+
+// IME composition (e.g. a CJK input method) uses Enter and Escape itself.
+const composing = (e: KeyboardEvent) => e.nativeEvent.isComposing || e.keyCode === 229;
+
 export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChanged, onDeleted, onError }: SidebarProps) {
-  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Busy | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const triggers = useRef(new Map<string, HTMLButtonElement>());
+  const popover = useRef<HTMLDivElement>(null);
+  const busySession = busy ? sessions.find((s) => s.id === busy.id) : undefined;
+  const suggestions = busy?.mode === "tags" && busy.suggest && busySession
+    ? tagSuggestions(knownTags, busySession.tags, busy.draft)
+    : [];
+
+  const focusTrigger = (id: string) => triggers.current.get(id)?.focus();
+
+  const save = async (id: string, patch: MetaPatch | null) => {
+    if (!patch) return;
+    try {
+      await updateSession(id, patch);
+      onChanged();
+    } catch (e) {
+      onError(errorText(e, "Saving the change failed."));
+    }
+  };
+
+  // Ends whatever is open. A rename in progress is saved if it changed the title (Open WebUI's
+  // blur rule); a tag typed but not added is dropped (its tag editor's).
+  const end = (returnFocus = false) => {
+    if (!busy) return;
+    setBusy(null);
+    if (busy.mode === "rename" && busySession) void save(busy.id, renamePatch(busy.draft, busySession.title));
+    if (returnFocus) focusTrigger(busy.id);
+  };
+
+  // The busy row left the list (hidden, deleted, or gone after a refresh): nothing is open.
+  useEffect(() => {
+    if (busy && !busySession) setBusy(null);
+  }, [busy, busySession]);
+
+  // A press outside ends it: outside the menu and its ⋯ for the popover, outside the row for a rename.
+  // Capture phase, so it runs before the press's own target acts (another row opens, another ⋯ toggles).
+  useEffect(() => {
+    if (!busy || busy.mode === "delete") return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      const trigger = triggers.current.get(busy.id);
+      if (busy.mode === "rename") {
+        if (!trigger?.closest(".spe-row")?.contains(target)) end();
+        return;
+      }
+      if (popover.current?.contains(target) || trigger?.contains(target)) return;
+      end();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  });
+
+  // Escape, wherever focus is: the tag suggestions first, then the menu or editor. The rename input
+  // and the dialog handle their own.
+  useEffect(() => {
+    if (!busy || busy.mode === "rename" || busy.mode === "delete") return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing) return;
+      e.preventDefault();
+      if (busy.mode === "tags" && suggestions.length > 0) setBusy({ ...busy, suggest: false });
+      else end(true);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
+  const toggleMenu = (id: string, e: MouseEvent) => {
+    if (busy?.id === id && busy.mode === "rename") return; // inert while renaming
+    if (busy?.id === id && (busy.mode === "menu" || busy.mode === "tags")) {
+      end();
+      return;
+    }
+    end();
+    // A click with no pointer behind it (detail 0) is Enter or Space on the ⋯.
+    setBusy({ id, mode: "menu", keyboard: e.detail === 0 });
+  };
+  const startRename = (s: SessionMeta) => {
+    end();
+    setBusy({ id: s.id, mode: "rename", draft: s.title });
+  };
+  const choose = (s: SessionMeta, patch: MetaPatch) => {
+    end(true);
+    void save(s.id, patch);
+  };
+
+  // The tag editor stays open for the next tag; on a failed save it keeps the text and shows why.
+  const setTags = (id: string, change: (b: Extract<Busy, { mode: "tags" }>) => Busy) =>
+    setBusy((b) => (b && b.mode === "tags" && b.id === id ? change(b) : b));
+  const addTag = async (s: SessionMeta, text: string) => {
+    if (!text.trim()) return;
+    const patch = withTag(s.tags, text);
+    if (!patch) {
+      setTags(s.id, (b) => ({ ...b, draft: "", suggest: false, error: null })); // already there
+      return;
+    }
+    try {
+      await updateSession(s.id, patch);
+      setTags(s.id, (b) => ({ ...b, draft: "", suggest: false, error: null }));
+      onChanged();
+    } catch (e) {
+      setTags(s.id, (b) => ({ ...b, draft: text, suggest: false, error: errorText(e, "Saving the tag failed.") }));
+    }
+  };
+  const removeTag = async (s: SessionMeta, tag: string) => {
+    popover.current?.querySelector<HTMLInputElement>(".spe-tag-input")?.focus();
+    try {
+      await updateSession(s.id, withoutTag(s.tags, tag));
+      setTags(s.id, (b) => ({ ...b, error: null }));
+      onChanged();
+    } catch (e) {
+      setTags(s.id, (b) => ({ ...b, error: errorText(e, "Saving the tag failed.") }));
+    }
+  };
+
+  const remove = async (id: string) => {
+    setBusy(null);
+    try {
+      await removeSession(id);
+      onDeleted(id);
+    } catch (e) {
+      onError(errorText(e, "Deleting the session failed."));
+      focusTrigger(id);
+    }
+  };
+
   if (collapsed) {
     return (
       <nav className="spe-sidebar spe-sidebar-collapsed" aria-label="Sessions">
@@ -30,153 +174,282 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   return (
     <nav className="spe-sidebar" aria-label="Sessions">
       <div className="spe-sidebar-top">
-        <button type="button" className="spe-new" onClick={onNew}>New chat</button>
-        <button type="button" className="spe-collapse" aria-label="Hide sessions" onClick={() => setCollapsed(true)}>‹</button>
+        <button type="button" className="spe-new" onClick={() => { end(); onNew(); }}>New chat</button>
+        <button type="button" className="spe-collapse" aria-label="Hide sessions"
+          onClick={() => { end(); setCollapsed(true); }}>‹</button>
       </div>
-      <datalist id="spe-known-tags">
-        {knownTags.map((t) => <option key={t} value={t} />)}
-      </datalist>
       <ul className="spe-list">
-        {sessions.map((s) => (
-          <SessionRow
-            key={s.id}
-            session={s}
-            active={s.id === activeId}
-            menuOpen={menuFor === s.id}
-            onToggleMenu={() => setMenuFor(menuFor === s.id ? null : s.id)}
-            onCloseMenu={() => setMenuFor(null)}
-            onOpen={() => onOpen(s.id)}
-            onChanged={onChanged}
-            onDeleted={() => onDeleted(s.id)}
-            onError={onError}
-          />
-        ))}
+        {sessions.map((s) => {
+          const mine = busy?.id === s.id ? busy : null;
+          const popoverOpen = mine?.mode === "menu" || mine?.mode === "tags";
+          const classes = ["spe-row"];
+          if (s.id === activeId) classes.push("spe-row-active");
+          if (popoverOpen) classes.push("spe-row-menu-open");
+          if (mine?.mode === "rename") classes.push("spe-row-renaming");
+          return (
+            <li key={s.id} className={classes.join(" ")}>
+              {mine?.mode === "rename" ? (
+                <RenameInput
+                  value={mine.draft}
+                  onChange={(draft) => setBusy({ ...mine, draft })}
+                  onSave={() => { end(true); }}
+                  onCancel={() => { setBusy(null); focusTrigger(s.id); }}
+                />
+              ) : (
+                <button type="button" className="spe-row-open" aria-current={s.id === activeId ? "page" : undefined}
+                  onClick={() => { end(); onOpen(s.id); }} onDoubleClick={() => startRename(s)}>
+                  <span className="spe-row-title">
+                    {s.pinned && <span className="spe-pin" aria-label="pinned">📌 </span>}
+                    {s.title}
+                  </span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="spe-row-menu"
+                ref={(el) => { if (el) triggers.current.set(s.id, el); else triggers.current.delete(s.id); }}
+                aria-label={`Menu for ${s.title}`}
+                aria-haspopup="menu"
+                aria-expanded={popoverOpen}
+                aria-disabled={mine?.mode === "rename" || undefined}
+                tabIndex={mine?.mode === "rename" ? -1 : undefined}
+                onClick={(e) => toggleMenu(s.id, e)}
+              >⋯</button>
+            </li>
+          );
+        })}
       </ul>
       {sessions.length === 0 && <p className="spe-empty">No sessions yet.</p>}
       <p className="spe-note">Deleted sessions are kept in the run archive.</p>
+
+      {busySession && busy?.mode === "menu" && (
+        <Popover anchor={triggers.current.get(busy.id)} box={popover} key={`menu-${busy.id}`}>
+          <RowMenu
+            session={busySession}
+            keyboard={busy.keyboard}
+            onRename={() => startRename(busySession)}
+            onPin={() => choose(busySession, { pinned: !busySession.pinned })}
+            onTags={() => setBusy({ id: busySession.id, mode: "tags", draft: "", suggest: false, error: null })}
+            onHide={() => choose(busySession, { hidden: !busySession.hidden })}
+            onDelete={() => setBusy({ id: busySession.id, mode: "delete" })}
+          />
+        </Popover>
+      )}
+      {busySession && busy?.mode === "tags" && (
+        <Popover anchor={triggers.current.get(busy.id)} box={popover} key={`tags-${busy.id}`}>
+          <TagEditor
+            tags={busySession.tags}
+            draft={busy.draft}
+            suggestions={suggestions}
+            error={busy.error}
+            onDraft={(draft) => setBusy({ ...busy, draft, suggest: true, error: null })}
+            onAdd={(text) => void addTag(busySession, text)}
+            onRemove={(tag) => void removeTag(busySession, tag)}
+          />
+        </Popover>
+      )}
+      {busySession && busy?.mode === "delete" && (
+        <DeleteDialog
+          onCancel={() => { setBusy(null); focusTrigger(busySession.id); }}
+          onDelete={() => void remove(busySession.id)}
+        />
+      )}
     </nav>
   );
 }
 
-type RowProps = {
+// Floats over the list (fixed, so it never moves the rows), under its anchor or above it when it
+// would leave the viewport; follows the anchor on scroll and resize.
+function Popover({ anchor, box, children }:
+  { anchor: HTMLElement | undefined; box: RefObject<HTMLDivElement | null>; children: ReactNode }) {
+  const [place, setPlace] = useState<{ top: number; left: number; above: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !anchor) return;
+    const update = () => {
+      const next = popoverPosition(anchor.getBoundingClientRect(), { width: el.offsetWidth, height: el.offsetHeight },
+        { width: window.innerWidth, height: window.innerHeight });
+      setPlace((p) => (p && p.top === next.top && p.left === next.left && p.above === next.above ? p : next));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [anchor, box]);
+  // Unmeasured: transparent, not hidden, so its first item can take focus before it is placed.
+  return (
+    <div
+      ref={box}
+      className={place?.above ? "spe-popover spe-popover-above" : "spe-popover"}
+      style={place ? { top: place.top, left: place.left } : { top: 0, left: 0, opacity: 0 }}
+    >
+      {children}
+    </div>
+  );
+}
+
+type RowMenuProps = {
   session: SessionMeta;
-  active: boolean;
-  menuOpen: boolean;
-  onToggleMenu: () => void;
-  onCloseMenu: () => void;
-  onOpen: () => void;
-  onChanged: () => void;
-  onDeleted: () => void;
-  onError: (message: string) => void;
+  keyboard: boolean;
+  onRename: () => void;
+  onPin: () => void;
+  onTags: () => void;
+  onHide: () => void;
+  onDelete: () => void;
 };
 
-type Mode = "menu" | "rename" | "tags" | "delete";
-
-function SessionRow({ session, active, menuOpen, onToggleMenu, onCloseMenu, onOpen, onChanged, onDeleted, onError }: RowProps) {
-  const [mode, setMode] = useState<Mode>("menu");
-  const [draft, setDraft] = useState("");
-
-  const close = () => {
-    setMode("menu");
-    setDraft("");
-    onCloseMenu();
+function RowMenu({ session, keyboard, onRename, onPin, onTags, onHide, onDelete }: RowMenuProps) {
+  const menu = useRef<HTMLDivElement>(null);
+  const items = () => [...(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+  // From the keyboard the first item takes focus; from a click the menu itself, so arrows work.
+  useEffect(() => {
+    if (keyboard) items()[0]?.focus();
+    else menu.current?.focus();
+  }, [keyboard]);
+  const onKeyDown = (e: KeyboardEvent) => {
+    const list = items();
+    const next = menuIndex(e.key, list.indexOf(document.activeElement as HTMLElement), list.length);
+    if (next === null) return;
+    e.preventDefault();
+    list[next].focus();
   };
-  // `stay`: the tag editor stays open for the next tag.
-  const save = async (patch: MetaPatch | null, stay = false) => {
-    if (patch) {
-      try {
-        await updateSession(session.id, patch);
-        onChanged();
-      } catch (e) {
-        onError(e instanceof Error ? e.message : "Saving the change failed.");
-      }
-    }
-    if (stay) setDraft("");
-    else close();
-  };
-  const remove = async () => {
-    try {
-      await removeSession(session.id);
-      onDeleted();
-    } catch (e) {
-      onError(e instanceof Error ? e.message : "Deleting the session failed.");
-    }
-    close();
-  };
-  const keys = (onEnter: () => void) => (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") onEnter();
-    if (event.key === "Escape") close();
-  };
-
   return (
-    <li className={active ? "spe-row spe-row-active" : "spe-row"}>
-      {mode === "rename" && menuOpen ? (
-        <input
-          className="spe-rename"
-          aria-label="Session title"
-          autoFocus
-          maxLength={200}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={keys(() => void save(renamePatch(draft, session.title)))}
-        />
-      ) : (
-        <button type="button" className="spe-row-open" onClick={onOpen} aria-current={active ? "page" : undefined}>
-          <span className="spe-row-title">
-            {session.pinned && <span className="spe-pin" aria-label="pinned">📌 </span>}
-            {session.title}
-          </span>
-          {session.tags.length > 0 && (
-            <span className="spe-row-tags">
-              {session.tags.map((t) => <span key={t} className="spe-chip">{t}</span>)}
+    <div className="spe-menu" role="menu" aria-label={`Menu for ${session.title}`} tabIndex={-1} ref={menu} onKeyDown={onKeyDown}>
+      <button type="button" role="menuitem" onClick={onRename}>Rename</button>
+      <button type="button" role="menuitem" onClick={onPin}>{session.pinned ? "Unpin" : "Pin"}</button>
+      <button type="button" role="menuitem" onClick={onTags}>Tags</button>
+      <button type="button" role="menuitem" onClick={onHide}>{session.hidden ? "Unhide" : "Hide"}</button>
+      <div role="separator" className="spe-menu-separator" />
+      <button type="button" role="menuitem" className="spe-menu-danger" onClick={onDelete}>Delete</button>
+    </div>
+  );
+}
+
+// Replaces the row's title in place, focused with the text selected.
+function RenameInput({ value, onChange, onSave, onCancel }:
+  { value: string; onChange: (v: string) => void; onSave: () => void; onCancel: () => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    input.current?.focus();
+    input.current?.select();
+  }, []);
+  return (
+    <input
+      ref={input}
+      className="spe-rename"
+      aria-label="Session title"
+      maxLength={200}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (composing(e)) return;
+        if (e.key === "Enter") { e.preventDefault(); onSave(); }
+        if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+      }}
+    />
+  );
+}
+
+type TagEditorProps = {
+  tags: string[];
+  draft: string;
+  suggestions: string[];
+  error: string | null;
+  onDraft: (text: string) => void;
+  onAdd: (text: string) => void;
+  onRemove: (tag: string) => void;
+};
+
+// Open WebUI's tag editor: the tags as pills, each removed by its ×, and an input whose suggestions
+// are the tags in use. Enter adds the suggestion picked with the arrow keys, else the typed text; a
+// click on a suggestion adds it; leaving the editor adds nothing.
+function TagEditor({ tags, draft, suggestions, error, onDraft, onAdd, onRemove }: TagEditorProps) {
+  const input = useRef<HTMLInputElement>(null);
+  const [picked, setPicked] = useState(-1);
+  useEffect(() => input.current?.focus(), []);
+  useEffect(() => setPicked(-1), [draft, suggestions.length]);
+  return (
+    <div className="spe-tag-editor" role="group" aria-label="Tags">
+      {tags.length > 0 && (
+        <div className="spe-tag-list">
+          {tags.map((t) => (
+            <span key={t} className="spe-chip">
+              {t}
+              <button type="button" aria-label={`Remove tag ${t}`} onClick={() => onRemove(t)}>×</button>
             </span>
-          )}
-        </button>
-      )}
-      <button type="button" className="spe-row-menu" aria-label={`Menu for ${session.title}`} aria-expanded={menuOpen}
-        onClick={() => { setMode("menu"); onToggleMenu(); }}>⋯</button>
-      {menuOpen && mode === "menu" && (
-        <div className="spe-menu" role="menu">
-          <button type="button" role="menuitem" onClick={() => { setDraft(session.title); setMode("rename"); }}>Rename</button>
-          <button type="button" role="menuitem" onClick={() => void save({ pinned: !session.pinned })}>
-            {session.pinned ? "Unpin" : "Pin"}
-          </button>
-          <button type="button" role="menuitem" onClick={() => { setDraft(""); setMode("tags"); }}>Tags</button>
-          <button type="button" role="menuitem" onClick={() => void save({ hidden: !session.hidden })}>
-            {session.hidden ? "Unhide" : "Hide"}
-          </button>
-          <button type="button" role="menuitem" onClick={() => setMode("delete")}>Delete</button>
+          ))}
         </div>
       )}
-      {menuOpen && mode === "tags" && (
-        <div className="spe-menu">
-          <span className="spe-row-tags">
-            {session.tags.map((t) => (
-              <span key={t} className="spe-chip">
-                {t}
-                <button type="button" aria-label={`Remove tag ${t}`} onClick={() => void save(withoutTag(session.tags, t), true)}>×</button>
-              </span>
-            ))}
-          </span>
-          <input
-            aria-label="Add a tag"
-            placeholder="add a tag"
-            list="spe-known-tags"
-            autoFocus
-            maxLength={32}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={keys(() => void save(withTag(session.tags, draft), true))}
-          />
-        </div>
+      <input
+        ref={input}
+        className="spe-tag-input"
+        aria-label="Add a tag"
+        placeholder="Add a tag…"
+        maxLength={32}
+        value={draft}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? "spe-tag-error" : undefined}
+        aria-activedescendant={picked >= 0 ? `spe-tag-suggestion-${picked}` : undefined}
+        onChange={(e) => onDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (composing(e)) return;
+          if (e.key === "Enter") {
+            e.preventDefault();
+            onAdd(suggestions[picked] ?? draft);
+          } else if ((e.key === "ArrowDown" || e.key === "ArrowUp") && suggestions.length > 0) {
+            e.preventDefault();
+            setPicked((i) => menuIndex(e.key, i, suggestions.length) ?? -1);
+          }
+        }}
+      />
+      {suggestions.length > 0 && (
+        <ul className="spe-tag-suggestions" role="listbox" aria-label="Tags in use">
+          {suggestions.map((t, i) => (
+            // mousedown, and its default prevented: the input keeps focus.
+            <li key={t} id={`spe-tag-suggestion-${i}`} role="option" aria-selected={i === picked}
+              className={i === picked ? "spe-tag-suggestion-picked" : undefined}
+              onMouseDown={(e) => { e.preventDefault(); onAdd(t); }}>{t}</li>
+          ))}
+        </ul>
       )}
-      {menuOpen && mode === "delete" && (
-        <div className="spe-menu" role="alertdialog" aria-label="Delete session">
-          <p>This removes it from your list. It is kept in the run archive.</p>
-          <button type="button" onClick={() => void remove()}>Delete</button>
-          <button type="button" onClick={close}>Cancel</button>
+      {error && <p className="spe-tag-error" id="spe-tag-error">{error}</p>}
+    </div>
+  );
+}
+
+// Modal: focus starts on Cancel and stays inside; Escape or the backdrop cancels.
+function DeleteDialog({ onCancel, onDelete }: { onCancel: () => void; onDelete: () => void }) {
+  const dialog = useRef<HTMLDivElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      onCancel();
+    } else if (e.key === "Tab") {
+      const buttons = [...(dialog.current?.querySelectorAll<HTMLElement>("button") ?? [])];
+      const at = buttons.indexOf(document.activeElement as HTMLElement);
+      e.preventDefault();
+      buttons[(at + (e.shiftKey ? buttons.length - 1 : 1)) % buttons.length]?.focus();
+    }
+  };
+  return (
+    <div className="spe-dialog-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="spe-dialog" role="alertdialog" aria-modal="true" aria-labelledby="spe-delete-title"
+        aria-describedby="spe-delete-text" ref={dialog} onKeyDown={onKeyDown}>
+        <h2 id="spe-delete-title">Delete chat?</h2>
+        <p id="spe-delete-text">This removes it from your list. It is kept in the run archive.</p>
+        <div className="spe-dialog-actions">
+          <button type="button" ref={cancel} onClick={onCancel}>Cancel</button>
+          <button type="button" className="spe-danger" onClick={onDelete}>Delete</button>
         </div>
-      )}
-    </li>
+      </div>
+    </div>
   );
 }

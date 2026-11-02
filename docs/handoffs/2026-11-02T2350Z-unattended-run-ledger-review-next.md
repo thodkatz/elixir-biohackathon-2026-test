@@ -1,7 +1,7 @@
-# Handoff: unattended run, PR #13's review round next
+# 2026-11-02: unattended run, PR #13's review round next
 
 Written 2026-11-02 at the context budget, in the worktree of `change/upstream-ports-ledger` (PR #13). No plan
-holds this run of work, so its handoffs live here, in `docs/superpowers/handoffs/`.
+holds this run of work, so its handoffs live here, in `docs/handoffs/`.
 
 ## The user's instruction (2026-11-02, in chat)
 

@@ -23,7 +23,8 @@ upstream*, plus `AGENTS.md` itself, and changes with it:
 ```bash
 X=(":(exclude).gitmodules" ":(exclude).methodology" ":(exclude).claude" ":(exclude)AGENTS.md"
    ":(exclude)BACKLOG.md" ":(exclude)docs/README.md" ":(exclude)docs/guides" ":(exclude)docs/knowledge"
-   ":(exclude)docs/investigations" ":(exclude)docs/proposals" ":(exclude)docs/superpowers" ":(exclude)docs/upstream-ports.md")
+   ":(exclude)docs/investigations" ":(exclude)docs/proposals" ":(exclude)docs/superpowers" ":(exclude)docs/handoffs"
+   ":(exclude)docs/upstream-ports.md")
 ```
 
 A ported commit never leaves `upstream/main..main` (upstream gets a rewritten commit, not ours), so the fork keeps
@@ -32,12 +33,13 @@ fork commits with project changes that have no line there yet, oldest first:
 
 ```bash
 git fetch upstream && git fetch origin
-git log --format='%h %s' --reverse upstream/main..origin/main -- . "${X[@]}" \
-  | grep -v -F -f <(git show origin/main:docs/upstream-ports.md | sed -n 's/^- `\([0-9a-f]*\)`.*/\1/p')
+git log --abbrev=7 --format='%h %s' --reverse upstream/main..origin/main -- . "${X[@]}" \
+  | grep -v -f <(git show origin/main:docs/upstream-ports.md | sed -n 's/^- `\([0-9a-f]*\)`.*/^\1 /p')
 ```
 
-A candidate upstream should not get (a fork-only change to a shared file) gets a `not for upstream` line in the
-ledger, so it stops showing up.
+The ledger is read from `origin/main`, so its lines are committed and pushed to `main` directly. A candidate
+upstream should not get (a fork-only change to a shared file) gets a `not for upstream` line there, so it stops
+showing up.
 
 If the work builds on an upstream PR that is still open, wait for it to merge, as with stacked PRs on the fork
 (`development-workflow.md`, *Review and merge*, step 1). Work that only touches the same area can go in
@@ -126,7 +128,7 @@ fork-only: no plan, slice, backlog or fork PR links.
 
 ### 6. Track it on the fork
 
-Once the PR has a number, record it on the fork, committed to `main` directly:
+Once the PR has a number, record it on the fork, committed and pushed to `main` directly:
 
 - `docs/upstream-ports.md` gets one line per fork commit the PR carries: `` - `<short sha>` <fork subject> →
   kraatz #<n> (open)``.

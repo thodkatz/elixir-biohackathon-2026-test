@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSession, fetchSessions, listOrder } from "../lib/client.ts";
 import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
 import type { SessionMeta } from "../lib/sessions.ts";
+import { ChevronRight } from "./icons";
 import { Sidebar } from "./sidebar";
 
 const MAX_RESULT_LINES = 40;
@@ -50,6 +51,12 @@ function brief(name: string, parameters: unknown): string {
   return "";
 }
 
+// Under the composer, where claude.ai and chatgpt.com keep their notice; the header holds the title only.
+const LABELS = {
+  chatDisclaimerText: "SPE agent · runs inside the secure processing environment · every tool call is shown",
+  chatInputPlaceholder: "Message the SPE agent",
+};
+
 const STATUS: Record<ToolProps["status"], string> = {
   inProgress: "preparing…",
   executing: "running…",
@@ -60,6 +67,7 @@ function ToolCard({ name, parameters, status, result }: ToolProps) {
   return (
     <details className="spe-tool">
       <summary>
+        <ChevronRight className="spe-tool-chevron" />
         <span className="spe-tool-name">{name}</span>
         <span className="spe-tool-brief">{brief(name, parameters)}</span>
         <span className="spe-tool-status">{STATUS[status]}</span>
@@ -184,17 +192,19 @@ function Chat() {
         onError={setError}
       />
       <div className="spe-page">
-        <div className="spe-header">SPE agent — every tool call is shown; your sessions are in the sidebar.</div>
+        <header className="spe-header">
+          <h1 className="spe-header-title">{sessions.find((s) => s.id === active)?.title ?? "New chat"}</h1>
+        </header>
         {error && (
           <div className="spe-error" role="alert">
-            {error}
-            <button type="button" onClick={() => setError(null)}>dismiss</button>
+            <span className="spe-error-text">{error}</span>
+            <button type="button" onClick={() => setError(null)}>Dismiss</button>
           </div>
         )}
         {active === null ? (
           <div className="spe-loading">Loading…</div>
         ) : (
-          <CopilotChatConfigurationProvider agentId="spe" threadId={active} hasExplicitThreadId={false}>
+          <CopilotChatConfigurationProvider agentId="spe" threadId={active} hasExplicitThreadId={false} labels={LABELS}>
             <CopilotChat
               key={active}
               agentId="spe"
@@ -211,7 +221,19 @@ function Chat() {
   );
 }
 
+// CopilotKit's own dark styles key on a `dark` class; this page follows the system setting.
+function useSystemColorScheme() {
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => document.documentElement.classList.toggle("dark", query.matches);
+    apply();
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+}
+
 export default function Page() {
+  useSystemColorScheme();
   return (
     <CopilotKitProvider runtimeUrl="/api/copilotkit" agentId="spe" showDevConsole={false}>
       <Chat />

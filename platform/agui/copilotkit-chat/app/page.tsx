@@ -112,8 +112,14 @@ function Chat() {
   // alone is not enough: the first-load effect below (startNew()/open(), gated on `isReady`) must
   // also have run, or an early New chat/row-open call sets `active` itself and mounts the chat
   // before the agent is ready to run anything, the same way a click that lands between hydration
-  // and `isReady` would, just without a dropped click to show for it.
-  const ready = useHydrated() && isReady;
+  // and `isReady` would, just without a dropped click to show for it. `isReady` alone still leaves
+  // a sub-frame window open between the render where it flips (committing enabled buttons) and the
+  // first-load effect that runs after that commit, so `ready` also waits for the effect itself:
+  // `active !== null` is only ever false before that effect has set it (every one of its paths —
+  // `open()`'s success, its not-found/error fallback to `startNew()`, and the no-parameter
+  // `startNew()` — ends by calling `select()`, which sets `active`), so this cannot leave `ready`
+  // false once the agent is actually ready, including with an empty session list.
+  const ready = useHydrated() && isReady && active !== null;
 
   // After each run (finished, failed or stopped) the list, fetched until it shows that run; once the
   // open session is in it (its first run recorded), the URL names it.

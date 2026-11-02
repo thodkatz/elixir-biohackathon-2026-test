@@ -32,9 +32,11 @@ type SidebarProps = {
   onError: (message: string) => void;
   /** A run is in progress: switching session, New chat and the open session's Delete are disabled. */
   running: boolean;
-  /** False until the page is safe to click (hydrated, and the agent is ready): every button here
+  /** False until the page is safe to click: hydrated, the agent ready, and the page's own
+   *  first-load `startNew()`/`open()` has actually run (not just become due). Every button here
    *  starts an action, so each stays disabled until then rather than risk a click landing before
-   *  its handler is attached, or before the page's own first-load `startNew()`/`open()` has run. */
+   *  its handler is attached, before the agent can run anything, or in the sub-frame window
+   *  between the agent becoming ready and that first-load effect running. */
   ready: boolean;
 };
 

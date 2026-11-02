@@ -99,6 +99,16 @@ stays where it precedes typing into the
 textarea itself: that element is separately self-gated (mounted only once a session is open), not covered by a
 disabled attribute on a button.
 
+A later review (PR #11's final review, M4) found one more, much smaller sub-frame window of the same shape:
+`isReady` flipping commits a render with the buttons enabled, and the first-load effect is a passive effect
+that only runs after that commit, so a click in between still calls `startNew()` ahead of the effect, the same
+way a click between hydration and `isReady` used to. `ready` now also requires `active !== null`
+(`app/page.tsx`), which the first-load effect's every path (`open()`'s success, its not-found/error fallback to
+`startNew()`, and the no-parameter `startNew()`) sets by calling `select()` before returning — so this cannot
+leave `ready` false once the agent is actually ready, including with an empty session list. Not reproduced by a
+human or by Playwright (whose stability check, two animation frames, outlasts it); closed anyway because the
+fix is the same one-line shape as the bug it extends.
+
 ## 7. A stop clicked very soon after a run starts used to record it `failed`, not `cancelled`
 
 **Symptom (now fixed at the source, kept here for how it was found).** `check_stop`'s flow (type a "slow"

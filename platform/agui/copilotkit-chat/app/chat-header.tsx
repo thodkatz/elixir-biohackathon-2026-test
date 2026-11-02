@@ -157,7 +157,7 @@ export function ChatHeader({ session, knownTags, running, onPatch, onDelete, onE
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         // Not `disabled`: a disabled button cannot take the focus that ending a rename returns to it
-        // (React applies `setOpen(null)` after the handler's `focus()`), as slice 2's rows do.
+        // (React applies `setOpen(null)` after the handler's `focus()`), the same pattern the sidebar's rows use.
         aria-disabled={open?.mode === "rename" || undefined}
         tabIndex={open?.mode === "rename" ? -1 : undefined}
         onClick={toggleMenu}

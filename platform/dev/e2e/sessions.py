@@ -610,7 +610,7 @@ def check_stop(r: Run) -> str:
     r.shot("during-run")
     # A stop clicked here, however soon, is now always recorded cancelled: lib/recorder.ts's
     # isAbort() covers both an abort after the agent's response headers (RUN_ERROR code "abort") and
-    # one before them (a raw AbortError) — see spec clarification 1. No wait needed before this click.
+    # one before them (a raw AbortError). No wait needed before this click.
     page.get_by_test_id("copilot-send-button").click()  # the stop button while a run is in progress
     expect(page.get_by_role("button", name="New chat")).to_be_enabled(timeout=15_000)
     for button in page.locator(".spe-row-open").all():

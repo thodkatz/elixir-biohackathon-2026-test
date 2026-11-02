@@ -148,7 +148,7 @@ because Z." This file wins over the guides in `.methodology/shared/guides/`.
   than rewritten): sign off from the first commit; a commit pushed without one stays, and the PR says
   so.
 - In this repo, **a PR that merges `upstream/main` is merged with a merge commit** instead of the squash in
-  `development-workflow.md`, *Review and merge*, step 6, because a squash drops `upstream/main` as a parent and
+  `development-workflow.md`, *Review and merge*, step 6, and `forge-github.md`, *Merge*, because a squash drops `upstream/main` as a parent and
   the next upstream merge conflicts on every commit again (`docs/guides/contributing-upstream.md`).
 
 ## Contributing upstream
@@ -157,6 +157,8 @@ Our fork's `main` carries fork-only files that upstream must never receive:
 
     .gitmodules  .methodology/  .claude/settings.json  BACKLOG.md
     docs/README.md  docs/guides/  docs/knowledge/  docs/investigations/  docs/proposals/  docs/superpowers/
+
+The guide's exclude list (its step 1) mirrors this list: change both together.
 
 A PR to upstream is cut from `upstream/main` (`git fetch upstream`), carries only project changes
 (cherry-picked or re-applied), and must pass this check before it is pushed:
@@ -177,7 +179,8 @@ Upstream changes come in by merging `upstream/main` into our `main`. The steps f
 
 One line per active track: where it stands, the next unit, and where its handoff is. This section only points
 to things. Who is working on what is shown by the open PRs, not here (*Claiming a unit* in the workflow guide).
-Each unit's PR updates its track's line; the last slice removes it.
+Each unit's PR updates its track's line; the last slice removes it. An open upstream PR also gets a line while it
+is open (`docs/guides/contributing-upstream.md`, step 6).
 
 - **Canary evaluation ladder** (biohackathon 0013): spec (#1) and plan (#2) merged. **Next: slice 1/9**
   `impl/canary-eval-ladder-1-scoring`. Handoff: `ls docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs | tail -1`.
@@ -214,8 +217,9 @@ evaluation instances.
 
 Each unit of work runs in its own worktree (*Development workflow*).
 
-The portal VM follows `main` (`platform/coder/deploy/sync-template.sh`): a merge
-to `main` changes what participants get within minutes.
+The portal VM follows upstream's `main`, not ours (`platform/coder/deploy/sync-template.sh`, on a checkout
+cloned from `kraatz`): a merge there changes what participants get within minutes. Our work reaches them through
+an upstream PR (`docs/guides/contributing-upstream.md`).
 
 Private instance files and `platform/ansible/output/` exist only in the main checkout,
 not in a worktree. To deploy a worktree's agent or chat UI before it is merged,

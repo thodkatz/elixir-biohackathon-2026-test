@@ -171,6 +171,9 @@ def check_focus(r: Run, ids: dict[str, str]) -> None:
     """The row menu closes, saves and gives focus back as Open WebUI's does. Leaves the sessions as it found them."""
     page = r.page
     a, b = "List the home directory", "Read the dataset"
+    patches: list[str] = []
+    page.on("request", lambda req: patches.append(req.url)
+            if req.method == "PATCH" and req.url.endswith(f"/api/sessions/{ids['first']}") else None)
     page.goto(f"{BASE}/?session={ids['first']}")
     expect(page.get_by_text("Turn 2: the command ran.")).to_be_visible(timeout=10_000)
     menus = page.locator(".spe-menu")
@@ -296,10 +299,11 @@ def check_focus(r: Run, ids: dict[str, str]) -> None:
     page.get_by_role("button", name="Remove tag canary-probe").click()
     expect(chips).to_have_count(0, timeout=5_000)
     assert r.files()[ids["first"]]["tags"] == []
+    patches.clear()
     tag_input.fill("leftover")
     page.locator(".spe-note").click()
     expect(page.locator(".spe-popover")).to_have_count(0)
-    time.sleep(0.5)
+    assert patches == [], patches  # a tag typed but not added must never PATCH
     assert r.files()[ids["first"]]["tags"] == []
     r.menu(b, "Tags")
     page.get_by_role("button", name="Remove tag canary-probe").click()
@@ -594,11 +598,12 @@ def check_stop(r: Run) -> str:
     stop's RUN_ERROR reaches the browser); the file ends with a `cancelled` run. Returns the session id.
 
     Called right after a `page.goto()` by two of its three callers (the standalone `stop` scenario,
-    local and against an instance): the hydration wait below covers them; the third (the "all"
-    scenario) already has it from an earlier check on the same page, so it costs nothing extra there.
+    local and against an instance); the third (the "all" scenario) is already well past its first
+    load. Either way, the first click below needs no hydration wait of its own: New chat is
+    `disabled` until React has hydrated, so Playwright's click (which waits for "enabled") is safe
+    whether or not the page has hydrated yet by the time it runs.
     """
     page = r.page
-    expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)
     title = f"slow run to stop {uuid.uuid4().hex[:8]}"
     page.get_by_role("button", name="New chat").click()
     box = page.get_by_test_id("copilot-chat-textarea")
@@ -670,6 +675,8 @@ def slow_loop(r: Run) -> None:
     for n in range(1, 13):
         title = f"slow run {stamp}-{n}"
         try:
+            # No hydration wait before this first click (n == 1): New chat is `disabled` until
+            # React has hydrated, so the click's own wait for "enabled" covers it.
             page.get_by_role("button", name="New chat").click(timeout=10_000)
             box = page.get_by_test_id("copilot-chat-textarea")
             box.fill(title)
@@ -688,9 +695,9 @@ def two_turn(r: Run) -> None:
     """The paid check: two turns with the instance's real model; both runs recorded completed."""
     page = r.page
     page.goto(BASE + "/")
-    # Hydration wait: a click or keypress right after goto() can land before React attaches its
-    # handlers and do nothing (as in check_stop).
-    expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)
+    # No hydration wait needed before this click: New chat is `disabled` until React has
+    # hydrated, so Playwright's click (which waits for "enabled") is safe either way (as in
+    # check_stop).
     page.get_by_role("button", name="New chat").click()
     first = "Run pwd and tell me the result in one sentence."
     for text in (first, "Now list the files in that directory, briefly."):

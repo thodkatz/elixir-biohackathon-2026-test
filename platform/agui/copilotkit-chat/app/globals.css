@@ -161,19 +161,28 @@ body {
 .spe-icon { width: 16px; height: 16px; flex: none; }
 
 /* Visible keyboard focus on our own controls (CopilotKit's carry their own). */
-:where(.spe-sidebar, .spe-popover, .spe-dialog, .spe-error, .spe-tool) :is(button, summary, input):focus-visible {
+:where(.spe-sidebar, .spe-header, .spe-popover, .spe-dialog, .spe-error, .spe-tool) :is(button, summary, input):focus-visible {
   outline: 2px solid var(--focus-ring); outline-offset: 2px;
 }
 
 /* ---------- Header: the open session's title, nothing else ---------- */
 
-.spe-header { position: relative; z-index: 10; flex: none; display: flex; align-items: center; height: 48px;
-  padding: 0 20px; background: var(--bg); }
+/* Renamable in place (double-click or the menu's Rename), with the rows' ⋯ menu beside it. */
+.spe-header { position: relative; z-index: 10; flex: none; display: flex; align-items: center; gap: 4px;
+  height: 48px; padding: 0 20px; background: var(--bg); }
 /* A soft fade under it, over the chat's top edge, instead of a rule. */
 .spe-header::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 16px;
   background: linear-gradient(var(--bg), transparent); pointer-events: none; }
 .spe-header-title { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text-secondary); }
+  font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text-secondary); cursor: default; }
+.spe-header-rename { flex: 0 1 480px; min-width: 0; height: 32px; box-sizing: border-box; margin: 0 0 0 -8px;
+  padding: 6px 8px; border: 0; border-radius: var(--radius-item); background: none; color: var(--text);
+  font: inherit; font-size: 15px; line-height: 20px; font-weight: 500; outline: none;
+  box-shadow: inset 0 0 0 1px var(--line-strong); }
+.spe-header-rename:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--focus-ring); }
+.spe-header-menu .spe-icon { width: 18px; height: 18px; }
+.spe-header-menu[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+.spe-header-menu[aria-disabled="true"] { opacity: 0.4; cursor: default; background: none; } /* while renaming */
 
 .spe-chat { flex: 1; min-height: 0; }
 .spe-loading { padding: 16px 20px; color: var(--text-muted); font-size: 13px; }
@@ -267,6 +276,12 @@ body {
 .spe-hidden-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px;
   color: var(--text-muted); cursor: pointer; }
 .spe-hidden-toggle input { margin: 0; accent-color: var(--button-strong-bg); }
+
+/* During a run: New chat, the rows and the open session's Delete are disabled. */
+.spe-new:disabled, .spe-icon-button:disabled, .spe-row-open:disabled, .spe-menu > button:disabled {
+  cursor: not-allowed; color: var(--button-off-text); }
+.spe-new:disabled:hover, .spe-icon-button:disabled:hover, .spe-menu > button:disabled:hover { background: none; }
+.spe-row-active .spe-row-open:disabled { color: inherit; }
 
 /* ---------- Row popover: menu and tag editor ---------- */
 

@@ -12,11 +12,13 @@ import {
   useDefaultRenderTool,
 } from "@copilotkit/react-core/v2";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchSession, fetchSessions } from "../lib/client.ts";
+import { fetchSession, fetchSessions, removeSession, updateSession } from "../lib/client.ts";
 import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
-import type { SessionMeta } from "../lib/sessions.ts";
+import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
+import { ChatHeader } from "./chat-header";
 import { ChevronRight } from "./icons";
 import { Sidebar } from "./sidebar";
+import { useRunReconcile } from "./use-run-reconcile";
 
 const MAX_RESULT_LINES = 40;
 const MAX_RESULT_CHARS = 4000;
@@ -105,6 +107,15 @@ function Chat() {
   const { agent, isReady } = useAgent({ agentId: "spe" });
   useDefaultRenderTool({ render: (props) => <ToolCard {...props} /> });
 
+  // After each run (finished, failed or stopped) the list, fetched until it shows that run; once the
+  // open session is in it (its first run recorded), the URL names it.
+  const onList = useCallback((list: SessionMeta[]) => {
+    setSessions(list);
+    const id = activeRef.current;
+    if (id && list.some((s) => s.id === id)) showInUrl(id);
+  }, []);
+  const { busy, noteRunError } = useRunReconcile({ openId: active ?? "", onList, onError: setError });
+
   // The history goes onto the agent first, then CopilotChat remounts on the new thread
   // (key={id}): a freshly mounted chat on a non-explicit thread keeps the agent's messages,
   // and makes no connect request that would clear them (README, Sessions).
@@ -167,30 +178,35 @@ function Chat() {
     else startNew(); // no parameter, or a malformed one: dropped
   }, [isReady, open, refresh, startNew]);
 
-  // After each run (finished, failed or stopped) the list again; once the open session is in
-  // it (its first run recorded), the URL names it.
-  useEffect(() => {
-    if (!isReady) return;
-    const ended = () => {
-      void refresh().then((list) => {
-        const id = activeRef.current;
-        if (list && id && list.some((s) => s.id === id)) showInUrl(id);
-      });
-    };
-    const subscription = agent.subscribe({ onRunFinalized: ended, onRunFailed: ended });
-    return () => subscription.unsubscribe();
-  }, [agent, isReady, refresh]);
-
   const onDeleted = useCallback((id: string) => {
     if (id === activeRef.current) startNew();
     void refresh();
   }, [refresh, startNew]);
 
+  // The header's menu: the same PATCH and DELETE as the row's, on the open session.
+  const patchOpen = useCallback(async (patch: MetaPatch) => {
+    const id = activeRef.current;
+    if (id === null) return;
+    await updateSession(id, patch);
+    await refresh();
+  }, [refresh]);
+  const deleteOpen = useCallback(async () => {
+    const id = activeRef.current;
+    if (id === null) return;
+    try {
+      await removeSession(id);
+      onDeleted(id);
+    } catch (e) {
+      setError(messageOf(e));
+    }
+  }, [onDeleted]);
+  const knownTags = [...new Set(sessions.flatMap((s) => s.tags))].sort();
+
   return (
     <div className="spe-layout">
       <Sidebar
         sessions={sessions}
-        knownTags={[...new Set(sessions.flatMap((s) => s.tags))].sort()}
+        knownTags={knownTags}
         activeId={active}
         // Switching sessions mid-run would put the new session's history on the agent that is
         // still streaming the old one's run, so both are ignored until the run ends.
@@ -199,11 +215,18 @@ function Chat() {
         onChanged={refresh}
         onDeleted={onDeleted}
         onError={setError}
+        running={busy}
       />
       <div className="spe-page">
-        <header className="spe-header">
-          <h1 className="spe-header-title">{sessions.find((s) => s.id === active)?.title ?? "New chat"}</h1>
-        </header>
+        <ChatHeader
+          key={active ?? "none"}
+          session={active === null ? undefined : (sessions.find((s) => s.id === active) ?? null)}
+          knownTags={knownTags}
+          running={busy}
+          onPatch={patchOpen}
+          onDelete={() => void deleteOpen()}
+          onError={setError}
+        />
         {error && (
           <div className="spe-error" role="alert">
             <span className="spe-error-text">{error}</span>
@@ -220,7 +243,10 @@ function Chat() {
               className="spe-chat"
               onError={(event) => {
                 // The prop's type also admits a DOM error event; only CopilotKit's carries `error`.
-                if ("error" in event && event.error instanceof Error) setError(event.error.message || "The agent run failed.");
+                if ("error" in event && event.error instanceof Error) {
+                  noteRunError(event.error.message);
+                  setError(event.error.message || "The agent run failed.");
+                }
               }}
             />
           </CopilotChatConfigurationProvider>

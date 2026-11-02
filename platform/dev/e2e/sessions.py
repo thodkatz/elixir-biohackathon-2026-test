@@ -54,7 +54,9 @@ class Run:
     def shot(self, name: str) -> None:
         if self.shots:
             self.n += 1
-            self.page.screenshot(path=str(self.shots / f"{self.n:02d}-{name}.png"), full_page=True)
+            # animations="disabled" ends the menu's fade first, so a shot is not caught mid-way.
+            self.page.screenshot(path=str(self.shots / f"{self.n:02d}-{name}.png"), full_page=True,
+                                 animations="disabled")
 
     def ok(self, what: str) -> None:
         print(f"ok - {what}", flush=True)

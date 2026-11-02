@@ -12,10 +12,10 @@ start reads this section; keep it short.
 
 <!-- - <item> — from <investigation / review / handoff>; <waits on the user: what> | <due: why soon>. -->
 
-- Bring `impl/agui-chat-sessions-2-sidebar` (#10) and `impl/canary-eval-ladder-1-scoring` (#3) onto the new
-  `.methodology` pin (`172eae3`): each takes `main` at a clean point, by merge (pushed branches aren't rewritten
-  here, *Overrides*), then `git submodule update --init .methodology` — from the methodology update of 2026-11-02;
-  due: both still run the old scripts (`continue.sh`, no `next-session.sh --resume`).
+- Canary ladder: fold `biohackathon` knowledge 0015 (matched clean and injected trials; proposed) into the spec
+  and plan as 0014's findings were (clarifications, tasks rewritten) — from the user's comment on #3
+  (2026-10-23, "check 0015 review point as well"); waits on the user: 0015 is `proposed`, accept it first;
+  due: before the ladder's slice 5 (agent suite), whose plan 0015 reviews.
 
 ## Unscheduled
 

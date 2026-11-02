@@ -2,6 +2,7 @@
 // Titles and tags are model or participant text: rendered as React text only, never as HTML.
 import { useEffect, useRef, useState } from "react";
 import { menuIndex } from "../lib/menu.ts";
+import { XMark } from "./icons";
 import { composing } from "./keys.ts";
 
 type TagEditorProps = {
@@ -14,7 +15,7 @@ type TagEditorProps = {
   onRemove: (tag: string) => void;
 };
 
-// Open WebUI's tag editor: the tags as pills, each removed by its ×, and an input whose suggestions
+// Open WebUI's tag editor: the tags as pills, each removed by a click on it, and an input whose suggestions
 // are the tags in use. Enter adds the suggestion picked with the arrow keys, else the typed text; a
 // click on a suggestion adds it; leaving the editor adds nothing.
 export function TagEditor({ tags, draft, suggestions, error, onDraft, onAdd, onRemove }: TagEditorProps) {
@@ -24,13 +25,16 @@ export function TagEditor({ tags, draft, suggestions, error, onDraft, onAdd, onR
   useEffect(() => setPicked(-1), [draft, suggestions.length]);
   return (
     <div className="spe-tag-editor" role="group" aria-label="Tags">
+      <p className="spe-tag-heading" aria-hidden="true">Tags</p>
       {tags.length > 0 && (
         <div className="spe-tag-list">
+          {/* Open WebUI's pill: the whole pill is the remove button, its × always shown. */}
           {tags.map((t) => (
-            <span key={t} className="spe-chip">
-              {t}
-              <button type="button" aria-label={`Remove tag ${t}`} onClick={() => onRemove(t)}>×</button>
-            </span>
+            <button type="button" key={t} className="spe-chip" aria-label={`Remove tag ${t}`} title={`Remove tag ${t}`}
+              onClick={() => onRemove(t)}>
+              <span className="spe-chip-text">{t}</span>
+              <XMark />
+            </button>
           ))}
         </div>
       )}

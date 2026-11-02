@@ -286,7 +286,7 @@ def check_focus(r: Run, ids: dict[str, str]) -> None:
     expect(suggestions).to_have_text(["canary-probe"])
     tag_input.press("ArrowDown")
     tag_input.press("Enter")
-    expect(chips).to_have_text(["canary-probe×"], timeout=5_000)
+    expect(chips).to_have_text(["canary-probe"], timeout=5_000)
     assert r.files()[ids["first"]]["tags"] == ["canary-probe"]
     page.get_by_role("button", name="Remove tag canary-probe").click()
     expect(chips).to_have_count(0, timeout=5_000)

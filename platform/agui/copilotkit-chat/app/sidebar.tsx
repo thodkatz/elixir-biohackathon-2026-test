@@ -13,6 +13,7 @@ import { removeSession, renamePatch, tagSuggestions, updateSession, withTag, wit
 import { menuIndex } from "../lib/menu.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
 import { DeleteDialog } from "./delete-dialog";
+import { Ellipsis, Eye, EyeSlash, PencilSquare, Pencil, Pin, PinSlash, SidebarToggle, Tag, Trash } from "./icons";
 import { composing } from "./keys.ts";
 import { Popover } from "./popover";
 import { TagEditor } from "./tag-editor";
@@ -166,62 +167,86 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
     }
   };
 
+  const newChat = () => { end(); onNew(); };
   if (collapsed) {
     return (
       <nav className="spe-sidebar spe-sidebar-collapsed" aria-label="Sessions">
-        <button type="button" className="spe-collapse" aria-label="Show sessions" onClick={() => setCollapsed(false)}>›</button>
+        <button type="button" className="spe-icon-button" aria-label="Show sessions" title="Show sessions"
+          onClick={() => setCollapsed(false)}><SidebarToggle /></button>
+        <button type="button" className="spe-icon-button" aria-label="New chat" title="New chat"
+          onClick={newChat}><PencilSquare /></button>
       </nav>
     );
   }
+
+  const row = (s: SessionMeta) => {
+    const mine = busy?.id === s.id ? busy : null;
+    const popoverOpen = mine?.mode === "menu" || mine?.mode === "tags";
+    const classes = ["spe-row"];
+    if (s.id === activeId) classes.push("spe-row-active");
+    if (popoverOpen) classes.push("spe-row-menu-open");
+    if (mine?.mode === "rename") classes.push("spe-row-renaming");
+    return (
+      <li key={s.id} className={classes.join(" ")}>
+        {mine?.mode === "rename" ? (
+          <RenameInput
+            value={mine.draft}
+            onChange={(draft) => setBusy({ ...mine, draft })}
+            onSave={() => { end(true); }}
+            onCancel={() => { setBusy(null); focusTrigger(s.id); }}
+          />
+        ) : (
+          <button type="button" className="spe-row-open" aria-current={s.id === activeId ? "page" : undefined}
+            onClick={() => { end(); onOpen(s.id); }} onDoubleClick={() => startRename(s)}>
+            {/* The Pinned section shows it; this tells a screen reader too. */}
+            {s.pinned && <span className="spe-pin spe-sr-only">Pinned: </span>}
+            <span className="spe-row-title">{s.title}</span>
+          </button>
+        )}
+        <button
+          type="button"
+          className="spe-row-menu"
+          ref={(el) => { if (el) triggers.current.set(s.id, el); else triggers.current.delete(s.id); }}
+          aria-label={`Menu for ${s.title}`}
+          aria-haspopup="menu"
+          aria-expanded={popoverOpen}
+          aria-disabled={mine?.mode === "rename" || undefined}
+          tabIndex={mine?.mode === "rename" ? -1 : undefined}
+          onClick={(e) => toggleMenu(s.id, e)}
+        ><Ellipsis /></button>
+      </li>
+    );
+  };
+  // `sessions` comes ordered, pinned first.
+  const pinned = sessions.filter((s) => s.pinned);
+  const others = sessions.filter((s) => !s.pinned);
+
   return (
     <nav className="spe-sidebar" aria-label="Sessions">
       <div className="spe-sidebar-top">
-        <button type="button" className="spe-new" onClick={() => { end(); onNew(); }}>New chat</button>
-        <button type="button" className="spe-collapse" aria-label="Hide sessions"
-          onClick={() => { end(); setCollapsed(true); }}>‹</button>
+        <span className="spe-brand">SPE agent</span>
+        <button type="button" className="spe-icon-button spe-collapse" aria-label="Hide sessions" title="Hide sessions"
+          onClick={() => { end(); setCollapsed(true); }}><SidebarToggle /></button>
       </div>
-      <ul className="spe-list">
-        {sessions.map((s) => {
-          const mine = busy?.id === s.id ? busy : null;
-          const popoverOpen = mine?.mode === "menu" || mine?.mode === "tags";
-          const classes = ["spe-row"];
-          if (s.id === activeId) classes.push("spe-row-active");
-          if (popoverOpen) classes.push("spe-row-menu-open");
-          if (mine?.mode === "rename") classes.push("spe-row-renaming");
-          return (
-            <li key={s.id} className={classes.join(" ")}>
-              {mine?.mode === "rename" ? (
-                <RenameInput
-                  value={mine.draft}
-                  onChange={(draft) => setBusy({ ...mine, draft })}
-                  onSave={() => { end(true); }}
-                  onCancel={() => { setBusy(null); focusTrigger(s.id); }}
-                />
-              ) : (
-                <button type="button" className="spe-row-open" aria-current={s.id === activeId ? "page" : undefined}
-                  onClick={() => { end(); onOpen(s.id); }} onDoubleClick={() => startRename(s)}>
-                  <span className="spe-row-title">
-                    {s.pinned && <span className="spe-pin" aria-label="pinned">📌 </span>}
-                    {s.title}
-                  </span>
-                </button>
-              )}
-              <button
-                type="button"
-                className="spe-row-menu"
-                ref={(el) => { if (el) triggers.current.set(s.id, el); else triggers.current.delete(s.id); }}
-                aria-label={`Menu for ${s.title}`}
-                aria-haspopup="menu"
-                aria-expanded={popoverOpen}
-                aria-disabled={mine?.mode === "rename" || undefined}
-                tabIndex={mine?.mode === "rename" ? -1 : undefined}
-                onClick={(e) => toggleMenu(s.id, e)}
-              >⋯</button>
-            </li>
-          );
-        })}
-      </ul>
-      {sessions.length === 0 && <p className="spe-empty">No sessions yet.</p>}
+      <div className="spe-sidebar-actions">
+        <button type="button" className="spe-new" onClick={newChat}><PencilSquare />New chat</button>
+        {/* Title search goes here. */}
+      </div>
+      <div className="spe-sidebar-list">
+        {pinned.length > 0 && (
+          <>
+            <h3 className="spe-section" id="spe-section-pinned">Pinned</h3>
+            <ul className="spe-list" aria-labelledby="spe-section-pinned">{pinned.map(row)}</ul>
+          </>
+        )}
+        {pinned.length > 0 && others.length > 0 && <h3 className="spe-section" id="spe-section-chats">Chats</h3>}
+        {others.length > 0 && (
+          <ul className="spe-list" aria-labelledby={pinned.length > 0 ? "spe-section-chats" : undefined}>
+            {others.map(row)}
+          </ul>
+        )}
+        {sessions.length === 0 && <p className="spe-empty">No sessions yet.</p>}
+      </div>
       <p className="spe-note">Deleted sessions are kept in the run archive.</p>
 
       {busySession && busy?.mode === "menu" && (
@@ -287,12 +312,16 @@ function RowMenu({ session, keyboard, onRename, onPin, onTags, onHide, onDelete 
   };
   return (
     <div className="spe-menu" role="menu" aria-label={`Menu for ${session.title}`} tabIndex={-1} ref={menu} onKeyDown={onKeyDown}>
-      <button type="button" role="menuitem" onClick={onRename}>Rename</button>
-      <button type="button" role="menuitem" onClick={onPin}>{session.pinned ? "Unpin" : "Pin"}</button>
-      <button type="button" role="menuitem" onClick={onTags}>Tags</button>
-      <button type="button" role="menuitem" onClick={onHide}>{session.hidden ? "Unhide" : "Hide"}</button>
+      <button type="button" role="menuitem" onClick={onRename}><Pencil />Rename</button>
+      <button type="button" role="menuitem" onClick={onPin}>
+        {session.pinned ? <><PinSlash />Unpin</> : <><Pin />Pin</>}
+      </button>
+      <button type="button" role="menuitem" onClick={onTags}><Tag />Tags</button>
+      <button type="button" role="menuitem" onClick={onHide}>
+        {session.hidden ? <><Eye />Unhide</> : <><EyeSlash />Hide</>}
+      </button>
       <div role="separator" className="spe-menu-separator" />
-      <button type="button" role="menuitem" className="spe-menu-danger" onClick={onDelete}>Delete</button>
+      <button type="button" role="menuitem" className="spe-menu-danger" onClick={onDelete}><Trash />Delete</button>
     </div>
   );
 }

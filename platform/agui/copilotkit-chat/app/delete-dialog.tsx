@@ -26,7 +26,7 @@ export function DeleteDialog({ onCancel, onDelete }: { onCancel: () => void; onD
         <p id="spe-delete-text">This removes it from your list. It is kept in the run archive.</p>
         <div className="spe-dialog-actions">
           <button type="button" ref={cancel} onClick={onCancel}>Cancel</button>
-          <button type="button" className="spe-danger" onClick={onDelete}>Delete</button>
+          <button type="button" className="spe-dialog-confirm" onClick={onDelete}>Delete</button>
         </div>
       </div>
     </div>

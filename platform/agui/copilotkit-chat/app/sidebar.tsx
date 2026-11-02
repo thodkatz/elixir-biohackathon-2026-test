@@ -241,11 +241,11 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
       <div className="spe-sidebar-list">
         {pinned.length > 0 && (
           <>
-            <h3 className="spe-section" id="spe-section-pinned">Pinned</h3>
+            <h2 className="spe-section" id="spe-section-pinned">Pinned</h2>
             <ul className="spe-list" aria-labelledby="spe-section-pinned">{pinned.map(row)}</ul>
           </>
         )}
-        {pinned.length > 0 && others.length > 0 && <h3 className="spe-section" id="spe-section-chats">Chats</h3>}
+        {pinned.length > 0 && others.length > 0 && <h2 className="spe-section" id="spe-section-chats">Chats</h2>}
         {others.length > 0 && (
           <ul className="spe-list" aria-labelledby={pinned.length > 0 ? "spe-section-chats" : undefined}>
             {others.map(row)}

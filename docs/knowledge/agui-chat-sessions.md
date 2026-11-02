@@ -88,7 +88,9 @@ reuses is already hydrated from an earlier `expect(...)` on the same page, so th
 **Fix.** Before the first interaction on a freshly loaded page, wait for something that only exists once
 hydrated and interactive, e.g. `expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)`.
 `check_stop` itself does this now, first thing, since two of its three callers go straight from `page.goto()`
-into it.
+into it. `two_turn` (the paid check) does its own `page.goto()` internally and was missed in slice 2; it hit
+the same race on its first run against a real instance (slice 3, task 5: the first paid-check attempt failed
+before any model call, $0 spent) and now has the same wait right after its `goto()`.
 
 ## 7. A stop clicked very soon after a run starts used to record it `failed`, not `cancelled`
 

@@ -7,6 +7,7 @@ One line per document: what it covers and who reads it. Open the document only w
 | `../.methodology/shared/guides/` | the shared guides: workflow, sessions and context, spec and plan layout (a submodule; never edited here) | see `AGENTS.md`, *Read on demand* |
 | `guides/` | this repo's own guides (fork-only, `AGENTS.md`, *Contributing upstream*) | see `AGENTS.md`, *Read on demand* |
 | `guides/contributing-upstream.md` | guide: porting fork work to upstream, and merging upstream back | you open a PR on upstream or merge `upstream/main` |
+| `upstream-ports.md` | ledger: which fork commits went upstream (kraatz PR) or are not for upstream (fork-only) | you choose what to port upstream |
 | `knowledge/README.md` | as-you-go gotchas, one line each | before non-trivial work in an area |
 | `specs/`, `plans/` | upstream's design specs and plans (the AG-UI frontend), shared with upstream | when working on what they built |
 | `superpowers/specs/`, `superpowers/plans/` | our fork's specs and plans (fork-only, `AGENTS.md`, *Contributing upstream*) | when your unit names one |

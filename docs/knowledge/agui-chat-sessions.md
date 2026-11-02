@@ -85,12 +85,14 @@ window does nothing (no second `startNew()` fires — confirmed by logging every
 hydrated, the same click behaves normally. When `check_stop` runs later in the "all" scenario, the page it
 reuses is already hydrated from an earlier `expect(...)` on the same page, so the race never shows there.
 
-**Fix.** Before the first interaction on a freshly loaded page, wait for something that only exists once
-hydrated and interactive, e.g. `expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)`.
-`check_stop` itself does this now, first thing, since two of its three callers go straight from `page.goto()`
-into it. `two_turn` (the paid check) does its own `page.goto()` internally and was missed in slice 2; it hit
-the same race on its first run against a real instance (slice 3, task 5: the first paid-check attempt failed
-before any model call, $0 spent) and now has the same wait right after its `goto()`.
+**Fix.** Every button that starts an action (New chat in both views, a row's open and ⋯ menu, the header's
+actions) is now `disabled` until a `useHydrated()` flag goes true (`app/use-hydrated.ts`: a `useEffect` runs
+only on the client, after hydration; owned once in `app/page.tsx`, passed down as `ready`). Playwright's click
+already waits for "enabled", so no caller needs a stand-in wait before one any more; `check_stop`, `two_turn`
+and `slow_loop` in `sessions.py` all rely on this now instead. The textarea's own hydration-implying wait
+(`expect(get_by_test_id("copilot-chat-textarea")).to_be_visible(...)`) stays where it precedes typing into the
+textarea itself: that element is separately self-gated (mounted only once a session is open), not covered by a
+disabled attribute on a button.
 
 ## 7. A stop clicked very soon after a run starts used to record it `failed`, not `cancelled`
 

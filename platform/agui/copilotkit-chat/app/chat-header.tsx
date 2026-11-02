@@ -160,9 +160,9 @@ export function ChatHeader({ session, knownTags, running, ready, onPatch, onDele
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         disabled={!ready}
-        // Not `aria-disabled`→`disabled` for renaming: a disabled button cannot take the focus that
-        // ending a rename returns to it (React applies `setOpen(null)` after the handler's `focus()`),
-        // the same pattern the sidebar's rows use.
+        // `disabled` only for `!ready`; renaming uses `aria-disabled` instead, because a disabled
+        // button cannot take the focus that ending a rename returns to it (React applies
+        // `setOpen(null)` after the handler's `focus()`), the same pattern the sidebar's rows use.
         aria-disabled={open?.mode === "rename" || undefined}
         tabIndex={open?.mode === "rename" ? -1 : undefined}
         onClick={toggleMenu}

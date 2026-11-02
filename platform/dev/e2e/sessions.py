@@ -600,8 +600,8 @@ def check_stop(r: Run) -> str:
     Called right after a `page.goto()` by two of its three callers (the standalone `stop` scenario,
     local and against an instance); the third (the "all" scenario) is already well past its first
     load. Either way, the first click below needs no hydration wait of its own: New chat is
-    `disabled` until React has hydrated, so Playwright's click (which waits for "enabled") is safe
-    whether or not the page has hydrated yet by the time it runs.
+    `disabled` until the page is ready (hydrated, and the agent ready), so Playwright's click (which
+    waits for "enabled") is safe whether or not the page is ready yet by the time it runs.
     """
     page = r.page
     title = f"slow run to stop {uuid.uuid4().hex[:8]}"
@@ -676,7 +676,8 @@ def slow_loop(r: Run) -> None:
         title = f"slow run {stamp}-{n}"
         try:
             # No hydration wait before this first click (n == 1): New chat is `disabled` until
-            # React has hydrated, so the click's own wait for "enabled" covers it.
+            # the page is ready (hydrated, and the agent ready), so the click's own wait for
+            # "enabled" covers it.
             page.get_by_role("button", name="New chat").click(timeout=10_000)
             box = page.get_by_test_id("copilot-chat-textarea")
             box.fill(title)
@@ -695,9 +696,9 @@ def two_turn(r: Run) -> None:
     """The paid check: two turns with the instance's real model; both runs recorded completed."""
     page = r.page
     page.goto(BASE + "/")
-    # No hydration wait needed before this click: New chat is `disabled` until React has
-    # hydrated, so Playwright's click (which waits for "enabled") is safe either way (as in
-    # check_stop).
+    # No hydration wait needed before this click: New chat is `disabled` until the page is
+    # ready (hydrated, and the agent ready), so Playwright's click (which waits for "enabled")
+    # is safe either way (as in check_stop).
     page.get_by_role("button", name="New chat").click()
     first = "Run pwd and tell me the result in one sentence."
     for text in (first, "Now list the files in that directory, briefly."):
@@ -798,7 +799,8 @@ def main() -> None:
                 check_save_failed(r)
             else:
                 page.goto(BASE + "/")
-                check_stop(r)  # its own hydration wait covers the fresh `goto` above
+                # New chat is disabled until the page is ready, so the click right after goto is safe
+                check_stop(r)
             browser.close()
         print(f"sessions: {data}")
     finally:

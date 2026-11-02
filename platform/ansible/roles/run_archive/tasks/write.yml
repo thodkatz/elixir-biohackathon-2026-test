@@ -59,6 +59,11 @@
 - name: Unpack the AG-UI bundle
   when: agui_bundle.stat.exists
   block:
+    - name: Remove a leftover bundle directory
+      ansible.builtin.file:
+        path: "{{ spe_output_dir }}/archive-bundle-agui"
+        state: absent
+
     - name: Bundle directory
       ansible.builtin.file:
         path: "{{ spe_output_dir }}/archive-bundle-agui"

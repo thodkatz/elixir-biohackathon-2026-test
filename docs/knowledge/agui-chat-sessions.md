@@ -72,3 +72,40 @@ an async drain, since a detached run holds no HTTP response open for Next.js to 
 it refuses new runs, cancels every run in progress (saved `cancelled`), drains the session queue (at most 25s)
 and then exits. `node scripts/check-shutdown.mjs` checks this end to end, both standalone and in the built
 image.
+
+## 6. Clicking "New chat" right after `page.goto()` can be silently dropped
+
+**Symptom.** `platform/dev/e2e/sessions.py`'s `check_stop`, called right after `page.goto(BASE + "/")` with no
+other check in between, sends its message but `agent.isRunning` never flips: *New chat* stays enabled and no
+run is ever recorded, even though the button visibly exists and the click reports success.
+
+**Cause.** A fresh `page.goto()` return (the `load` event) does not mean the React app has hydrated yet. A
+server-rendered *New chat* button exists in the DOM before its `onClick` is attached; a click landing in that
+window does nothing (no second `startNew()` fires — confirmed by logging every `startNew()` call). Once
+hydrated, the same click behaves normally. When `check_stop` runs later in the "all" scenario, the page it
+reuses is already hydrated from an earlier `expect(...)` on the same page, so the race never shows there.
+
+**Fix.** Before the first interaction on a freshly loaded page, wait for something that only exists once
+hydrated and interactive, e.g. `expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)`.
+`sessions.py`'s `main()` does this before calling `check_stop` standalone (`--scenario stop`).
+
+## 7. Stopping a run too soon after it shows as running records it `failed`, not `cancelled`
+
+**Symptom.** `check_stop`'s flow (type a "slow" message, wait for *New chat* to disable, click the composer's
+stop button) occasionally (roughly 1 run in 4–6, worse on a cold server) ends with the session's last run
+`status: "failed"` instead of `"cancelled"`, with `started_at`/`ended_at` only ~50 ms apart — far too short for
+the fake agent's first streamed chunk (1 s in).
+
+**Cause.** The sidebar's *New chat* disables as soon as the client locally starts the run
+(`onRunInitialized`), which can fire before the request has actually reached the server's admission
+(`lib/recorder.ts`'s `withSession`/admission wrapper). `HttpAgent.abortRun()` only maps to the recorder's
+`cancelled` status when the server has gotten far enough to start its own request and set up its abort
+controller; an abort that races ahead of that lands as a plain dropped-connection error, which the recorder
+records as `failed` (the same path as "a stream error (connection lost): failed" in `recorder.test.ts`).
+Confirmed empirically: inserting any delay before the stop click (even an incidental one, like
+`r.shot("during-run")` writing a screenshot file) made the race disappear; waiting for the outgoing
+`POST .../agent/spe/run` request to be *issued* (`page.expect_request`) was not enough — the race is about
+server-side admission, not the client sending the request.
+
+**Fix.** `check_stop` waits `page.wait_for_timeout(250)` between confirming *New chat* is disabled and
+clicking the stop button — enough margin in testing (0/14 failures) where the bare click flaked.

@@ -18,6 +18,7 @@ import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
 import { ChatHeader } from "./chat-header";
 import { ChevronRight } from "./icons";
 import { Sidebar } from "./sidebar";
+import { useHydrated } from "./use-hydrated";
 import { useRunReconcile } from "./use-run-reconcile";
 
 const MAX_RESULT_LINES = 40;
@@ -106,6 +107,9 @@ function Chat() {
   const requestRef = useRef(0);
   const { agent, isReady } = useAgent({ agentId: "spe" });
   useDefaultRenderTool({ render: (props) => <ToolCard {...props} /> });
+  // One owner of "has React hydrated yet": passed down to every button that starts an action from
+  // the sidebar and header, so a click before handlers attach is disabled rather than dropped.
+  const ready = useHydrated();
 
   // After each run (finished, failed or stopped) the list, fetched until it shows that run; once the
   // open session is in it (its first run recorded), the URL names it.
@@ -219,6 +223,7 @@ function Chat() {
         onDeleted={onDeleted}
         onError={setError}
         running={busy}
+        ready={ready}
       />
       <div className="spe-page">
         <ChatHeader
@@ -226,6 +231,7 @@ function Chat() {
           session={active === null ? undefined : (sessions.find((s) => s.id === active) ?? null)}
           knownTags={knownTags}
           running={busy}
+          ready={ready}
           onPatch={patchOpen}
           onDelete={() => void deleteOpen()}
           onError={setError}

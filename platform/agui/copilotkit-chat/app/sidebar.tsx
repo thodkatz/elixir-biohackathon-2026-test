@@ -32,6 +32,9 @@ type SidebarProps = {
   onError: (message: string) => void;
   /** A run is in progress: switching session, New chat and the open session's Delete are disabled. */
   running: boolean;
+  /** False until React has hydrated: every button here starts an action, so each stays disabled
+   *  until then rather than risk a click landing before its handler is attached. */
+  ready: boolean;
 };
 
 // What the one busy row is doing. `keyboard`: the menu was opened from the keyboard, so its first
@@ -45,7 +48,7 @@ type Busy =
 const errorText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 
 
-export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChanged, onDeleted, onError, running }: SidebarProps) {
+export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChanged, onDeleted, onError, running, ready }: SidebarProps) {
   const [busy, setBusy] = useState<Busy | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const triggers = useRef(new Map<string, HTMLButtonElement>());
@@ -194,7 +197,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
         <button type="button" className="spe-icon-button" aria-label="Show sessions" title="Show sessions"
           onClick={() => setCollapsed(false)}><SidebarToggle /></button>
         <button type="button" className="spe-icon-button" aria-label="New chat" title="New chat"
-          disabled={running} onClick={newChat}><PencilSquare /></button>
+          disabled={running || !ready} onClick={newChat}><PencilSquare /></button>
       </nav>
     );
   }
@@ -218,7 +221,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
           />
         ) : (
           <button type="button" className="spe-row-open" aria-current={s.id === activeId ? "page" : undefined}
-            disabled={running} onClick={() => { end(); onOpen(s.id); }} onDoubleClick={() => startRename(s)}>
+            disabled={running || !ready} onClick={() => { end(); onOpen(s.id); }} onDoubleClick={() => startRename(s)}>
             {/* The Pinned section shows it; this tells a screen reader too. */}
             {s.pinned && <span className="spe-pin spe-sr-only">Pinned: </span>}
             <span className="spe-row-title">{s.title}</span>
@@ -231,6 +234,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
           aria-label={`Menu for ${s.title}`}
           aria-haspopup="menu"
           aria-expanded={popoverOpen}
+          disabled={!ready}
           aria-disabled={mine?.mode === "rename" || undefined}
           tabIndex={mine?.mode === "rename" ? -1 : undefined}
           onClick={(e) => toggleMenu(s.id, e)}
@@ -246,7 +250,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
           onClick={() => { end(); setCollapsed(true); }}><SidebarToggle /></button>
       </div>
       <div className="spe-sidebar-actions">
-        <button type="button" className="spe-new" disabled={running} onClick={newChat}><PencilSquare />New chat</button>
+        <button type="button" className="spe-new" disabled={running || !ready} onClick={newChat}><PencilSquare />New chat</button>
         <SearchBox query={filter.query} knownTags={knownTags} onChange={(query) => setFilter({ ...filter, query })} />
       </div>
       <div className="spe-sidebar-list">

@@ -25,6 +25,9 @@ type Props = {
   knownTags: string[];
   /** A run is in progress: Delete is disabled, as in the open session's row. */
   running: boolean;
+  /** False until React has hydrated: the actions button starts a menu of actions, so it stays
+   *  disabled until then rather than risk a click landing before its handler is attached. */
+  ready: boolean;
   /** Saves the change and refreshes the list; rejects with the failure. */
   onPatch: (patch: MetaPatch) => Promise<void>;
   onDelete: () => void;
@@ -39,7 +42,7 @@ type Mode =
 
 const errorText = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 
-export function ChatHeader({ session, knownTags, running, onPatch, onDelete, onError }: Props) {
+export function ChatHeader({ session, knownTags, running, ready, onPatch, onDelete, onError }: Props) {
   const [open, setOpen] = useState<Mode | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const popover = useRef<HTMLDivElement>(null);
@@ -156,8 +159,10 @@ export function ChatHeader({ session, knownTags, running, onPatch, onDelete, onE
         aria-label="Chat actions"
         aria-haspopup="menu"
         aria-expanded={menuOpen}
-        // Not `disabled`: a disabled button cannot take the focus that ending a rename returns to it
-        // (React applies `setOpen(null)` after the handler's `focus()`), the same pattern the sidebar's rows use.
+        disabled={!ready}
+        // Not `aria-disabled`→`disabled` for renaming: a disabled button cannot take the focus that
+        // ending a rename returns to it (React applies `setOpen(null)` after the handler's `focus()`),
+        // the same pattern the sidebar's rows use.
         aria-disabled={open?.mode === "rename" || undefined}
         tabIndex={open?.mode === "rename" ? -1 : undefined}
         onClick={toggleMenu}

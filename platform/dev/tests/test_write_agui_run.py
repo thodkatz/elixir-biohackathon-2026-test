@@ -118,6 +118,18 @@ def test_agui_run_tool_calls_are_fenced_longer_than_any_backtick_run(bundle, tmp
     assert "## user\n\nturn 1\n" in md and "## assistant\n\nTurn 1: the command ran.\n" in md
 
 
+def test_agui_run_numeric_title_does_not_crash(tmp_path):
+    b = tmp_path / "bundle"
+    (b / "sessions").mkdir(parents=True)
+    rec = record(ACTIVE, 42, "2026-10-29T10:02:11.000Z")
+    (b / "sessions" / f"{ACTIVE}.json").write_text(json.dumps(rec, indent=1))
+    out = tmp_path / "run"
+    proc = run(b, out)
+    assert "1 sessions" in proc.stdout
+    assert (out / "chats" / "01-42.md").exists()
+    assert "[42](chats/01-42.md)" in (out / "index.md").read_text()
+
+
 def test_agui_run_empty_bundle_says_so(tmp_path):
     b = tmp_path / "bundle"
     (b / "sessions").mkdir(parents=True)

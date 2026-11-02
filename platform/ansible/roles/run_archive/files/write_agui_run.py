@@ -204,7 +204,7 @@ def main(argv):
     records, unreadable = load_sessions(raw_dir)
     rows = []
     for i, (name, rec) in enumerate(records, 1):
-        stem = f"{i:02d}-{slug(rec.get('title'))}"
+        stem = f"{i:02d}-{slug(title_of(rec))}"
         write(os.path.join(run_dir, "chats", stem + ".md"), render_session(rec))
         shutil.copyfile(os.path.join(raw_dir, name), os.path.join(run_dir, "chats", stem + ".json"))
         link = re.sub(r"([\[\]|\\])", r"\\\1", title_of(rec))

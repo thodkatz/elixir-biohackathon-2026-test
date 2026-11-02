@@ -473,7 +473,7 @@ index edc0e58..14e3cef 100644
  import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
  import type { SessionMeta } from "../lib/sessions.ts";
  import { ChevronRight } from "./icons";
-@@ -182,7 +182,7 @@ function Chat() {
+@@ -182,6 +182,6 @@ function Chat() {
    return (
      <div className="spe-layout">
        <Sidebar
@@ -481,7 +481,6 @@ index edc0e58..14e3cef 100644
 +        sessions={sessions}
          knownTags={[...new Set(sessions.flatMap((s) => s.tags))].sort()}
          activeId={active}
-         onNew={startNew}
 diff --git a/platform/agui/copilotkit-chat/app/sidebar.tsx b/platform/agui/copilotkit-chat/app/sidebar.tsx
 index cc46485..2f1fa35 100644
 --- a/platform/agui/copilotkit-chat/app/sidebar.tsx
@@ -1349,7 +1348,7 @@ index 14e3cef..0e1733d 100644
    // The history goes onto the agent first, then CopilotChat remounts on the new thread
    // (key={id}): a freshly mounted chat on a non-explicit thread keeps the agent's messages,
    // and makes no connect request that would clear them (README, Sessions).
-@@ -160,41 +171,53 @@ function Chat() {
+@@ -160,43 +171,55 @@ function Chat() {
      else startNew(); // no parameter, or a malformed one: dropped
    }, [isReady, open, refresh, startNew]);
  
@@ -1398,9 +1397,11 @@ index 14e3cef..0e1733d 100644
 -        knownTags={[...new Set(sessions.flatMap((s) => s.tags))].sort()}
 +        knownTags={knownTags}
          activeId={active}
-         onNew={startNew}
-         onOpen={(id) => void open(id)}
-         onChanged={() => void refresh()}
+         // Switching sessions mid-run would put the new session's history on the agent that is
+         // still streaming the old one's run, so both are ignored until the run ends.
+         onNew={() => { if (!agent.isRunning) startNew(); }}
+         onOpen={(id) => { if (!agent.isRunning) void open(id); }}
+         onChanged={refresh}
          onDeleted={onDeleted}
          onError={setError}
 +        running={busy}
@@ -1421,7 +1422,7 @@ index 14e3cef..0e1733d 100644
          {error && (
            <div className="spe-error" role="alert">
              <span className="spe-error-text">{error}</span>
-@@ -211,7 +234,10 @@ function Chat() {
+@@ -213,7 +236,10 @@ function Chat() {
                className="spe-chat"
                onError={(event) => {
                  // The prop's type also admits a DOM error event; only CopilotKit's carries `error`.
@@ -1464,7 +1465,7 @@ index 2f1fa35..df25c2b 100644
  import { TagEditor } from "./tag-editor";
  
 @@ -31,6 +30,8 @@ type SidebarProps = {
-   onChanged: () => void;
+   onChanged: () => Promise<unknown>; // resolves once the list is fetched again
    onDeleted: (id: string) => void;
    onError: (message: string) => void;
 +  /** A run is in progress: switching session, New chat and the open session's Delete are disabled. */

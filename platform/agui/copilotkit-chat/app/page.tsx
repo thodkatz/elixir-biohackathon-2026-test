@@ -192,9 +192,11 @@ function Chat() {
         sessions={listOrder(sessions)}
         knownTags={[...new Set(sessions.flatMap((s) => s.tags))].sort()}
         activeId={active}
-        onNew={startNew}
-        onOpen={(id) => void open(id)}
-        onChanged={() => void refresh()}
+        // Switching sessions mid-run would put the new session's history on the agent that is
+        // still streaming the old one's run, so both are ignored until the run ends.
+        onNew={() => { if (!agent.isRunning) startNew(); }}
+        onOpen={(id) => { if (!agent.isRunning) void open(id); }}
+        onChanged={refresh}
         onDeleted={onDeleted}
         onError={setError}
       />

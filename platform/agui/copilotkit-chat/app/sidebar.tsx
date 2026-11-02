@@ -24,7 +24,7 @@ type SidebarProps = {
   activeId: string | null;
   onNew: () => void;
   onOpen: (id: string) => void;
-  onChanged: () => void;
+  onChanged: () => Promise<unknown>; // resolves once the list is fetched again
   onDeleted: (id: string) => void;
   onError: (message: string) => void;
 };
@@ -45,8 +45,9 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   const [collapsed, setCollapsed] = useState(false);
   const triggers = useRef(new Map<string, HTMLButtonElement>());
   const popover = useRef<HTMLDivElement>(null);
-  // The session id whose tag PATCH is in flight, so a second Enter before it returns is
-  // ignored instead of computing its patch from the same stale tag list as the first.
+  // The session id whose tag change is in flight, until the list is fetched again: each patch is
+  // the whole tag list, so a second add or remove before then (ignored) would start from the
+  // list without the first change and undo it.
   const savingTag = useRef<string | null>(null);
   const busySession = busy ? sessions.find((s) => s.id === busy.id) : undefined;
   const suggestions = busy?.mode === "tags" && busy.suggest && busySession
@@ -59,7 +60,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
     if (!patch) return;
     try {
       await updateSession(id, patch);
-      onChanged();
+      void onChanged();
     } catch (e) {
       onError(errorText(e, "Saving the change failed."));
     }
@@ -144,7 +145,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
     try {
       await updateSession(s.id, patch);
       setTags(s.id, (b) => ({ ...b, draft: "", suggest: false, error: null }));
-      onChanged();
+      await onChanged();
     } catch (e) {
       setTags(s.id, (b) => ({ ...b, draft: text, suggest: false, error: errorText(e, "Saving the tag failed.") }));
     } finally {
@@ -153,12 +154,16 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   };
   const removeTag = async (s: SessionMeta, tag: string) => {
     popover.current?.querySelector<HTMLInputElement>(".spe-tag-input")?.focus();
+    if (savingTag.current === s.id) return;
+    savingTag.current = s.id;
     try {
       await updateSession(s.id, withoutTag(s.tags, tag));
       setTags(s.id, (b) => ({ ...b, error: null }));
-      onChanged();
+      await onChanged();
     } catch (e) {
       setTags(s.id, (b) => ({ ...b, error: errorText(e, "Saving the tag failed.") }));
+    } finally {
+      savingTag.current = null;
     }
   };
 

@@ -18,8 +18,8 @@ answers").
 interfaces and Review Focus: [plan README](README.md). Paths are relative to the repository root; `CHAT` is
 `platform/agui/copilotkit-chat`.
 
-**What this slice takes from slice 2** ([slice-2-sidebar.md](slice-2-sidebar.md), tasks 1 and 2; its merged code
-is authoritative, and a difference found there is recorded as a ruling in the handoff):
+**What this slice takes from slice 2** ([slice-2-sidebar.md](slice-2-sidebar.md), tasks 1, 2, 6 and 7; its merged
+code is authoritative, and a difference found there is recorded as a ruling in the handoff):
 
 - `CHAT/lib/client.ts`: `type Fetch`, `ApiError`, `fetchSessions`, `fetchSession`, `updateSession`, `removeSession`
   (each with an optional `f?: Fetch`), `listOrder` (removed here, task 1), `renamePatch`, `withTag`, `withoutTag`,
@@ -584,8 +584,9 @@ index cc46485..2f1fa35 100644
 ```
 
 - [ ] **Step 8: Styles.** Apply to `CHAT/app/globals.css`: the first group's heading takes the first heading's
-  tighter top padding, and a new section before the row popover's. Tokens only (no colour outside the token
-  blocks), so light and dark both hold:
+  tighter top padding, and a new section before the row popover's; the reduced-motion list gains
+  `.spe-search-suggestions`, which also animates in. Tokens only (no colour outside the token blocks), so light
+  and dark both hold:
 
 ```diff
 diff --git a/platform/agui/copilotkit-chat/app/globals.css b/platform/agui/copilotkit-chat/app/globals.css
@@ -633,6 +634,12 @@ index 0d9bc5d..fb266e3 100644
  /* ---------- Row popover: menu and tag editor ---------- */
  
  /* Floats over the list (fixed, placed by the sidebar under or above its ⋯). */
+@@ -378,4 +378,4 @@ body {
+ @media (prefers-reduced-motion: reduce) {
+-  .spe-popover, .spe-dialog, .spe-dialog-backdrop { animation: none; }
++  .spe-popover, .spe-dialog, .spe-dialog-backdrop, .spe-search-suggestions { animation: none; }
+   .spe-tool-chevron.spe-icon { transition: none; }
+ }
 ```
 
 - [ ] **Step 9: Run the suites**
@@ -701,6 +708,11 @@ nothing, so its own `RUN_ERROR` is the only message. When the recorder reports a
 list is fetched once after the run, without retries. The hook replaces slice 2's run-end effect: the list it returns also puts the open session into the
 URL once listed. The open session's *Delete* is disabled during a run as well (it would start a new chat under the
 running one, through slice 2's `onDeleted`), in its row's menu and in the header's; record this as a ruling (cost if wrong: one more click after the run).
+
+The header must never say "New chat" while the page's own "Loading…" still shows: on first load, which
+session is open is unknown until the URL's `?session=` is resolved, so `ChatHeader`'s `session` prop is
+`undefined` for that span (no title shown) and only `null` once a New chat is actually confirmed (`active`
+holds a fresh id with no session file yet).
 
 - [ ] **Step 1: Write the failing test** `CHAT/lib/reconcile.test.ts`
 
@@ -1095,7 +1107,10 @@ export function RenameInput({ value, onChange, onSave, onCancel, label = "Sessio
 // The chat header (Open WebUI's navbar): the open session's title, renamable in place (by its menu's
 // Rename or a double-click, as a row), and the same `⋯` menu as its sidebar row: RowMenu, the
 // TagEditor, the DeleteDialog, with the sidebar's close and focus rules. A session not yet recorded
-// (New chat, before its first run ends) shows "New chat" and no menu: PATCH would answer 404.
+// (New chat, before its first run ends) shows "New chat" and no menu: PATCH would answer 404. Which
+// session is open is still unknown on first load (before the URL's `?session=` is resolved, while
+// the page's own "Loading…" shows): `session` is `undefined` then, so the header shows no title at
+// all rather than "New chat" while the rest of the page says it is still loading.
 // Its rename input is labelled "Chat title", not the rows' "Session title", so a label lookup finds one.
 // Titles and tags are model or participant text: rendered as React text only, never as HTML.
 import { useEffect, useRef, useState } from "react";
@@ -1109,7 +1124,9 @@ import { RenameInput, RowMenu } from "./row-menu";
 import { TagEditor } from "./tag-editor";
 
 type Props = {
-  session: SessionMeta | null;
+  /** `undefined`: which session is open is not yet known (first load, still "Loading…"), so
+   * nothing is shown. `null`: a confirmed New chat, not yet recorded. */
+  session: SessionMeta | null | undefined;
   knownTags: string[];
   /** A run is in progress: Delete is disabled, as in the open session's row. */
   running: boolean;
@@ -1182,6 +1199,9 @@ export function ChatHeader({ session, knownTags, running, onPatch, onDelete, onE
     return () => document.removeEventListener("keydown", onKey);
   });
 
+  if (session === undefined) {
+    return <header className="spe-header" />; // which session is open is not yet known
+  }
   if (session === null) {
     return (
       <header className="spe-header">
@@ -1391,7 +1411,7 @@ index 14e3cef..0e1733d 100644
 -        </header>
 +        <ChatHeader
 +          key={active ?? "none"}
-+          session={sessions.find((s) => s.id === active) ?? null}
++          session={active === null ? undefined : (sessions.find((s) => s.id === active) ?? null)}
 +          knownTags={knownTags}
 +          running={busy}
 +          onPatch={patchOpen}
@@ -1499,7 +1519,8 @@ index 2f1fa35..df25c2b 100644
 ```
 
 and to `CHAT/app/globals.css` (the header's focus ring, its rename input and `⋯`, the disabled controls; tokens
-only, light and dark; slice 2's `.spe-header` and `.spe-header-title` rules stay):
+only, light and dark; slice 2's `.spe-header` and `.spe-header-title` rules gain the new properties in place,
+rather than a second rule under the same selector):
 
 ```diff
 diff --git a/platform/agui/copilotkit-chat/app/globals.css b/platform/agui/copilotkit-chat/app/globals.css
@@ -1515,13 +1536,21 @@ index fb266e3..ad8a85b 100644
    outline: 2px solid var(--focus-ring); outline-offset: 2px;
  }
  
-@@ -172,6 +172,17 @@ body {
-   background: linear-gradient(var(--bg), transparent); pointer-events: none; }
- .spe-header-title { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-   font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text-secondary); }
+@@ -169,10 +169,20 @@ body {
+ /* ---------- Header: the open session's title, nothing else ---------- */
+ 
+-.spe-header { position: relative; z-index: 10; flex: none; display: flex; align-items: center; height: 48px;
+-  padding: 0 20px; background: var(--bg); }
 +/* Renamable in place (double-click or the menu's Rename), with the rows' ⋯ menu beside it. */
-+.spe-header { gap: 4px; }
-+.spe-header-title { cursor: default; user-select: none; }
++.spe-header { position: relative; z-index: 10; flex: none; display: flex; align-items: center; gap: 4px;
++  height: 48px; padding: 0 20px; background: var(--bg); }
+ /* A soft fade under it, over the chat's top edge, instead of a rule. */
+ .spe-header::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 16px;
+   background: linear-gradient(var(--bg), transparent); pointer-events: none; }
+-.spe-header-title { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+-  font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text-secondary); }
++.spe-header-title { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
++  font-size: 15px; line-height: 20px; font-weight: 500; color: var(--text-secondary); cursor: default; }
 +.spe-header-rename { flex: 0 1 480px; min-width: 0; height: 32px; box-sizing: border-box; margin: 0 0 0 -8px;
 +  padding: 6px 8px; border: 0; border-radius: var(--radius-item); background: none; color: var(--text);
 +  font: inherit; font-size: 15px; line-height: 20px; font-weight: 500; outline: none;
@@ -1695,6 +1724,19 @@ def check_header(r: Run, ids: dict[str, str]) -> None:
     assert rec["title"] == "Renamed in the header" and rec["title_source"] == "user", rec["title"]
     assert rec["tags"] == ["dns", "header"], rec["tags"]
     r.shot("header")
+
+    actions.click()
+    page.get_by_role("menuitem", name="Delete").click()
+    dialog = page.get_by_role("alertdialog")
+    expect(dialog).to_contain_text("Delete chat?")
+    # The dialog renders inside the header, whose z-index: 10 puts it above the chat below;
+    # this shot shows the dialog's backdrop covering the chat, not hidden behind it.
+    r.shot("header-delete")
+    page.keyboard.press("Escape")
+    expect(dialog).to_have_count(0)
+    expect(r.row("Renamed in the header")).to_have_count(1)
+    assert r.files()[ids["first"]]["deleted_at"] is None
+
     page.reload()
     expect(header.locator(".spe-header-title")).to_have_text("Renamed in the header", timeout=10_000)
     expect(page.locator(".spe-tool")).to_have_count(2)
@@ -1703,7 +1745,8 @@ def check_header(r: Run, ids: dict[str, str]) -> None:
     expect(header.locator(".spe-header-title")).to_have_text("New chat")
     expect(header.get_by_role("button", name="Chat actions")).to_have_count(0)
     r.ok("header: rename by its menu (Enter saves) and double-click (Esc cancels), tags in the menu's tag editor, "
-         "saved to the file; reload reopens it with its tool cards; New chat has no menu")
+         "Delete opens the same dialog above the chat (Escape cancels, keeps the file); saved to the file; "
+         "reload reopens it with its tool cards; New chat has no menu")
 
 
 def check_stop(r: Run) -> str:

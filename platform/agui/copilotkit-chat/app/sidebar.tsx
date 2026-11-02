@@ -45,6 +45,9 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   const [collapsed, setCollapsed] = useState(false);
   const triggers = useRef(new Map<string, HTMLButtonElement>());
   const popover = useRef<HTMLDivElement>(null);
+  // The session id whose tag PATCH is in flight, so a second Enter before it returns is
+  // ignored instead of computing its patch from the same stale tag list as the first.
+  const savingTag = useRef<string | null>(null);
   const busySession = busy ? sessions.find((s) => s.id === busy.id) : undefined;
   const suggestions = busy?.mode === "tags" && busy.suggest && busySession
     ? tagSuggestions(knownTags, busySession.tags, busy.draft)
@@ -131,18 +134,21 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   const setTags = (id: string, change: (b: Extract<Busy, { mode: "tags" }>) => Busy) =>
     setBusy((b) => (b && b.mode === "tags" && b.id === id ? change(b) : b));
   const addTag = async (s: SessionMeta, text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() || savingTag.current === s.id) return;
     const patch = withTag(s.tags, text);
     if (!patch) {
       setTags(s.id, (b) => ({ ...b, draft: "", suggest: false, error: null })); // already there
       return;
     }
+    savingTag.current = s.id;
     try {
       await updateSession(s.id, patch);
       setTags(s.id, (b) => ({ ...b, draft: "", suggest: false, error: null }));
       onChanged();
     } catch (e) {
       setTags(s.id, (b) => ({ ...b, draft: text, suggest: false, error: errorText(e, "Saving the tag failed.") }));
+    } finally {
+      savingTag.current = null;
     }
   };
   const removeTag = async (s: SessionMeta, tag: string) => {

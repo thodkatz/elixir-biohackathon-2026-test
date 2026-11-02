@@ -209,7 +209,10 @@ function Chat() {
         knownTags={knownTags}
         activeId={active}
         // Switching sessions mid-run would put the new session's history on the agent that is
-        // still streaming the old one's run, so both are ignored until the run ends.
+        // still streaming the old one's run. `running={busy}` below disables the buttons
+        // themselves; these guards are the backstop for a click that lands before that
+        // re-render reaches the DOM (busy comes from the same agent.isRunning, just a render
+        // behind), so both stay ignored until the run truly ends either way.
         onNew={() => { if (!agent.isRunning) startNew(); }}
         onOpen={(id) => { if (!agent.isRunning) void open(id); }}
         onChanged={refresh}

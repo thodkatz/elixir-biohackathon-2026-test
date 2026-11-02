@@ -53,7 +53,8 @@ this is the SPE agent and every tool call is shown sits under the composer (Copi
 The sidebar's search filters by title (case-insensitive) and, as in Open WebUI, by `tag:<name>` terms (a
 session must have every one; typing `tag:` suggests the tags in use), lists pinned sessions first and then
 *Today*, *Yesterday*, *Previous 7 days* and *Older* by last change, and shows hidden sessions only with *Show
-hidden*. The chat header shows the open session's title, renamable in place, and the same `⋯` menu as its row. While a run is in progress, switching session and *New chat* are disabled; after a run the list is
+hidden*. The chat header shows the open session's title, renamable in place, and the same `⋯` menu as its
+row. While a run is in progress, switching session and *New chat* are disabled; after a run the list is
 fetched until it shows that run (up to 5 retries, 500 ms apart), else the error bar says the session could not
 be saved. `platform/dev/e2e/sessions.py` drives all of it in a browser against the scripted agent.
 

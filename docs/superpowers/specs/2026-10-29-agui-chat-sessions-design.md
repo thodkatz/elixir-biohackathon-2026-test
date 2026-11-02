@@ -1,6 +1,6 @@
 # AG-UI chat sessions — design
 
-**Status:** approved by the user (2026-10-29), PR #7. **Latest clarification:** 3.
+**Status:** approved by the user (2026-10-29), PR #7. **Latest clarification:** 4.
 Read against this repo at `ff3acc3` (`main`, equal to `upstream/main` plus the fork's files and the
 optional token cap of upstream PR #9).
 

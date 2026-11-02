@@ -86,11 +86,16 @@ hydrated, the same click behaves normally. When `check_stop` runs later in the "
 reuses is already hydrated from an earlier `expect(...)` on the same page, so the race never shows there.
 
 **Fix.** Every button that starts an action (New chat in both views, a row's open and ⋯ menu, the header's
-actions) is now `disabled` until a `useHydrated()` flag goes true (`app/use-hydrated.ts`: a `useEffect` runs
-only on the client, after hydration; owned once in `app/page.tsx`, passed down as `ready`). Playwright's click
-already waits for "enabled", so no caller needs a stand-in wait before one any more; `check_stop`, `two_turn`
-and `slow_loop` in `sessions.py` all rely on this now instead. The textarea's own hydration-implying wait
-(`expect(get_by_test_id("copilot-chat-textarea")).to_be_visible(...)`) stays where it precedes typing into the
+actions) is now `disabled` until a `ready` flag goes true, owned once in `app/page.tsx` and passed down:
+`useHydrated()` (`app/use-hydrated.ts`, a `useEffect` that runs only on the client, after hydration) **and**
+`useAgent`'s `isReady`. Hydration alone turned out not to be enough: the first-load effect that calls
+`startNew()`/`open()` is itself gated on `isReady`, so a New chat click that landed after hydration but before
+`isReady` (no longer dropped, just early) would call `startNew()` itself and mount the chat ahead of that
+effect — found by running the standalone `stop` scenario ten times in a row after fixing hydration alone, which
+failed every time. Playwright's click already waits for "enabled", so no caller needs a stand-in wait before
+one any more; `check_stop`, `two_turn` and `slow_loop` in `sessions.py` all rely on this now instead. The
+textarea's own hydration-implying wait (`expect(get_by_test_id("copilot-chat-textarea")).to_be_visible(...)`)
+stays where it precedes typing into the
 textarea itself: that element is separately self-gated (mounted only once a session is open), not covered by a
 disabled attribute on a button.
 

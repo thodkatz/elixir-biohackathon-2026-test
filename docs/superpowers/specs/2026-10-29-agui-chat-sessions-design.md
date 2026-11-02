@@ -32,7 +32,7 @@ copies every session and the agent's run log into the run directory, rendered li
 | 6 | Delete is a soft delete: `deleted_at` set, the session gone from every API answer and refused for new runs, the file kept and archived; a run already in progress is not cancelled and is recorded into the deleted file | [Recording](#2-recording-and-the-session-api) | `npm test`: after `DELETE`, list omits it, `GET`/`PATCH`/`DELETE` give 404, a run on its id ends with `RUN_ERROR` and does not reach the agent; the file still exists with `deleted_at` |
 | 7 | Titles start as the first user message cut to 60 characters and are never overwritten once the user renames | [Storage](#1-storage-and-the-session-record) | `npm test`: auto title after the first run; after `PATCH {title}` (`title_source: "user"`) a later run leaves it unchanged |
 | 8 | Tags are normalised (trim, lower-case, `[a-z0-9._-]`, ≤ 32 chars, ≤ 20 per session, de-duplicated) | [Storage](#1-storage-and-the-session-record) | `npm test`: table of inputs → stored tags or 400 |
-| 9 | The sidebar: new chat, title search, tag filter (all selected tags must match), pinned first then date groups, row menu (rename, pin, tags, hide, delete with confirmation), show-hidden toggle; the open session is in the URL (`?session=`) | [Sidebar](#3-the-sidebar) | Playwright run against `fake_agent.py`: each action, then a reload reopens the same session with its tool cards; screenshots in the slice's handoff |
+| 9 | The sidebar, in Open WebUI's look and behaviour (clarification 4): new chat, title search with Open WebUI's `tag:` filter (all named tags must match), pinned first then date groups, a popover row menu (rename, pin, tags, hide, delete with confirmation) that closes on outside click and Escape, show-hidden toggle; the open session is in the URL (`?session=`) | [Sidebar](#3-the-sidebar) | Playwright run against `fake_agent.py`: each action, then a reload reopens the same session with its tool cards; outside click, Escape and opening another row close the menu and commit or end an edit; screenshots (light and dark) in the slice's handoff |
 | 10 | Switching session and New chat are disabled while a run is in progress; after a run ends the list is reconciled until it shows that run | [Sidebar](#3-the-sidebar) | Playwright: during a scripted slow run both controls are disabled; after stop they are enabled, the stopped run is recorded as `cancelled` and a new session's row appears, also with the save delayed by a test hook |
 | 11 | `archive.yml` exports, for `spe_frontend: agui`, every session file (hidden and deleted included) and the agent's `runs.jsonl`, after stopping `chat-ui` and then `agent` so no run is in progress or unsaved; an absent run log is allowed, a missing `chat-ui` container fails the export | [Archive](#4-the-archive) | On the dev VM: `archive.yml` after the Playwright run gives a run directory with one `agui-sessions/<id>.json` per file on the volume and `agent-runs.jsonl`; `archive.yml` during a slow run has that run, `cancelled`, in both; on a fresh instance with zero runs it succeeds with an empty `agui-sessions/` and no `agent-runs.jsonl` (the run log's copy fails with `Could not find the file`, which the export accepts); with `chat-ui` removed, `archive.yml` fails and `destroy.yml` deletes nothing |
 | 12 | `write_agui_run.py` renders the bundle in the Open WebUI run layout: `index.md`, `chats/NN-<title>.md` and `.json`, plus the raw files; re-runnable on an archived run; no run log or no sessions is a valid bundle | [Archive](#4-the-archive) | `pytest platform/dev/tests -k agui_run`: a fixture with active, hidden and deleted sessions renders the expected index rows and state, a deleted marker, fenced tool calls; a bundle with no sessions and no run log renders an index saying so; a second run on the output directory gives identical files |
@@ -198,17 +198,28 @@ is out of scope here (*Out of scope*).
 
 Plain React and CSS in `app/` (no new dependencies); all session data is rendered as React text.
 
+- **Look:** Open WebUI's sidebar and chat chrome, finished to the standard of claude.ai and chatgpt.com
+  (clarification 4): its gray scale, type sizes, row and menu geometry and transitions, light and dark
+  (`prefers-color-scheme`), Heroicons-style inline SVG icons; the CopilotKit chat restyled to the same
+  palette. Still plain React and CSS.
 - **Layout:** a left sidebar (about 260 px, collapsible) and the chat to its right. Top to bottom: *New
-  chat*; a search box filtering by title (case-insensitive substring, in the browser); tag chips for every
-  tag in use with a count, where selecting several shows sessions that have all of them; the list, pinned
-  first, then grouped *Today*, *Yesterday*, *Previous 7 days*, *Older* by `updated_at`, each row with title
-  and tags, the open one highlighted; at the bottom a *Show hidden* toggle and the note "Deleted sessions
-  are kept in the run archive."
-- **Row menu (`⋯`):** *Rename* (inline; Enter saves, Esc cancels), *Pin* / *Unpin*, *Tags* (add with an
-  input suggesting existing tags; remove with a chip's ×), *Hide* / *Unhide*, *Delete* (confirmation: "This
-  removes it from your list. It is kept in the run archive.").
-- **Chat header:** replaces today's one-line banner: the session's title and tags, editable there too, and
-  the note that every tool call is shown.
+  chat*; a search box filtering by title (case-insensitive substring, in the browser), where Open WebUI's
+  `tag:<name>` terms filter by tag (several must all match) and typing `tag:` suggests the tags in use;
+  the list, pinned first, then grouped *Today*, *Yesterday*, *Previous 7 days*, *Older* by `updated_at`,
+  each row with its title only (as in Open WebUI), the open one highlighted, `⋯` shown on hover, focus,
+  the open row and the row whose menu is open; at the bottom a *Show hidden* toggle and the note "Deleted
+  sessions are kept in the run archive."
+- **Row menu (`⋯`):** a popover anchored to the button, one open at a time; it closes on a click outside,
+  Escape, choosing an item, opening a session or *New chat*, and returns focus to its `⋯`; arrow keys move
+  between items. *Rename* (inline in the row, also by double-click; text selected; Enter or a click outside
+  saves, Esc cancels), *Pin* / *Unpin*, *Tags* (Open WebUI's tag editor: the session's tags as pills, each
+  removed by its ×, and an "Add a tag…" input whose suggestions are the tags in use; Enter adds), *Hide* /
+  *Unhide*, *Delete* (a dialog "Delete chat?" with "This removes it from your list. It is kept in the run
+  archive.", *Cancel* and *Delete*; Escape cancels).
+- **Chat header:** replaces today's one-line banner: a quiet row with the session's title (*New chat*
+  before the first run), renamable in place, and the same `⋯` menu. No banner sentence: the note that this
+  is the SPE agent and that every tool call is shown is the muted line under the composer, where claude.ai
+  and chatgpt.com put theirs.
 - **Open session in the URL:** `?session=<id>`. Loading the page with it fetches the session; without it,
   or with an id that answers 404, the page starts a new session (and drops the parameter).
 - **Opening a session:** `GET /api/sessions/{id}`, then CopilotChat's `threadId` set to the id and
@@ -419,3 +430,15 @@ The same slice rewrites every current text that says the AG-UI chat is not archi
    time of the copy, so nothing can be checked inside it, and a check before stopping it races with its last write
    (Docker Compose 5.5.1: `cp` copies from a stopped container; a missing file fails with rc 1 and that message).
    *Amends:* §4 *Export*, step 2; decision 11 (acceptance check). *Status:* folded.
+4. **The sidebar and chat follow Open WebUI's look and behaviour** (2026-11-02; slice 2/3, at the user's request
+   on the early output). The row menu is a popover with Open WebUI's close and focus rules (outside click,
+   Escape, choosing an item, opening a session; focus back to `⋯`); a rename is committed by Enter or a click
+   outside and cancelled by Esc; tags are edited in Open WebUI's tag editor (pills with ×, "Add a tag…" with
+   suggestions) and filtered with its `tag:` search syntax instead of tag chips; rows show the title only; the
+   chat header is a title row and the "SPE agent — every tool call is shown" banner becomes the line under the
+   composer. *Reason:* the user found the first sidebar's menu and rename left open after a click elsewhere,
+   and asked for Open WebUI's look, polished like claude.ai and chatgpt.com, with identical tag features.
+   Open WebUI (`main`, read 2026-11-02: `Sidebar/ChatItem.svelte`, `ChatMenu.svelte`, `SearchInput.svelte`,
+   `common/Tags.svelte`, `chat/Navbar.svelte`) renders no tag editor in its menu today; the editor component
+   it ships for that is the one followed. *Amends:* §3 *Look*, *Layout*, *Row menu*, *Chat header*; decision 9.
+   *Status:* folded.

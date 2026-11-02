@@ -7,7 +7,7 @@
 agent's AG-UI stream, kept on a `chat-sessions` volume and exported by `archive.yml` like an Open WebUI run.
 
 **Spec:** [`docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md`](../../specs/2026-10-29-agui-chat-sessions-design.md)
-(decisions 1–15; latest clarification: 3). Each slice file links the sections it implements.
+(decisions 1–15; latest clarification: 4). Each slice file links the sections it implements.
 
 **Architecture.** All new chat-UI logic lives in `platform/agui/copilotkit-chat/lib/` as plain TypeScript that
 `node --test` runs without Next.js: the store (`sessions.ts`), the recorder middleware (`recorder.ts`) and the

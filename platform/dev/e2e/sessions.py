@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drive the chat UI's session sidebar in a real browser, against the scripted agent (no LLM).
 
-    python3 platform/dev/e2e/sessions.py [--shots DIR] [--sessions DIR]
+    python3 platform/dev/e2e/sessions.py [--shots DIR] [--sessions DIR] [--color-scheme light|dark]
     python3 platform/dev/e2e/sessions.py --scenario stop --save-delay-ms 1500
     python3 platform/dev/e2e/sessions.py --url http://127.0.0.1:3000 --compose-file F --scenario stop|slow-loop|two-turn
 
@@ -747,6 +747,8 @@ def main() -> None:
                     help="SPE_SESSIONS_TEST_SAVE_DELAY_MS for the local chat UI")
     ap.add_argument("--url", help="an instance's chat UI (e.g. http://127.0.0.1:3000) instead of local servers")
     ap.add_argument("--compose-file", help="with --url: the instance's frontend docker-compose.yml")
+    ap.add_argument("--color-scheme", choices=["light", "dark"],
+                    help="emulate this colour scheme (for --shots; default: Playwright's own default)")
     args = ap.parse_args()
     if args.shots:
         args.shots.mkdir(parents=True, exist_ok=True)
@@ -756,7 +758,7 @@ def main() -> None:
         BASE = args.url.rstrip("/")
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page = browser.new_page(viewport={"width": 1280, "height": 800}, color_scheme=args.color_scheme)
             r = InstanceRun(page, args.compose_file, args.shots)
             if args.scenario == "stop":
                 page.goto(BASE + "/")
@@ -786,7 +788,7 @@ def main() -> None:
         wait_http(BASE + "/api/sessions", "the chat UI")
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-            page = browser.new_page(viewport={"width": 1280, "height": 800})
+            page = browser.new_page(viewport={"width": 1280, "height": 800}, color_scheme=args.color_scheme)
             r = Run(page, data, args.shots)
             if args.scenario == "all":
                 ids = check_list(r)

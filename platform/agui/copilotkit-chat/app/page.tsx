@@ -99,6 +99,9 @@ function Chat() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const activeRef = useRef<string | null>(null);
+  // Bumped by every open()/startNew() call, so a response from a call that is no longer the
+  // latest (a second click while the first's fetch is still in flight) is ignored on arrival.
+  const requestRef = useRef(0);
   const { agent, isReady } = useAgent({ agentId: "spe" });
   useDefaultRenderTool({ render: (props) => <ToolCard {...props} /> });
 
@@ -124,13 +127,16 @@ function Chat() {
 
   // New chat: a fresh thread id and an empty history; it joins the list once its first run is recorded.
   const startNew = useCallback(() => {
+    requestRef.current += 1;
     select(crypto.randomUUID(), []);
     showInUrl(null);
   }, [select]);
 
   const open = useCallback(async (id: string) => {
+    const requestId = (requestRef.current += 1);
     try {
       const session = await fetchSession(id);
+      if (requestId !== requestRef.current) return; // superseded by a later open()/startNew()
       if (!session) {
         // Deleted, or never recorded: a new session, without an error bar.
         startNew();
@@ -140,6 +146,7 @@ function Chat() {
       select(id, session.messages);
       showInUrl(id);
     } catch (e) {
+      if (requestId !== requestRef.current) return; // superseded by a later open()/startNew()
       setError(messageOf(e));
       // On first load (no session opened yet) this was a failed attempt to open the
       // id named in the URL: fall back to a new session, and make sure the URL no

@@ -1,5 +1,6 @@
 "use client";
-// The sessions sidebar: New chat, the list (pinned first, then newest) and each row's menu.
+// The sessions sidebar: New chat, the title search (with `tag:` terms), the list the search shows
+// (pinned first, then Today / Yesterday / Previous 7 days / Older), each row's menu, and Show hidden.
 // Titles and tags are model or participant text: rendered as React text only, never as HTML.
 //
 // One owner for what a row is doing: `Sidebar` holds which row has its menu, rename, tag editor or
@@ -12,10 +13,13 @@ import type { KeyboardEvent, MouseEvent } from "react";
 import { removeSession, renamePatch, tagSuggestions, updateSession, withTag, withoutTag } from "../lib/client.ts";
 import { menuIndex } from "../lib/menu.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
+import { filterSessions, sections } from "../lib/sidebar-view.ts";
+import type { ViewFilter } from "../lib/sidebar-view.ts";
 import { DeleteDialog } from "./delete-dialog";
 import { Ellipsis, Eye, EyeSlash, PencilSquare, Pencil, Pin, PinSlash, SidebarToggle, Tag, Trash } from "./icons";
 import { composing } from "./keys.ts";
 import { Popover } from "./popover";
+import { HiddenToggle, SearchBox } from "./session-filters";
 import { TagEditor } from "./tag-editor";
 
 type SidebarProps = {
@@ -49,7 +53,11 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   // the whole tag list, so a second add or remove before then (ignored) would start from the
   // list without the first change and undo it.
   const savingTag = useRef<string | null>(null);
-  const busySession = busy ? sessions.find((s) => s.id === busy.id) : undefined;
+  const [filter, setFilter] = useState<ViewFilter>({ query: "", showHidden: false });
+  // `sessions` is every session the server lists; the filter decides which rows show.
+  const visible = filterSessions(sessions, filter);
+  const shown = sections(visible, new Date());
+  const busySession = busy ? visible.find((s) => s.id === busy.id) : undefined;
   const suggestions = busy?.mode === "tags" && busy.suggest && busySession
     ? tagSuggestions(knownTags, busySession.tags, busy.draft)
     : [];
@@ -195,10 +203,11 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
     const popoverOpen = mine?.mode === "menu" || mine?.mode === "tags";
     const classes = ["spe-row"];
     if (s.id === activeId) classes.push("spe-row-active");
+    if (s.hidden) classes.push("spe-row-hidden");
     if (popoverOpen) classes.push("spe-row-menu-open");
     if (mine?.mode === "rename") classes.push("spe-row-renaming");
     return (
-      <li key={s.id} className={classes.join(" ")}>
+      <li key={s.id} className={classes.join(" ")} data-session-id={s.id}>
         {mine?.mode === "rename" ? (
           <RenameInput
             value={mine.draft}
@@ -228,10 +237,6 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
       </li>
     );
   };
-  // `sessions` comes ordered, pinned first.
-  const pinned = sessions.filter((s) => s.pinned);
-  const others = sessions.filter((s) => !s.pinned);
-
   return (
     <nav className="spe-sidebar" aria-label="Sessions">
       <div className="spe-sidebar-top">
@@ -241,24 +246,21 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
       </div>
       <div className="spe-sidebar-actions">
         <button type="button" className="spe-new" onClick={newChat}><PencilSquare />New chat</button>
-        {/* Title search goes here. */}
+        <SearchBox query={filter.query} knownTags={knownTags} onChange={(query) => setFilter({ ...filter, query })} />
       </div>
       <div className="spe-sidebar-list">
-        {pinned.length > 0 && (
-          <>
-            <h2 className="spe-section" id="spe-section-pinned">Pinned</h2>
-            <ul className="spe-list" aria-labelledby="spe-section-pinned">{pinned.map(row)}</ul>
-          </>
+        {shown.map((section, i) => (
+          <section key={section.label} className="spe-group" data-group={section.label}
+            aria-labelledby={`spe-section-${i}`}>
+            <h3 className="spe-section" id={`spe-section-${i}`}>{section.label}</h3>
+            <ul className="spe-list">{section.sessions.map(row)}</ul>
+          </section>
+        ))}
+        {shown.length === 0 && (
+          <p className="spe-empty">{sessions.length === 0 ? "No sessions yet." : "No session matches."}</p>
         )}
-        {pinned.length > 0 && others.length > 0 && <h2 className="spe-section" id="spe-section-chats">Chats</h2>}
-        {others.length > 0 && (
-          <ul className="spe-list" aria-labelledby={pinned.length > 0 ? "spe-section-chats" : undefined}>
-            {others.map(row)}
-          </ul>
-        )}
-        {sessions.length === 0 && <p className="spe-empty">No sessions yet.</p>}
       </div>
-      <p className="spe-note">Deleted sessions are kept in the run archive.</p>
+      <HiddenToggle showHidden={filter.showHidden} onChange={(showHidden) => { end(); setFilter({ ...filter, showHidden }); }} />
 
       {busySession && busy?.mode === "menu" && (
         <Popover anchor={triggers.current.get(busy.id)} box={popover} key={`menu-${busy.id}`}>

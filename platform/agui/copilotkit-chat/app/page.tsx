@@ -12,7 +12,7 @@ import {
   useDefaultRenderTool,
 } from "@copilotkit/react-core/v2";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fetchSession, fetchSessions, listOrder } from "../lib/client.ts";
+import { fetchSession, fetchSessions } from "../lib/client.ts";
 import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
 import type { SessionMeta } from "../lib/sessions.ts";
 import { ChevronRight } from "./icons";
@@ -189,7 +189,7 @@ function Chat() {
   return (
     <div className="spe-layout">
       <Sidebar
-        sessions={listOrder(sessions)}
+        sessions={sessions}
         knownTags={[...new Set(sessions.flatMap((s) => s.tags))].sort()}
         activeId={active}
         // Switching sessions mid-run would put the new session's history on the agent that is

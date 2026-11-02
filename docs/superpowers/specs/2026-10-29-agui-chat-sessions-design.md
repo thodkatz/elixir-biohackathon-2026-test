@@ -1,6 +1,6 @@
 # AG-UI chat sessions — design
 
-**Status:** approved by the user (2026-10-29), PR #7. **Latest clarification:** 4.
+**Status:** approved by the user (2026-10-29), PR #7. **Latest clarification:** 5.
 Read against this repo at `ff3acc3` (`main`, equal to `upstream/main` plus the fork's files and the
 optional token cap of upstream PR #9).
 
@@ -265,7 +265,10 @@ becomes "Export the frontend's chats"):
    queue to drain and exits (a handler registered in `instrumentation.ts`; the image sets
    `NEXT_MANUAL_SIG_HANDLE=true`, because Next.js's own handler closes the server and exits without
    waiting for a detached run's save). The agent, stopped second, has then seen its last
-   request and closed its run log. A missing `chat-ui` container fails here.
+   request and closed its run log. A missing `chat-ui` container fails here, and so does a stop that did not
+   end cleanly: each service running before the barrier must have exited 0 (`docker compose ps -a --format
+   '{{.Service}} {{.ExitCode}}'`), since a drain timeout (the chat UI exits 1) or a kill after `-t 30` (137)
+   leaves `stop` itself at rc 0. The containers are started again either way.
 2. **Copy** from the stopped containers: `docker compose -p spe-frontend cp chat-ui:/data/sessions
    <tmp>/sessions` (always present: the image creates it, §1) and `… cp agent:/var/lib/spe-agent/runs.jsonl
    <tmp>/agent-runs.jsonl`. Only an absent run log is tolerated (no run reached the agent yet): the copy's own
@@ -441,4 +444,11 @@ The same slice rewrites every current text that says the AG-UI chat is not archi
    Open WebUI (`main`, read 2026-11-02: `Sidebar/ChatItem.svelte`, `ChatMenu.svelte`, `SearchInput.svelte`,
    `common/Tags.svelte`, `chat/Navbar.svelte`) renders no tag editor in its menu today; the editor component
    it ships for that is the one followed. *Amends:* §3 *Look*, *Layout*, *Row menu*, *Chat header*; decision 9.
+   *Status:* folded.
+5. **The barrier fails on a stopped service's exit code** (2026-11-02; slice 2/3, review round on #10). After
+   the two stops, the export reads each service's exit code and fails unless every service running before the
+   barrier exited 0. *Reason:* `docker compose stop` returns 0 whether the chat UI drained (exit 0), timed out
+   (exit 1) or was killed after `-t 30` (137), so a barrier that did not hold went unnoticed and the archive could
+   lack the last run before `destroy.yml` drops the volume (§4: any failed step fails `archive.yml`). A service
+   already stopped before the barrier keeps an old exit code, so it is not checked. *Amends:* §4 *Export*, step 1.
    *Status:* folded.

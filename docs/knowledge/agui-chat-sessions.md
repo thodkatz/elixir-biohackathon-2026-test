@@ -49,6 +49,13 @@ container (`Could not find the file … in container`, rc 1) — that part needs
 *container* needs the explicit `ps -a -q` check first. `run_archive`'s `write_agui_run.py` export task does
 this for `chat-ui`.
 
+**It also exits 0 when the container did not stop cleanly.** A process that exits 1 on `SIGTERM`, or one Docker
+kills after `-t` (exit 137), still leaves `docker compose stop` at rc 0. Read the exit code afterwards:
+`docker compose -p spe-frontend ps -a --format '{{.Service}} {{.ExitCode}}' chat-ui agent` (inside an Ansible
+expression, quote it as a plain string literal: a nested `{{ '{{…}}' }}` is a Jinja syntax error). A container
+already stopped before keeps its old exit code, so compare only services that were running
+(`ps --status running --services`).
+
 ## 5. Next.js's own `SIGTERM` handler exits before a detached run can be saved
 
 **Symptom.** `docker compose stop chat-ui` (or `stop -t 30`) can kill the chat UI mid-save: a run that has no

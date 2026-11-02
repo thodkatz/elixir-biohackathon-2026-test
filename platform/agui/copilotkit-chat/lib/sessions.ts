@@ -31,6 +31,8 @@ export type SessionMeta = Pick<SessionRecord, "id" | "title" | "tags" | "pinned"
 export type SessionView = Omit<SessionRecord, "deleted_at" | "runs">;
 export type MetaPatch = Partial<Pick<SessionRecord, "title" | "tags" | "pinned" | "hidden">>;
 
+const DIR_SYNC_UNSUPPORTED = new Set(["EINVAL", "ENOTSUP", "EISDIR", "EPERM"]);
+
 export class ValidationError extends Error {}
 
 const TAG = /^[a-z0-9._-]{1,32}$/;
@@ -207,12 +209,17 @@ export class SessionStore {
       await fs.rm(tmp, { force: true }).catch(() => {});
       throw error;
     }
-    // The rename itself is durable only once the directory is synced.
-    const dir = await fs.open(this.dir, "r");
+    // The rename itself is durable only once the directory is synced. Some filesystems (network, 9p,
+    // virtiofs mounts) refuse to sync a directory; the file is in place then, so that is not a failed save.
     try {
-      await dir.sync();
-    } finally {
-      await dir.close();
+      const dir = await fs.open(this.dir, "r");
+      try {
+        await dir.sync();
+      } finally {
+        await dir.close();
+      }
+    } catch (error) {
+      if (!DIR_SYNC_UNSUPPORTED.has((error as NodeJS.ErrnoException).code ?? "")) throw error;
     }
   }
 

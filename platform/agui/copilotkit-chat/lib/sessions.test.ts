@@ -144,14 +144,38 @@ test("a write interrupted before the rename leaves the previous file intact", as
 
 test("a write syncs the directory after the rename, so the rename survives a power loss", async () => {
   const store = await tmpStore();
-  const open = mock.method(fs, "open");
+  const realOpen = fs.open;
+  const synced: string[] = [];
+  const open = mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+    const handle = await realOpen(...args);
+    const sync = handle.sync.bind(handle);
+    handle.sync = async () => { synced.push(String(args[0])); return sync(); };
+    return handle;
+  });
   try {
     await seeded(store);
   } finally {
     open.mock.restore();
   }
-  const opened = open.mock.calls.map((c) => [c.arguments[0], c.arguments[1]]);
-  assert.deepEqual(opened.at(-1), [store.dir, "r"]);
+  assert.equal(synced.at(-1), store.dir);
+});
+
+test("a directory that cannot be synced (EINVAL, as on some network mounts) is not a failed save", async () => {
+  const store = await tmpStore();
+  const realOpen = fs.open;
+  const open = mock.method(fs, "open", async (...args: Parameters<typeof fs.open>) => {
+    const handle = await realOpen(...args);
+    if (args[0] === store.dir) {
+      handle.sync = async () => { throw Object.assign(new Error("EINVAL: invalid argument, fsync"), { code: "EINVAL" }); };
+    }
+    return handle;
+  });
+  try {
+    await seeded(store);
+  } finally {
+    open.mock.restore();
+  }
+  assert.equal((await fs.readdir(store.dir)).length, 1);
 });
 
 test("last_run_at is the last run's end; a metadata change moves updated_at, not last_run_at", async () => {

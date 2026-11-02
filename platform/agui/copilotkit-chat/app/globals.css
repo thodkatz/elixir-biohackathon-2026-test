@@ -51,6 +51,7 @@
   --chip-hover: var(--gray-100);
 
   --dialog-bg: var(--white);
+  --dialog-border: transparent;
   --overlay: rgba(0, 0, 0, 0.6);
   --button-bg: var(--gray-100);
   --button-hover: var(--gray-200);
@@ -119,6 +120,7 @@
     --chip-hover: var(--gray-800);
 
     --dialog-bg: var(--gray-950);
+    --dialog-border: var(--gray-800);
     --overlay: rgba(0, 0, 0, 0.6);
     --button-bg: var(--gray-850);
     --button-hover: var(--gray-800);
@@ -289,7 +291,7 @@ body {
 .spe-dialog-backdrop { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center;
   justify-content: center; padding: 16px; background: var(--overlay); animation: spe-fade 120ms ease-out; }
 .spe-dialog { width: 100%; max-width: 448px; box-sizing: border-box; padding: 20px; border-radius: var(--radius-dialog);
-  background: var(--dialog-bg); box-shadow: var(--shadow-dialog); color: var(--text);
+  background: var(--dialog-bg); border: 1px solid var(--dialog-border); box-shadow: var(--shadow-dialog); color: var(--text);
   animation: spe-fly-down var(--menu-transition); }
 .spe-dialog h2 { margin: 0 0 6px; font-size: 15px; line-height: 22px; font-weight: 600; }
 .spe-dialog p { margin: 0; font-size: 14px; line-height: 20px; color: var(--text-muted); }

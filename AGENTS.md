@@ -247,8 +247,8 @@ How to deploy and use it: [`docs/getting-started.md`](docs/getting-started.md).
 All 13 tasks are done, including the model-backed checks on the development VM
 (Anthropic `claude-haiku-5-5`) and on de.NBI (`qwen3.8-27b`). Merged into `main`
 on 2026-10-19 together with the Coder portal, which offers it as the `agui`
-frontend. Not done yet: archiving its chats on stop (the run archive exports
-Open WebUI only) and a run-report equivalent in the CopilotKit chat.
+frontend. Chat sessions (sidebar, archive) are being added by the *AG-UI chat
+sessions* track. Not done yet: a run-report equivalent in the CopilotKit chat.
 
 ## Development workflow
 

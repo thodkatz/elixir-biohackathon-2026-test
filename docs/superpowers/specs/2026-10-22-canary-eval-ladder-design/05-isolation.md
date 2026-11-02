@@ -31,6 +31,7 @@ per-version workflow cache, which outlives a deleted TRS tool). A restore remove
 | seeded data | `/data-share` | no: read-only to workflows, not mounted in the sandbox |
 | anything written outside a volume (the sandbox's `/tmp`, a workflow in a worker's writable layer), anonymous volumes | the containers of the workflow stack and the sandbox | yes: recreated from their images |
 | the agent | `agent` container | no: read-only apart from its run log, which the agent cannot read |
+| chat sessions of the AG-UI chat | `chat-sessions` (mounted by `chat-ui` only) | no: evaluations call the agent directly, never `chat-ui` |
 | requests the test receiver got | its log on the VM (`spe_eval_sink`, [04](04-agent-suite-and-scoring.md)) | no: append-only; the baseline records its length and the diff reads what was appended |
 
 ## Hooks (decision 9)

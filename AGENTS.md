@@ -28,7 +28,7 @@ instruction set: each rule lives in exactly one of them, so update the file that
 | [`.methodology/shared/guides/development-workflow.md`](.methodology/shared/guides/development-workflow.md) | you start a change, spike or spec, or claim, open, review, advance or merge any PR: modes, stages, handoffs, deferred items, claiming, local or CI review, merge and cleanup, slicing, agent automation |
 | [`.methodology/shared/guides/forge-github.md`](.methodology/shared/guides/forge-github.md) | you run a step on the forge (claim, ready, comment, label, merge, issues) or check what must pass before a merge: the command for each |
 | [`.methodology/shared/guides/spec-and-plan-layout.md`](.methodology/shared/guides/spec-and-plan-layout.md) | you write, extend or split a spec or plan, add a clarification, hand a slice to a subagent, or work from a spec or plan that is a directory |
-| [`.methodology/shared/guides/tooling-gotchas.md`](.methodology/shared/guides/tooling-gotchas.md) | a command or tool fails (`gh`, `fj`, `git`, Claude Code, the runners): known failures in every repo, and the command that works |
+| [`.methodology/shared/guides/tooling-gotchas.md`](.methodology/shared/guides/tooling-gotchas.md) | a command or tool fails (`gh`, `fj`, `git`, Claude Code, the runners, agent-action's CI reviewers): known failures in every repo, and the command that works |
 | [`docs/README.md`](docs/README.md) | you look for a spec, plan, investigation or reference: the index of everything under `docs/` |
 | [`docs/knowledge/README.md`](docs/knowledge/README.md) | you start non-trivial work in an area, or a command or tool fails: as-you-go gotchas and workarounds (see *Project knowledge*) |
 | [`BACKLOG.md`](BACKLOG.md) | you start a unit, triage, or look for known unscheduled problems |
@@ -49,14 +49,24 @@ Context is the scarce resource: every request re-reads the whole conversation, a
 So a session does one bounded piece of work and hands off:
 
 - **Budget: `AGENT_CONTEXT_BUDGET` tokens of context per session** (150k in `.claude/settings.json`). Past it, the
-  context-budget hook tells you so; the optional status line (`.methodology/shared/claude/statusline.sh`) shows it
+  context-budget hook tells you so; the status line (`.methodology/shared/claude/statusline.sh`) shows it
   all along. Finish the current step, write the handoff (a new file in the plan's `handoffs/`, a knowledge note or
   the investigation's output), commit, and end the session, **even in the middle of a unit**. The next session
   starts fresh from the handoff; with `AGENT_AUTO_CONTINUE=1`, start it yourself with
-  `.methodology/shared/claude/continue.sh <handoff path>` (in this terminal under `chain.sh`, else in the
-  background), then stop.
+  `.methodology/shared/claude/next-session.sh <handoff path>` (under `chain.sh`, in this terminal or a new `dtach`
+  one), then stop. A new parallel session (a fresh unit's worktree) starts only with `next-session.sh --new
+  "<prompt>"`, never a bare `claude`/`claudeN`: only `chain.sh` moves a session off an exhausted account.
 - **A fresh session starts the same way every time:** read the handoff (only the newest:
-  `ls <plan>/handoffs | tail -1`), `git status`, `git log --oneline -5`, run the unit's check command, then work.
+  `ls <plan>/handoffs | tail -1`), `git status`, `git log --oneline -5`,
+  `.methodology/shared/claude/prune-worktrees.sh` (merged units' worktrees), `BACKLOG.md`'s *Next* (due on any
+  track, or waiting on the user), then work.
+  A user saying *continue* (*continue with the handoff*) means this routine, in this session: `next-session.sh`
+  runs only at the budget, and `next-session.sh --next` only at a unit's end.
+- **Other sessions are the supervisor's, not yours.** Don't watch or poll other sessions with `status.sh` (one
+  check that a session you just started came up is fine), and rescue one only when the user asks or the
+  supervisor can't reach it: the supervisor's timer (`supervise.sh`) acts on unattended ones, a person on their
+  own. A handoff never asks the next session to watch one (`sessions-and-context.md`, *Other sessions are not a
+  session's work*).
 - **Investigations and audits are scoped.** Each one answers a written question into a file. Wide reading
   goes to subagents, which return short summaries; a repo-wide audit is a fan-out of scoped subagent tasks
   plus one synthesis session.
@@ -82,8 +92,9 @@ context": read its index or the section your unit names.
   as written. A doc the diff left stale is a review finding.
 - **Large specs and plans are directories**: a `README.md` index plus one file per section or slice, past ~400
   lines for a spec and always for a plan with more than one slice.
+- **Whatever grows by appending is built to grow**: a one-line-per-item index, detail apart, a pruning rule.
 
-Both rules, the clarification template and the layout: `.methodology/shared/guides/spec-and-plan-layout.md`.
+History apart, large documents, growth, the clarification template and the layout: `.methodology/shared/guides/spec-and-plan-layout.md`.
 <!-- /methodology: progressive-disclosure -->
 
 ## Working Conventions
@@ -108,10 +119,11 @@ Both rules, the clarification template and the layout: `.methodology/shared/guid
     `docs/knowledge/`, so the reading stays out of your context.
   - Use `superpowers:dispatching-parallel-agents` for independent investigations.
 - **Don't stop for approval inside the workflow.** The loop runs unattended: no in-chat check-ins between
-  tasks, slices or review rounds. Its one human gate is the spec PR's `approved` label, which you wait for by
-  handing off, not by asking in chat. Otherwise stop only for what the loop can't decide: destructive or
-  irreversible actions outside it, a plan broken beyond a ledgered ruling, or quota-heavy runs, which *Setup*
-  lists.
+  tasks, slices or review rounds. Its one human gate is the spec PR's `approved` label. Otherwise stop only for
+  what the loop can't decide: destructive or irreversible actions outside it, a plan broken beyond a ledgered
+  ruling, or quota-heavy runs, which *Setup* lists. Never wait by asking in chat: a gate ends as
+  `development-workflow.md`'s *Gates* says, with one comment on the PR and `next-session.sh --end --blocked
+  <PR>`, which adds the `waiting-on-user` label.
 - **Never edit `.methodology/`.** It is a submodule of agent-methodology, pinned to a commit. Edits there make
   it dirty, are lost or conflict on the next update, and a commit inside it would push to agent-methodology.
   Deviate from a shared rule in *Overrides*; carry an improvement back to agent-methodology as its own change,
@@ -127,14 +139,14 @@ Both rules, the clarification template and the layout: `.methodology/shared/guid
 Where this repo deviates from a shared guide, one line each: "In this repo, X instead of `<guide>`, *Section*,
 because Z." This file wins over the guides in `.methodology/shared/guides/`.
 
-- In this repo, **the user is the reviewer and merges every PR** instead of `development-workflow.md`,
-  *Review and merge*, and *Development workflow* above (one review round, then merge it yourself), because no
-  CI reviewer runs on the fork yet (`BACKLOG.md`). Hand off after opening the PR; the next unit starts once it is
-  merged. So the loop has two human gates, the spec's approval and each PR's merge, not the one *Working
-  Conventions* names.
-- In this repo, **a spec is approved when the user says so on its PR** (review or comment) instead of the
-  `approved` label (`development-workflow.md`, *Review and merge*; *Working Conventions* and *Development
-  workflow* above), because the fork has no labels or `pr-checks` yet (`BACKLOG.md`).
+- In this repo, **the user merges every PR** instead of `development-workflow.md`, *Review and merge*, and
+  *Development workflow* below (merge it yourself after the review round), because the fork has no CI checks
+  yet (`BACKLOG.md`), so a human gate stays on each merge. The merge is a gate (`development-workflow.md`,
+  *Gates*): once the local review round (*Reviewers*) is addressed and the checks below pass, hand off, post one
+  comment on the PR saying it is ready to merge, and end with `next-session.sh --end --blocked <PR>`, or, with
+  the next unit's handoff already on `main`, `--end --blocked <PR> <branch> <handoff>`. The user merges and
+  removes `waiting-on-user`, which clears it. So the loop has two human gates, the spec's `approved` and each
+  PR's merge, not the one *Working Conventions* names.
 - In this repo, **the checks before a merge are the DCO app, the unit's test commands run locally (*Running
   things*) and `sync-agents.py --check`** instead of `forge-github.md`, *Before a merge* (tests, lint, DCO and
   `pr-checks.yml` in CI), because the fork has no workflows yet (`BACKLOG.md`). The PR body says what ran.
@@ -148,14 +160,14 @@ because Z." This file wins over the guides in `.methodology/shared/guides/`.
 Our fork's `main` carries fork-only files that upstream must never receive:
 
     .gitmodules  .methodology/  .claude/settings.json  BACKLOG.md
-    docs/README.md  docs/knowledge/  docs/investigations/  docs/superpowers/
+    docs/README.md  docs/knowledge/  docs/investigations/  docs/proposals/  docs/superpowers/
 
 A PR to upstream is cut from `upstream/main` (`git fetch upstream`), carries only project changes
 (cherry-picked or re-applied), and must pass this check before it is pushed:
 
 ```bash
 git diff --name-only upstream/main...HEAD \
-  | grep -E '^(\.gitmodules|\.methodology|\.claude/|BACKLOG\.md|docs/(README\.md|knowledge/|investigations/|superpowers/))' \
+  | grep -E '^(\.gitmodules|\.methodology|\.claude/|BACKLOG\.md|docs/(README\.md|knowledge/|investigations/|proposals/|superpowers/))' \
   && echo "fork-only files in this branch: remove them" || echo ok
 ```
 
@@ -173,7 +185,10 @@ Each unit's PR updates its track's line; the last slice removes it.
 - **Canary evaluation ladder** (biohackathon 0013): slice 1 PR #3. **Next: slice 2/9**
   `impl/canary-eval-ladder-2-isolation`. Handoff:
   `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/2026-10-23T0810Z-slice-1-done-next-is-slice-2.md`.
-- **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice.
+- **AG-UI chat sessions**: spec (#7) and plan (#8) merged. **Next: slice 2/3** `impl/agui-chat-sessions-2-sidebar`.
+  Handoff: `ls docs/superpowers/plans/2026-10-29-agui-chat-sessions/handoffs | tail -1`.
+- **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice; its *Next*, the ones due soon or
+  waiting on the user.
 
 ## Project in brief
 
@@ -221,6 +236,7 @@ uv run --with pytest pytest platform/dev/tests -q    # dataset generator, host p
 (cd platform/agui/pydantic-ai-agent && uv run --group dev pytest -q)   # agent
 (cd platform/promptfoo-evals && uv run --group dev pytest -q)          # promptfoo provider and assertions
 (cd platform/agui/copilotkit-chat && npm ci && npm run build)          # chat UI (type check)
+(cd platform/agui/copilotkit-chat && npm ci && npm test)               # chat UI (sessions, recorder, API)
 cd platform/ansible && ansible-playbook playbooks/create.yml -e @instances/NAME.yml </dev/null
 ```
 
@@ -267,15 +283,19 @@ Pick the lightest mode that fits, and move up when the work turns out bigger:
 
 The rules that bite most often:
 
-- **Claim before you work**: the unit's branch pushed to `origin` plus a draft PR. **One PR open at a time per
-  track**, and dependent work waits until that PR has merged.
+- **Claim before you work**: the unit's branch pushed to `origin` plus a draft PR, worked on in its own worktree,
+  `.claude/worktrees/<branch, / as ->` of the main checkout (`.methodology/shared/claude/worktree.sh <branch>`
+  makes it; `git worktree list` shows them all). **One PR open at a time per track**, and dependent work waits
+  until that PR has merged.
 - **One review round, by the reviewer in *Reviewers***: local reviewer subagents, or a CI reviewer and, if it's
-  out, the fallbacks there, in order. Address every finding, then **merge it yourself**
+  out, the fallbacks there, in order; a mechanical PR (a pointer, copied or regenerated files) has none. Address every finding, then **merge it yourself**
   (*Merge*) once every check the forge sheet lists under *Before a merge* passes (and, for a spec, once the
   user has added `approved`). Clean up the worktree and branch afterwards.
-- **Hand off, then stop**: every unit ends with a handoff for the next one, riding in its own PR, and updates its
-  track's line in *Current work*. Don't start the next unit in the same session, and hand off earlier when the
-  context budget says so.
+- **Hand off, then chain**: every unit ends with a handoff for the next one, riding in its own PR, and updates its
+  track's line in *Current work*. Don't start the next unit in the same session: once the PR merged and cleanup is
+  done, write the next unit's handoff on `main` and start it with `.methodology/shared/claude/next-session.sh
+  --next <branch> <handoff>` from the main checkout; the track's last unit ends with `next-session.sh --end`.
+  Hand off earlier when the context budget says so.
 - **Deferred items land somewhere durable**: rewritten into a planned slice's task text, a new slice, the next
   spec's **Inputs for**, or `BACKLOG.md`. A handoff, PR body or review reply only points.
 
@@ -287,13 +307,16 @@ In this repo:
 
 - **Every PR targets our fork**: `gh pr create --repo thodkatz/elixir-biohackathon-2026-test --base main`.
   Without `--repo`, `gh` may pick upstream.
-- **The user approves specs and reviews and merges every PR** (*Overrides*). Address every comment in its own
-  thread. Clean up the worktree and branch after the merge, then move the pin in `biohackathon` (*Worktrees and
-  deploying*).
+- **The review round is local** (*Reviewers*); **the user approves specs** (the `approved` label) **and merges
+  every PR**, a gate (*Overrides*).
+  Address the round's findings and any comment the user leaves, each in its own thread. Clean up the worktree and
+  branch after the merge, then move the pin in `biohackathon` (*Worktrees and deploying*).
 
 ## Reviewers
 
-No CI review rotation yet: the user reviews (*Overrides*, `BACKLOG.md`).
+- **`local`**: reviewer subagents in the working session (`development-workflow.md`, *Review and merge*, *Local
+  review*: at least the correctness and methodology focuses), findings posted on the PR as one comment; no CI
+  reviewer yet (`BACKLOG.md`). The user can still review any PR, and merges every one, a gate (*Overrides*).
 
 ## Project knowledge
 

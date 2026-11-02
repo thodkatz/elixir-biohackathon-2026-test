@@ -7,6 +7,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY next.config.mjs tsconfig.json ./
 COPY app ./app
+COPY lib ./lib
 RUN npm run build
 
 FROM node:24-slim
@@ -16,8 +17,10 @@ ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 COPILOTKIT_TELEMETRY_DISABLED=
     PORT=3000 HOSTNAME=0.0.0.0
 COPY --from=build --chown=root:root /app/.next/standalone ./
 COPY --from=build --chown=root:root /app/.next/static ./.next/static
-# The image's own files stay root-owned and read-only to the app; only .next/cache is writable.
-RUN install -d -o node -g node -m 0700 /app/.next/cache
+# The image's own files stay root-owned and read-only to the app; only .next/cache is writable,
+# and /data, where the chat-sessions volume is mounted: Docker copies /data/sessions, with its
+# owner, into the volume when it is first mounted empty, so a fresh volume starts writable.
+RUN install -d -o node -g node -m 0700 /app/.next/cache /data /data/sessions
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=3 \

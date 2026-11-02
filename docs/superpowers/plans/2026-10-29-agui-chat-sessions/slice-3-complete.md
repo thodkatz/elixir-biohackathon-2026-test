@@ -1537,7 +1537,7 @@ index fb266e3..ad8a85b 100644
    outline: 2px solid var(--focus-ring); outline-offset: 2px;
  }
  
-@@ -169,10 +169,20 @@ body {
+@@ -169,12 +169,21 @@ body {
  /* ---------- Header: the open session's title, nothing else ---------- */
  
 -.spe-header { position: relative; z-index: 10; flex: none; display: flex; align-items: center; height: 48px;

@@ -2924,7 +2924,8 @@ instance may have no internet): a system font stack.
   row with a pencil-square icon, the collapse control as an icon button, a search-shaped area left for slice 3,
   rows of title only (single line, ellipsis, `⋯` on hover/focus/open row/menu open, selected and hover
   backgrounds, rounded), pinned rows under a small muted *Pinned* label, the bottom note muted and small. The
-  popover menu, tag pills, suggestion list and dialog in Open WebUI's style, each menu item with its icon
+  popover menu, tag pills (Open WebUI's: the whole pill, with its always-visible ×, removes the tag on a click),
+  suggestion list and dialog in Open WebUI's style, each menu item with its icon
   (pencil, pin/pin-slash, tag, eye-slash/eye, trash); *Delete* in a muted red. Visible `:focus-visible` rings.
 - [ ] **Step 3: Header and composer.** Drop the banner sentence. A quiet header row (no border; a fade under it
   when the chat scrolls is fine) with the open session's title, *New chat* before the first run, truncated.

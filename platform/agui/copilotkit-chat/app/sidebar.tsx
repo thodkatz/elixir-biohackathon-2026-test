@@ -32,8 +32,9 @@ type SidebarProps = {
   onError: (message: string) => void;
   /** A run is in progress: switching session, New chat and the open session's Delete are disabled. */
   running: boolean;
-  /** False until React has hydrated: every button here starts an action, so each stays disabled
-   *  until then rather than risk a click landing before its handler is attached. */
+  /** False until the page is safe to click (hydrated, and the agent is ready): every button here
+   *  starts an action, so each stays disabled until then rather than risk a click landing before
+   *  its handler is attached, or before the page's own first-load `startNew()`/`open()` has run. */
   ready: boolean;
 };
 

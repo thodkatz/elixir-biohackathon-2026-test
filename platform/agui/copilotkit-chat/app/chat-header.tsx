@@ -25,8 +25,8 @@ type Props = {
   knownTags: string[];
   /** A run is in progress: Delete is disabled, as in the open session's row. */
   running: boolean;
-  /** False until React has hydrated: the actions button starts a menu of actions, so it stays
-   *  disabled until then rather than risk a click landing before its handler is attached. */
+  /** False until the page is safe to click (hydrated, and the agent is ready): the actions button
+   *  starts a menu of actions, so it stays disabled until then, as the sidebar's buttons do. */
   ready: boolean;
   /** Saves the change and refreshes the list; rejects with the failure. */
   onPatch: (patch: MetaPatch) => Promise<void>;

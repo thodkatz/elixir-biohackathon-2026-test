@@ -252,7 +252,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
         {shown.map((section, i) => (
           <section key={section.label} className="spe-group" data-group={section.label}
             aria-labelledby={`spe-section-${i}`}>
-            <h3 className="spe-section" id={`spe-section-${i}`}>{section.label}</h3>
+            <h2 className="spe-section" id={`spe-section-${i}`}>{section.label}</h2>
             <ul className="spe-list">{section.sessions.map(row)}</ul>
           </section>
         ))}

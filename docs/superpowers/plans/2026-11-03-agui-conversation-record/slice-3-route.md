@@ -1070,6 +1070,11 @@ red until then)."
 - Modify: `CHAT/app/api/copilotkit/[[...slug]]/route.ts` (l. 7, 23–27), `CHAT/lib/reconcile.ts` (`SAVE_FAILED_EVENT`,
   `REFUSED_RUN_MESSAGES`, `isSaveFailed`),
   `CHAT/lib/reconcile.test.ts` (imports, two tests), `CHAT/app/use-run-reconcile.ts` (the save-failed event gone)
+- Modify: `CHAT/lib/anchor.ts`, `CHAT/lib/anchor.test.ts` (one test appended): `classify`'s path leaves out
+  activity messages. `@ag-ui/client`'s `prepareRunAgentInput` drops them from every run's input, so the browser
+  never sends one back (it is not `deleted`) and the agent, called past that filter, must not get one (the
+  compacting-run test). In `anchor.ts`, the path computed as before is `held`, then
+  `const path = held.filter((m) => m.role !== "activity");`
 - Unchanged, run: `CHAT/lib/clone.test.ts` (decision 24's unit half: the hook survives the clone with per-run
   state)
 
@@ -1078,7 +1083,7 @@ red until then)."
   `lib/anchor.ts`); `branchOfTip`, `Conversation` (slice 1); `parseJournal`, `Line`, `RunStartLine`,
   `RunEndLine`, `JournalFs`, `Clock` (slice 1); `startTestAgent` with its keywords (`hang`, `boom`, `error`,
   `eof`, `crash`, `compact`, `activity`; slice 1 adds `echo-input`); `seedRun` (task 1).
-- Produces: [`interfaces.md`](interfaces.md)'s `lib/recorder.ts` line: `SessionRecorder(journals: () => Journals, now?)`, `fetch`, `run`;
+- Produces: [`interfaces.md`](interfaces.md)'s `lib/recorder.ts` line: `SessionRecorder(journals: () => Journals)`, `fetch`, `run`;
   `REFUSAL_MESSAGES`. The refusal messages: `invalid session`, `this session was deleted`, `the chat UI is
   shutting down`, `this session could not be saved`, and two this slice names (*Notes for the plan author*):
   `this run carries no new message` (decision 3, journaled) and `this run was already recorded` (a reused
@@ -1214,13 +1219,15 @@ const view = (m: Message) => {
 };
 
 // A recorder whose agent is a script: it gets the subscriber and the input the agent would have been sent.
-type Script = (sub: Subscriber<BaseEvent>, runInput: RunAgentInput) => void;
+type Script = (sub: Subscriber<BaseEvent>, runInput: RunAgentInput) => void | Promise<void>;
 class Scripted extends SessionRecorder {
   received: RunAgentInput[] = [];
   script: Script = () => {};
   protected runNext(runInput: RunAgentInput): Observable<BaseEvent> {
     this.received.push(runInput);
-    return new Observable<BaseEvent>((sub) => this.script(sub, runInput));
+    return new Observable<BaseEvent>((sub) => {
+      void this.script(sub, runInput); // an async script's promise is not a teardown
+    });
   }
 }
 
@@ -1337,7 +1344,7 @@ test("decision 6: a snapshot of the agent's input right after RUN_STARTED when c
     const out = await drive(recorder, input(id, "forged", forged), agent());
     assert.deepEqual(types(out).slice(0, 2), [EventType.RUN_STARTED, EventType.MESSAGES_SNAPSHOT]);
     assert.equal(types(out).filter((t) => t === EventType.MESSAGES_SNAPSHOT).length, 1);
-    const snapshot = (out.events[1] as { messages: Message[] }).messages;
+    const snapshot = (out.events[1] as unknown as { messages: Message[] }).messages;
     assert.deepEqual(snapshot.map(view), (server.requests.at(-1)!.body.messages as Message[]).map(view));
     // Derived, so not journaled.
     assert.equal(ofType(await lines(journals, id), "event").some((l) => l.event.type === EventType.MESSAGES_SNAPSHOT), false);
@@ -1642,7 +1649,8 @@ test("decision 8: a journal cut after a run's third event rebuilds that run inco
     const cut = await tmpJournals();
     // The third event's line whole, then half of the fourth: a copy taken mid-append.
     await fs.writeFile(path.join(cut.dir, `${id}.jsonl`), raw.slice(0, third + 1).join("\n") + "\n" + raw[third + 1].slice(0, 20));
-    const logged = mock.method(console, "error", () => {});
+    // parseJournal reports the cut line with console.warn.
+    const logged = mock.method(console, "warn", () => {});
     let conv;
     try {
       conv = (await cut.load(id))!;
@@ -1866,9 +1874,10 @@ test("closing set while admission's journal read is pending: the run is refused,
   }
 });
 
-test("closing set while run_start is being written: run_end refused, the agent never called", async () => {
+test("closing set while run_start is being written: run_end cancelled, the agent never called", async () => {
   // SIGTERM lands during run_start's fsync, after the last check before it: the run has a line, so it ends
-  // with run_end refused instead of running unseen by shutdown's snapshot of `running`.
+  // with run_end cancelled (its run_start holds the new message) instead of running unseen by shutdown's
+  // snapshot of `running`.
   const server = await startTestAgent();
   class ClosesDuringRunStart extends Journals {
     async append(id: string, line: NewLine, durability: "now" | "soon"): Promise<void> {
@@ -1887,7 +1896,7 @@ test("closing set while run_start is being written: run_end refused, the agent n
     await settled(id);
     assert.equal(isRunning(id), false);
     const end = await onlyEnd(journals, id);
-    assert.deepEqual([end.status, end.error], ["refused", "the chat UI is shutting down"]);
+    assert.deepEqual([end.status, end.error], ["cancelled", "the chat UI is shutting down"]);
   } finally {
     shared().closing = false;
     await server.close();
@@ -1924,15 +1933,20 @@ test("decision 27: neither the request's nor the agent's bearer key reaches the 
 
 test("SPE_SESSIONS_TEST_SAVE_DELAY_MS holds a stopped run's run_end after the client has gone", async () => {
   const { journals, server, recorder, agent } = await setup();
-  process.env.SPE_SESSIONS_TEST_SAVE_DELAY_MS = "300";
+  const delayMs = 300;
+  process.env.SPE_SESSIONS_TEST_SAVE_DELAY_MS = String(delayMs);
   try {
     const id = randomUUID();
     await drive(recorder, input(id, "hang then stop"), agent(), (e) => e.type === EventType.TEXT_MESSAGE_CONTENT);
-    const stopped = Date.now();
     assert.equal(ofType(await lines(journals, id), "run_end").length, 0);
     await settled(id);
-    assert.ok(Date.now() - stopped >= 250, "the run_end waited for the delay");
-    assert.equal((await onlyEnd(journals, id)).status, "cancelled");
+    const end = await onlyEnd(journals, id);
+    assert.equal(end.status, "cancelled");
+    // Relative to the run's last event, journaled before the client left: run_end is stamped after the delay
+    // (1 ms for the stamps' rounding).
+    const lastEvent = ofType(await lines(journals, id), "event").at(-1)!;
+    const held = Date.parse(end.at) - Date.parse(lastEvent.at);
+    assert.ok(held >= delayMs - 1, `the run_end waited for the delay: ${held} ms`);
   } finally {
     delete process.env.SPE_SESSIONS_TEST_SAVE_DELAY_MS;
     await server.close();
@@ -2092,7 +2106,7 @@ import type { Subscription } from "rxjs";
 import { classify } from "./anchor.ts";
 import type { Classification } from "./anchor.ts";
 import type { Durability, NewLine, RunStatus } from "./journal.ts";
-import { isSessionId, shared, withSession } from "./sessions.ts";
+import { codeOf, isSessionId, shared, withSession } from "./sessions.ts";
 import type { Journals, RunHandle } from "./sessions.ts";
 
 // The RUN_ERROR messages of a run the recorder refuses or ends itself. lib/reconcile.ts copies them.
@@ -2148,21 +2162,14 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// Log lines name ids and error codes, never message content.
-function codeOf(error: unknown): string {
-  return (error as NodeJS.ErrnoException)?.code ?? (error instanceof Error ? error.name : "error");
-}
-
 export class SessionRecorder extends Middleware {
   readonly journals: () => Journals;
-  readonly now: () => Date;
   // One abort controller per admitted run, by runKey(), for its request to the agent.
   private readonly requests = new Map<string, AbortController>();
 
-  constructor(journals: () => Journals, now: () => Date = () => new Date()) {
+  constructor(journals: () => Journals) {
     super();
     this.journals = journals;
-    this.now = now;
   }
 
   // The agent's fetch: pass it to the HttpAgent (`new HttpAgent({ url, fetch: recorder.fetch })`) so that a
@@ -2370,25 +2377,22 @@ export class SessionRecorder extends Middleware {
         console.error(`journal: run_start of run ${input.runId} of ${id} failed: ${codeOf(error)}`);
         return { refused: NOT_SAVED };
       }
+      // A run journaled but not admitted: its run_end, then the refusal the client sees. A run_end that cannot
+      // be written leaves the run incomplete in the journal; the client is refused either way.
+      const endHere = async (status: RunStatus, error: string): Promise<Admission> => {
+        try {
+          await journals.append(id, { type: "run_end", run_id: input.runId, status, error }, "now");
+        } catch (failure) {
+          console.error(`journal: run_end of run ${input.runId} of ${id} failed: ${codeOf(failure)}`);
+        }
+        return { refused: error };
+      };
+      if (classification.newMessages.length === 0) return endHere("refused", NO_NEW_MESSAGE);
       // Re-checked once run_start is on disk: SIGTERM may have landed during its fsync, after shutdown() took
       // its snapshot of `running`, so a run admitted now would never be cancelled and drain would time out.
-      // The run is journaled, so it is ended here: run_end refused, then the closing refusal.
-      if (shared().closing) {
-        try {
-          await journals.append(id, { type: "run_end", run_id: input.runId, status: "refused", error: CLOSING }, "now");
-        } catch (error) {
-          console.error(`journal: run_end of refused run ${input.runId} of ${id} failed: ${codeOf(error)}`);
-        }
-        return { refused: CLOSING };
-      }
-      if (classification.newMessages.length === 0) {
-        try {
-          await journals.append(id, { type: "run_end", run_id: input.runId, status: "refused", error: NO_NEW_MESSAGE }, "now");
-        } catch (error) {
-          console.error(`journal: run_end of refused run ${input.runId} of ${id} failed: ${codeOf(error)}`);
-        }
-        return { refused: NO_NEW_MESSAGE };
-      }
+      // Its run_start already carries the new user message, so it ends cancelled, not refused (a refused run
+      // adds no message, §13).
+      if (shared().closing) return endHere("cancelled", CLOSING);
       shared().running.set(runKey(id, input.runId), handle);
       return { refused: null, classification };
     });
@@ -2481,7 +2485,7 @@ export function useRunReconcile({ openId, onList, onError }: Options) {
         reconcile(fetchSessionList, ended.id, ended.startMs)
           .then(({ list, saved }) => {
             latest.current.onList(list);
-            if (!saved && !ended.refused) latest.current.onError(SAVE_FAILED_MESSAGE);
+            if (!saved) latest.current.onError(SAVE_FAILED_MESSAGE);
           })
           .catch(() => latest.current.onError(LIST_FAILED));
       },
@@ -2510,7 +2514,7 @@ export function useRunReconcile({ openId, onList, onError }: Options) {
 ```bash
 C=platform/agui/copilotkit-chat
 git add $C/lib/recorder.ts $C/lib/recorder.test.ts "$C/app/api/copilotkit/[[...slug]]/route.ts" \
-  $C/lib/reconcile.ts $C/lib/reconcile.test.ts $C/app/use-run-reconcile.ts
+  $C/lib/reconcile.ts $C/lib/reconcile.test.ts $C/app/use-run-reconcile.ts $C/lib/anchor.ts $C/lib/anchor.test.ts
 git commit -s -m "Chat sessions: the recorder keeps each run in the session's journal
 
 The agent is sent the journal's path plus the new user message; whatever else

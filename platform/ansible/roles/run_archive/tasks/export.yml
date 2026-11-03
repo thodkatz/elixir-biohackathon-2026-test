@@ -132,7 +132,7 @@
                   {{ agui_exits.stdout_lines | map('split') | selectattr(0, 'in', agui_running.stdout_lines)
                      | rejectattr(1, 'eq', '0') | map('join', ' ') | list }}
 
-        - name: Copy, export and fetch (live: from the running services; final: after the stop above)
+        - name: "Copy, export and fetch (live: from the running services; final: after the stop above)"
           block:
             # slice 3's: unchanged (live: from the running container; final: from the stopped one).
             - name: Copy the journals (hidden and deleted sessions included)
@@ -203,8 +203,8 @@
             - name: The archive failed after the copy began
               ansible.builtin.fail:
                 msg: >-
-                  The archive failed at "{{ ansible_failed_task.name }}" ({{ ansible_failed_result.msg
-                  | default(ansible_failed_result.stderr | default('no message')) }}).
+                  The archive failed at "{{ ansible_failed_task.name }}" ({{ ansible_failed_result.stderr | default('') | trim
+                  or ansible_failed_result.msg | default('no message') }}).
                   {{ agui_stopped_msg if agui_final else 'Nothing was stopped; run archive.yml again.' }}
       always:
         - name: Remove the export from the VM

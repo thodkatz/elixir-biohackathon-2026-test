@@ -94,6 +94,7 @@ Fields starting with `spe_` are ours; Open WebUI itself never writes them, so it
   index.md                    sessions table `# | Session | Tags | Created | Runs | Compactions | State`; says
                               that the AG-UI frontend has no run report, and whether the archive was live
                               (incomplete runs may still have been going) or final
+  openwebui-export.json       the bundle, copied as for Open WebUI; an in-place re-render reads it back
   chats/NN-<slug>.md          the active branch along currentId: user and assistant text, each tool call with
                               fenced arguments and result, plus the three additions below; then every message on
                               other branches, each naming the message it follows (clarification 8)

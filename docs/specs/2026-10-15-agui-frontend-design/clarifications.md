@@ -99,3 +99,11 @@ in the parts it amends.
    message. A client-chosen id equal to its own run's message, or to another exported id, could make a message
    its own ancestor and hang the walk along `currentId`. *Amends:* §14 *The Open WebUI chat* and *Write*.
    *Status:* folded.
+
+9. **`GET /api/sessions/{id}` no longer answers `last_run_at`** (2026-11-03; AG-UI conversation record,
+   slice 3/4, task 1). §6's row for that call drops the field; it stays on `GET /api/sessions`'s list rows.
+   *Reason:* `last_run_at` tells a client its run was journaled apart from a metadata change, which a list
+   row needs to reconcile after a run (decision 26); one session's own view does not, and the store's `get()`
+   builds `SessionView` as `SessionMeta` without it rather than carrying a field nothing reads. *Cost if
+   wrong:* a caller that read `last_run_at` off `GET /api/sessions/{id}` gets `undefined`; none does today.
+   *Amends:* §6, the `GET /api/sessions/{id}` row. *Status:* folded.

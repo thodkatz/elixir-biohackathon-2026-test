@@ -108,7 +108,8 @@ to the run's history and opens the request once more with them, so the retried r
 client like any other (clarification 6). The summary request goes to the wrapped model, not through the
 wrapper. The overflow errors are a fixed list in `compaction.py`, each with a test:
 `ModelHTTPError` with status 400 or 413 whose body contains `prompt is too long` (Anthropic),
-`context_length_exceeded` or `maximum context length` (OpenAI and vLLM), `input is too long` or
+`context_length_exceeded` or `maximum context length` (OpenAI and vLLM), `context window exceeded` (a LiteLLM
+proxy such as de.NBI's gateway, which refuses before vLLM sees the request), `input is too long` or
 `too many tokens`. Any other error passes through as today. The reactive path is what makes a session that
 already overflows recover (decision 13), and it covers an unset or wrong window.
 

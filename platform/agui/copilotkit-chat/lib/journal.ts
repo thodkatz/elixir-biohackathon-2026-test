@@ -70,7 +70,9 @@ export function parseJournal(text: string): { lines: Line[]; skipped: number } {
   const raw = text.split("\n");
   if (raw.at(-1) === "") raw.pop(); // the newline that ends the last line
   raw.forEach((row, index) => {
-    if (row === "") return; // the "\n" written to repair a torn end leaves at most this
+    // A blank line is no line, and no skip. JournalWriter never writes one (its torn-end repair adds "\n" only
+    // after a last byte that is not "\n"); only an edit by hand leaves one.
+    if (row === "") return;
     let value: unknown;
     try {
       value = JSON.parse(row);

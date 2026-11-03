@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import AsyncIterator, Iterator
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass, field, replace
 from importlib.resources import files
 from typing import Any, Literal
@@ -20,7 +22,8 @@ from pydantic_ai.messages import (
     CompactionPart, ModelMessage, ModelRequest, ModelResponse, RetryPromptPart, SystemPromptPart, TextPart,
     ToolCallPart, ToolReturnPart, UserPromptPart,
 )
-from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
+from pydantic_ai.models import Model, ModelRequestContext, ModelRequestParameters, StreamedResponse
+from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import RunContext
 
@@ -230,7 +233,8 @@ def _tool_chars(request_context: ModelRequestContext) -> int:
 
 @dataclass
 class Compaction(AbstractCapability[Any]):
-    """Compacts before a request past the trigger."""
+    """Compacts before a request past the trigger, and after the provider rejects a request as too long
+    (then sends it once more, compacted)."""
 
     cfg: CompactionCfg
     system_prompt: str
@@ -244,10 +248,15 @@ class Compaction(AbstractCapability[Any]):
                                  handler) -> ModelResponse:
         run: CompactionRun = ctx.deps.compaction
         sent = build_sent(list(request_context.messages))
+        compacted_here = False
         if over_trigger(self._estimate(sent, request_context), self.cfg):
             sent = await self._compact(ctx, request_context, sent, "threshold")
+            compacted_here = True
         request_context.messages = sent.copy()
         ctx.messages[:] = sent
+        # The graph opens a streamed request lazily, in the task that reads the stream, so a provider's
+        # rejection never reaches this hook: the model is wrapped to catch it where the request is sent.
+        request_context.model = _Reactive(request_context.model, self, ctx, request_context, compacted_here)
         response = await handler(request_context)
         if run.records and run.records[-1].next_input_tokens is None:
             run.records[-1].next_input_tokens = response.usage.input_tokens
@@ -291,3 +300,71 @@ class Compaction(AbstractCapability[Any]):
             if not last and self.cfg.context_window_tokens is None and is_overflow(error):
                 return None
             raise
+
+
+class _Reactive(WrapperModel):
+    """The model of one request: on a listed overflow, compacts the messages it was given and sends them once
+    more. At most one compaction per request: a request already compacted before it was sent is not
+    compacted again, and an overflow on the compacted request ends the run."""
+
+    def __init__(self, wrapped: Model, capability: Compaction, ctx: RunContext[Any],
+                 request_context: ModelRequestContext, compacted: bool):
+        super().__init__(wrapped)
+        self._capability, self._ctx, self._request_context, self._compacted = capability, ctx, request_context, compacted
+        self._swap: tuple[list[ModelMessage], list[ModelMessage]] | None = None  # (as given, as compacted)
+
+    def _sent(self, messages: list[ModelMessage]) -> list[ModelMessage]:
+        """A continuation (a suspended response sent back) carries the messages as given: send the compacted ones."""
+        if self._swap is not None and messages[:len(self._swap[0])] == self._swap[0]:
+            return [*self._swap[1], *messages[len(self._swap[0]):]]
+        return messages
+
+    async def _recover(self, error: Exception, messages: list[ModelMessage]) -> list[ModelMessage]:
+        if not is_overflow(error):
+            raise error
+        if self._compacted:
+            raise CompactionError() from error
+        self._compacted = True
+        # The summary request goes to the provider directly, not through this wrapper.
+        request_context = replace(self._request_context, model=self.wrapped, messages=list(messages))
+        sent = await self._capability._compact(self._ctx, request_context, list(messages), "overflow")
+        self._ctx.messages[:] = sent
+        self._swap = (list(messages), sent)
+        return sent.copy()
+
+    @staticmethod
+    @contextmanager
+    def _retrying() -> Iterator[None]:
+        try:
+            yield
+        except ModelHTTPError as error:
+            if is_overflow(error):
+                raise CompactionError() from error
+            raise
+
+    async def request(self, messages: list[ModelMessage], model_settings: ModelSettings | None,
+                      model_request_parameters: ModelRequestParameters) -> ModelResponse:
+        messages = self._sent(messages)
+        try:
+            return await self.wrapped.request(messages, model_settings, model_request_parameters)
+        except ModelHTTPError as error:
+            messages = await self._recover(error, messages)
+        with self._retrying():
+            return await self.wrapped.request(messages, model_settings, model_request_parameters)
+
+    @asynccontextmanager
+    async def request_stream(self, messages: list[ModelMessage], model_settings: ModelSettings | None,
+                             model_request_parameters: ModelRequestParameters,
+                             run_context: RunContext[Any] | None = None) -> AsyncIterator[StreamedResponse]:
+        messages = self._sent(messages)
+        async with AsyncExitStack() as stack:
+            def open_(sent: list[ModelMessage]):
+                return stack.enter_async_context(
+                    self.wrapped.request_stream(sent, model_settings, model_request_parameters, run_context))
+            try:
+                stream = await open_(messages)
+            except ModelHTTPError as error:
+                messages = await self._recover(error, messages)
+                with self._retrying():
+                    stream = await open_(messages)
+            yield stream

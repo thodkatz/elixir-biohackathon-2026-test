@@ -8,7 +8,7 @@ history with the same model, sends the model the summary instead, and marks the 
 the chat shows it, the session record keeps it and later runs cut there.
 
 **Spec:** [`docs/superpowers/specs/2026-11-03-agui-compaction-design.md`](../../specs/2026-11-03-agui-compaction-design.md)
-(decisions 1–13; latest clarification: none; slice 1 folds 1–4, slice 3 folds 5). Each slice file links the
+(decisions 1–13; latest clarification: none; slice 1 folds 1–4 and 6, slice 3 folds 5). Each slice file links the
 sections it implements.
 
 **Architecture.** One new module, `platform/agui/pydantic-ai-agent/src/spe_agent/compaction.py`: the token
@@ -171,7 +171,7 @@ marker as `## Compacted`; `index.md`'s columns become `| # | Session | Tags | Cr
 | Path | Slice | What |
 |---|---|---|
 | `copilotkit-chat/lib/test-agent.ts`, `lib/recorder.test.ts` | 1 | the round-trip test (`compact`, `activity` keywords) |
-| `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` | 1 | clarifications 1–4 (the plan's proposed ones) |
+| `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` | 1 | clarifications 1–4 and 6 (the plan's proposed ones) |
 | `pydantic-ai-agent/src/spe_agent/config.py`, `tests/test_config.py` | 1 | `CompactionCfg` |
 | `ansible/inventory/group_vars/all.yml`, `ansible/roles/agui/tasks/main.yml`, `roles/agui/tasks/checks.yml` | 1 | `spe_agent_compaction_*`, the rendered block, the check that shows it |
 | `pydantic-ai-agent/src/spe_agent/compaction.py`, `compaction_prompt.md`, `tests/test_compaction.py` | 1 | the module, the prompt, unit tests |
@@ -257,6 +257,9 @@ Each is added by the slice that verifies it, with status `folded`, and the spec 
    slice 2's early output. Decision 13's acceptance check is rewritten: **an approved acceptance check changes, so
    the user is pointed at this clarification** in this plan's PR and in slice 3's PR, and slice 3 reads the
    user's answer on this plan's PR before its paid run (task 3, step 0). Slice 3, task 3.
+6. **The reactive retry goes through the streamed request**, inside a wrapper model that `wrap_model_request`
+   sets: in 2.56.0 a streamed request's error surfaces in the task that reads the stream, never in the hook.
+   Rewrites decision 3's row, §1 and §2. Slice 1, task 5.
 
 ## Handoffs
 

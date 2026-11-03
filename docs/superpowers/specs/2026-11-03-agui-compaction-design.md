@@ -32,7 +32,7 @@ archive renders it. The browser always keeps and sends the full history; only wh
 |---|---|---|---|
 | 1 | Compaction lives in the agent, as a capability on the `spe-agent` `Agent`, for every provider; not in the chat UI, not provider-native | [Approach](#1-approach) | `pytest` (agent): with a `FunctionModel`, a history past the trigger leads to one summary request and then a model request that holds the system prompt, the framed summary, the latest user request and only the messages after the cut; with `AnthropicModel` and `OpenAIChatModel` over a mocked HTTP transport, the overflow bodies those providers send are recognised and the wire request after a compaction has that shape, with no `CompactionPart` and no `compact-*` beta header |
 | 2 | Proactive trigger: before each model request, estimated tokens of what would be sent ≥ `trigger_ratio` × `context_window_tokens`; off while `context_window_tokens` is unset | [Trigger](#2-trigger) | `pytest`: estimates just under and just over the trigger compact 0 and 1 times; with `context_window_tokens: null` a large history is sent uncompacted; inside one run, tool results that push the history over the trigger compact before the next request, not only at the run's start; the usage anchor is the latest response after our latest marker |
-| 3 | Reactive trigger: a request the provider rejects as too long (a fixed list of overflow errors) is caught in `wrap_model_request`, compacted and sent once more with a direct `model.request`, whether or not a window is configured | [Trigger](#2-trigger) | `pytest`, through `AGUIAdapter.run_stream`: a model raising each listed overflow error (Anthropic, OpenAI, vLLM wording) once, then answering, gives one compaction and a completed run whose answer reaches the AG-UI stream; an unlisted 400 is not retried and reaches `RUN_ERROR` as today; overflow again after the retry gives `RUN_ERROR` with the message of decision 6 |
+| 3 | Reactive trigger: a request the provider rejects as too long (a fixed list of overflow errors) is caught where the request is sent (a wrapper around the request's model, set by `wrap_model_request`), compacted and sent once more through the same streamed request, whether or not a window is configured | [Trigger](#2-trigger) | `pytest`, through `AGUIAdapter.run_stream`: a model raising each listed overflow error (Anthropic, OpenAI, vLLM wording) once, then answering, gives one compaction and a completed run whose answer reaches the AG-UI stream; an unlisted 400 is not retried and reaches `RUN_ERROR` as today; overflow again after the retry gives `RUN_ERROR` with the message of decision 6 |
 | 4 | What is sent after a compaction: the system prompt, one user message holding the framed summary, the latest user request verbatim if it lies before the cut, then the messages after our latest marker, unchanged; no `CompactionPart` (ours or anyone's) is ever sent | [What the model sees](#3-what-the-model-sees) | `pytest`: requests after a compaction, in the same run and in a later run rebuilt from AG-UI messages, have exactly that shape; the system prompt is present in both; a marker from another producer (`provider_name` not `spe-agent`, `anthropic` included) is neither a cut point nor sent; a marker merged into the following `ModelResponse` on reload cuts at part level; a marker followed directly by a user message (a run that failed after compacting) cuts the same way |
 | 5 | The summary request uses the same model, no tools, a fixed prompt kept in the package, a transcript with each tool result cut to 2000 characters and marked as tool output, at most `summary_max_tokens` of output; it counts as a request towards the run's usage and limits, checked before it is sent | [The summary request](#4-the-summary-request) | `pytest`: the summary request carries no tool definitions, the cut and marked tool results and the package prompt; `result.usage.requests` and tokens after a compacting run include it; a run at `request_limit` - 1 that needs a compaction ends with the usage-limit error before the summary request is sent; the framed summary says it is not the participant's words |
 | 6 | At most one compaction per model request and three per run; past that the run fails with "The conversation is still too long after compacting it. Start a new chat." | [Trigger](#2-trigger) | `pytest`: a summary that is itself past the trigger does not compact again for the same request; a fourth compaction in one run gives `RUN_ERROR` with that message |
@@ -77,8 +77,10 @@ capability (`wrap_model_request`), sees every request, inside a run too, uses th
 works the same for every provider and every AG-UI client (the promptfoo provider included). It is chosen.
 
 `on_model_request_error` is not used: it cannot recover an error once streaming has begun
-(`_agent_graph.py:1488`), and the AG-UI adapter always streams. `wrap_model_request` sees both the request
-before it is sent (the proactive trigger) and the error its handler raises (the reactive one).
+(`_agent_graph.py:1488`), and the AG-UI adapter always streams. `wrap_model_request` sees the request before it is
+sent (the proactive trigger). A streamed request is opened later, in the task that reads the stream, so its
+error never reaches `wrap_model_request`; the hook therefore wraps the request's model, and the wrapper sees the
+provider's error where the request is sent (the reactive trigger, §2; clarification 6).
 
 Dropping old messages or old tool results without a summary was also considered: no extra request, but the
 model silently loses what the participant asked and what it found. It stays a possible cheaper first stage
@@ -99,10 +101,12 @@ Before each model request the capability estimates what is sent:
 
 Three characters a token over-estimates English and JSON for the tokenizers in use, which errs towards
 compacting early. **Proactive:** when `context_window_tokens` is set and the estimate is at least
-`trigger_ratio` × `context_window_tokens`, compact before calling the handler. **Reactive:** the capability
-calls the handler inside a `try`; when it raises an overflow error, the capability compacts and sends the
-rebuilt request once more with `model.request` directly, returning that response (the handler may be called
-only once). The overflow errors are a fixed list in `compaction.py`, each with a test:
+`trigger_ratio` × `context_window_tokens`, compact before calling the handler. **Reactive:** before calling the
+handler, the capability replaces the request's model by a thin wrapper (pydantic-ai's `WrapperModel`); when
+opening the request raises an overflow error, the wrapper compacts the messages it was given, writes the result
+to the run's history and opens the request once more with them, so the retried response streams to the AG-UI
+client like any other (clarification 6). The summary request goes to the wrapped model, not through the
+wrapper. The overflow errors are a fixed list in `compaction.py`, each with a test:
 `ModelHTTPError` with status 400 or 413 whose body contains `prompt is too long` (Anthropic),
 `context_length_exceeded` or `maximum context length` (OpenAI and vLLM), `input is too long` or
 `too many tokens`. Any other error passes through as today. The reactive path is what makes a session that
@@ -314,3 +318,20 @@ the glossary are rewritten to match.
 prompt, framed summary, latest user request), so later requests of the same run start from it and the history
 holds no `CompactionPart` that a model could be sent. The marker exists only in the AG-UI stream and, on later
 runs, in the input. `test_compacts_inside_a_run` and `test_fourth_compaction_fails` pin the in-run behaviour.
+
+### 6. The reactive retry goes through the streamed request, inside a wrapper model — folded
+
+**2026-11-03, slice 1, task 5** (numbered 6 because 3–4 are proposed for task 6 and 5 is reserved for slice 3).
+In pydantic-ai 2.56.0 a streamed request is opened lazily, in the task that reads the stream
+(`_ContinuationStreamedResponse`, `models/_continuation.py`), after the graph has marked the stream ready
+(`_agent_graph.py` ≈ 1465–1475). The provider's error therefore surfaces in that task, and `wrap_model_request`
+only sees its own cancellation: a `try` around the handler never catches an overflow. *Inputs for the plan*
+allowed the retry to go through the streaming request instead, and it does: `wrap_model_request` sets the
+request's model to a `WrapperModel` whose `request_stream` (and `request`) catches a listed overflow when the
+inner request opens, compacts with the trigger `overflow`, writes `ctx.messages`, and opens the inner request
+once more with the compacted messages. One compaction per request still holds: a request the proactive trigger
+compacted, or the retry itself, overflowing again ends the run with decision 6's message; an unlisted error is
+raised untouched. The graph counts the retried response as the step's one request; the rejected one produced
+nothing and is not counted. Decision 3's row, §1 and §2 are rewritten. `test_overflow_compacts_and_retries`,
+`test_overflow_after_the_retry_fails`, `test_overflow_after_a_proactive_compaction_fails` and
+`tests/test_compaction_providers.py` pin it.

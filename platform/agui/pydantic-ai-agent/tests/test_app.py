@@ -13,6 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 from ag_ui.core import RunAgentInput
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
     ModelRequest, ModelResponse, SystemPromptPart, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart,
 )
@@ -527,15 +528,15 @@ BIG = "x" * 15000  # a tool result of about 5000 estimated tokens; see the verif
 
 
 class Script:
-    """A FunctionModel scripted for compaction. The streamed requests (the agent's) call run_command with a
-    long command until `calls` tool calls are made, then answer; the non-streamed ones are summary
-    requests (system prompt = the package's prompt) or the reactive retry."""
+    """A FunctionModel scripted for compaction. The streamed requests (the agent's, including the one sent
+    again after the provider rejected it as too long) call run_command with a long command until `calls`
+    tool calls are made, then answer; the non-streamed ones are summary requests (system prompt = the
+    package's prompt)."""
 
     def __init__(self, calls=1, summary="SUMMARY", answer="final answer"):
         self.calls, self.summary, self.answer = calls, summary, answer
-        self.streamed: list[list] = []   # messages of each agent request
+        self.streamed: list[list] = []   # messages of each agent request that reached the model
         self.summaries: list[tuple[list, AgentInfo]] = []
-        self.retries: list[list] = []
 
     @staticmethod
     def is_summary(messages):
@@ -543,11 +544,9 @@ class Script:
         return isinstance(first, SystemPromptPart) and first.content == cmp.SUMMARY_PROMPT
 
     def function(self, messages, info):
-        if self.is_summary(messages):
-            self.summaries.append((messages, info))
-            return ModelResponse(parts=[TextPart(self.summary)])
-        self.retries.append(messages)
-        return ModelResponse(parts=[TextPart(self.answer)])
+        assert self.is_summary(messages), "the agent's requests are streamed"
+        self.summaries.append((messages, info))
+        return ModelResponse(parts=[TextPart(self.summary)])
 
     async def stream(self, messages, info):
         self.streamed.append(messages)
@@ -681,3 +680,142 @@ async def test_empty_summary_gets_placeholder(tmp_path):
     assert terminal(evs) == ["RUN_FINISHED"]
     assert _framed(script.streamed[-1][0])
     assert any(getattr(p, "content", None) == cmp.frame(cmp.EMPTY_SUMMARY) for p in script.streamed[-1][0].parts)
+
+
+# --- the reactive trigger ---------------------------------------------------------------------
+
+ANTHROPIC_TOO_LONG = {"type": "error", "error": {"type": "invalid_request_error",
+                                                 "message": "prompt is too long: 210000 tokens > 200000 maximum"}}
+
+
+def too_long():
+    return ModelHTTPError(400, "m", body=ANTHROPIC_TOO_LONG)
+
+
+class Overflowing(FunctionModel):
+    """Raises the queued errors when a stream is opened, as a provider rejecting the request does; then
+    streams as the FunctionModel would. `rejected` holds the messages of each rejected request."""
+
+    def __init__(self, errors, **kw):
+        super().__init__(**kw)
+        self.errors = list(errors)
+        self.rejected: list[list] = []
+
+    @asynccontextmanager
+    async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
+        if self.errors:
+            self.rejected.append(messages)
+            raise self.errors.pop(0)
+        async with super().request_stream(messages, model_settings, model_request_parameters, run_context) as s:
+            yield s
+
+
+async def overflow_run(tmp_path, errors, script=None, messages=None, text="hi", **cfg):
+    script = script or Script(calls=0)  # answers at once: the retry's text is the answer
+    model = Overflowing(errors, function=script.function, stream_function=script.stream)
+    app, _ = build(tmp_path, model=model, **cfg)
+    async with running(app) as client:
+        await until_status(client, 200)
+        return script, model, await post_run(client, messages=messages, text=text)
+
+
+def run_error(evs):
+    return next(e for e in evs if e["type"] == "RUN_ERROR")["message"]
+
+
+@pytest.mark.parametrize("body", [
+    ANTHROPIC_TOO_LONG,
+    {"error": {"message": "This model's maximum context length is 8192 tokens.", "code": "context_length_exceeded"}},
+    {"object": "error", "message": "This model's maximum context length is 32768 tokens. However, you requested "
+                                   "40000 tokens", "type": "BadRequestError", "code": 400},
+])
+async def test_overflow_compacts_and_retries(tmp_path, body):
+    script, model, evs = await overflow_run(tmp_path, [ModelHTTPError(400, "m", body=body)])
+    assert terminal(evs) == ["RUN_FINISHED"]
+    assert len(model.rejected) == 1 and not _framed(model.rejected[0][0])
+    assert len(script.summaries) == 1 and len(script.streamed) == 1 and _framed(script.streamed[0][0])
+    answer = "".join(e["delta"] for e in evs if e["type"] == "TEXT_MESSAGE_CONTENT"
+                     and not e["messageId"].startswith(cmp.MARKER_PREFIX))
+    assert answer == "final answer"  # the retried request's response reached the AG-UI stream
+    (record,) = log_records(tmp_path)
+    assert record["usage"]["requests"] == 2  # the summary and the retry; the rejected request is not counted
+
+
+async def test_overflow_without_a_window_still_compacts(tmp_path):
+    script, _, evs = await overflow_run(tmp_path, [too_long()])
+    assert terminal(evs) == ["RUN_FINISHED"] and len(script.summaries) == 1  # build() sets no window
+
+
+async def test_disabled_overflow_is_not_retried(tmp_path):
+    script, model, evs = await overflow_run(tmp_path, [too_long()], **window(6000, enabled=False))
+    assert terminal(evs) == ["RUN_ERROR"]
+    assert script.summaries == [] and script.streamed == [] and len(model.rejected) == 1
+    assert cmp.STILL_TOO_LONG not in run_error(evs)
+
+
+async def test_unlisted_400_is_not_retried(tmp_path):
+    script, model, evs = await overflow_run(tmp_path, [ModelHTTPError(400, "m", body={"error": {"message": "bad tool"}})])
+    assert terminal(evs) == ["RUN_ERROR"]
+    assert script.summaries == [] and script.streamed == [] and len(model.rejected) == 1
+    assert cmp.STILL_TOO_LONG not in run_error(evs) and "bad tool" in run_error(evs)
+
+
+async def test_reactive_compaction_holds_for_the_run(tmp_path):
+    # The compacted history is the run's: the request after the retry's tool call starts from the summary.
+    script, model, evs = await overflow_run(tmp_path, [too_long()], script=Script(calls=2), text="do the task")
+    assert terminal(evs) == ["RUN_FINISHED"] and len(script.summaries) == 1
+    first, second, _ = script.streamed
+    assert _framed(first[0]) and _framed(second[0]) and isinstance(second[0].parts[0], SystemPromptPart)
+    assert sum(isinstance(p, ToolReturnPart) for m in second for p in m.parts) == 1
+
+
+async def test_overflow_after_the_retry_fails(tmp_path):
+    script, model, evs = await overflow_run(tmp_path, [too_long(), too_long()])
+    assert run_error(evs) == cmp.STILL_TOO_LONG
+    assert len(script.summaries) == 1 and len(model.rejected) == 2 and _framed(model.rejected[1][0])
+
+
+async def test_overflow_after_a_proactive_compaction_fails(tmp_path):
+    # At most one compaction per request: the request already compacted is not compacted again.
+    script = Script()
+    model = Overflowing([], function=script.function, stream_function=script.stream)
+    original = model.request_stream
+
+    @asynccontextmanager
+    async def request_stream(messages, *a, **kw):
+        if any(_framed(m) for m in messages):
+            raise too_long()
+        async with original(messages, *a, **kw) as s:
+            yield s
+
+    model.request_stream = request_stream
+    app, _ = build(tmp_path, model=model, **window(6000))
+    async with running(app) as client:
+        await until_status(client, 200)
+        evs = await post_run(client)
+    assert run_error(evs) == cmp.STILL_TOO_LONG
+    assert len(script.summaries) == 1
+
+
+async def test_overflowing_summary_without_a_window_is_sent_shorter(tmp_path):
+    # No window: the summary request itself may be too long; it is sent once more with older entries left out.
+    script = Script(calls=0)
+    summarise = script.function
+    failed = []
+
+    def function(messages, info):
+        if not failed:
+            failed.append(messages)
+            raise too_long()
+        return summarise(messages, info)
+
+    script.function = function
+    history = [{"id": f"{role[0]}{i}", "role": role, "content": f"{role} turn {i}"}
+               for i in range(3) for role in ("user", "assistant")] + [{"id": "u9", "role": "user", "content": "now"}]
+    _, model, evs = await overflow_run(tmp_path, [too_long()], script=script, messages=history)
+    assert terminal(evs) == ["RUN_FINISHED"]
+    first = failed[0][-1].parts[-1].content
+    second = script.summaries[0][0][-1].parts[-1].content
+    assert len(failed) + len(script.summaries) == 2  # two summary requests: one rejected, one answered
+    assert "earlier entries left out" not in first and "earlier entries left out]" in second
+    assert "User: now" in second

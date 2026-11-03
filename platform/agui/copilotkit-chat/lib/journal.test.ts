@@ -107,6 +107,15 @@ test("append stamps at after type, writes one line each, and the file parses bac
   });
 });
 
+test("the writer's at wins over one the caller passes", async () => {
+  const file = path.join(await tmp(), `${randomUUID()}.jsonl`);
+  const writer = new JournalWriter(file, { now: fixed });
+  const line = await writer.append({ type: "meta", at: "1999-01-01T00:00:00.000Z", pinned: true } as unknown as NewLine, "now");
+  await writer.close();
+  assert.deepEqual(line, { type: "meta", at: "2026-11-03T12:00:00.000Z", pinned: true });
+  assert.equal(await fs.readFile(file, "utf8"), '{"type":"meta","at":"2026-11-03T12:00:00.000Z","pinned":true}\n');
+});
+
 test("parseJournal skips torn, foreign and incomplete lines and logs only their numbers", () => {
   const good = '{"type":"meta","at":"t","hidden":true}';
   const warnings: string[] = [];

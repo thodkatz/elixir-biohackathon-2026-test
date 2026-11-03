@@ -144,7 +144,8 @@ export class JournalWriter {
     return this.enqueue(async () => {
       if (this.closed) throw new Error("journal writer is closed");
       const handle = await this.open();
-      const { type, ...rest } = line;
+      // A caller's own `at` (a line typed loosely) is dropped: the writer's stamp is the line's time.
+      const { type, at: _ignored, ...rest } = line as NewLine & { at?: unknown };
       const stamped = { type, at: this.now().toISOString(), ...rest } as Line;
       await handle.appendFile(`${JSON.stringify(stamped)}\n`);
       if (durability === "now") {

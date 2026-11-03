@@ -44,7 +44,11 @@ neither read nor migrated.
 - `/api/sessions`: `GET` lists metadata (newest first, at most 1000, deleted ones left out);
   `GET`/`PATCH`/`DELETE /api/sessions/{id}` read one (its latest branch), change `title`, `tags`, `pinned` or
   `hidden` (bodies up to 16 KB; one `meta` line each), or mark it deleted. A deleted session's journal is
-  kept. There is no `POST`: a session is listed once a run has added a message. Errors are `{"error": "<message>"}`.
+  kept. No route creates a session: one is listed once a run has added a message. `POST
+  /api/sessions/{id}/title` asks the agent's `POST /title` (same `AGENT_URL` host and key) for a 2-4 word title
+  from the first completed run's user message and answer, read from the journal, and appends it as a `meta`
+  title only if the session has none (a rename, even one made while the model writes, wins); it answers the
+  metadata, unchanged when nothing was written or the agent failed (logged). Errors are `{"error": "<message>"}`.
 
 The journals hold whatever participants typed and tools returned, canary values included: treat the
 volume like the agent's run log.

@@ -1,4 +1,4 @@
-# 2026-11-03: slice 3/3 claimed (PR #21), blocked on the de.NBI key
+# 2026-11-03: slice 3/3 claimed (PR #21); next: task 1 with the key from the de.NBI VM
 
 Done on `impl/agui-compaction-3-denbi-docs`:
 
@@ -12,18 +12,27 @@ Done on `impl/agui-compaction-3-denbi-docs`:
   2026-11-03; free). Task 4, step 5 sets it on the dev VM.
 - No model call made. The dev VM's `dev-local.yml` is as it was (`spe_agent_context_window_tokens: 20000`).
 
-## Blocked (PR #21 comment): what the next session needs from the user
+## The de.NBI key: from the de.NBI VMs (the user, 2026-11-03)
 
-1. **`DENBI_LLM_API_KEY`** in this environment. The endpoint `denbi-llm-api-internal.bihealth.org` does not
-   resolve from here (curl 000), and no key is set. Without the key, task 1, step 1 (`/v1/models`) is a gate, and
-   so are tasks 3 and 4, since a converge of `denbi-agui-01` renders the key. `agent-service-1` is reachable
-   over ssh and its `spe-frontend` stack is up. Alternative, offered on the PR: the user gives `max_model_len`.
-2. **The dev VM's disk:** 1.6 GB free on `/`, against the preflight's 5 GB. `create.yml` refused, nothing
-   changed. Reclaimable: the build cache (12.2 GB, none active), old `spe-agent`/`spe-chat-ui` tags (~300–440 MB
-   each), `/var/tmp` 19 GB. Not ours to prune (`dev-vm-converge.md`): the user decides. Only task 4, step 5
-   (the dev VM's window) needs it.
+The endpoint `denbi-llm-api-internal.bihealth.org` does not resolve from here (curl 000), and no key is set
+locally. The user said: "you should be able to ssh to vms on the denbi cloud and use the keys there".
+`agent-service-1` is reachable (`ssh -F /home/agentvm/.ssh/config agent-service-1`), and its `spe-frontend`
+stack is up.
 
-## Next, once unblocked
+- **Task 1, step 1:** run the `/v1/models` curl **on the VM**, with the key the deployed agent already holds
+  (its env file under the frontend dir, or `docker exec` into the agent container). The key stays there, and
+  only `max_model_len` comes back.
+- **Tasks 3 and 4 (converging `denbi-agui-01` from here):** export `DENBI_LLM_API_KEY` for the run only, read
+  over ssh into the environment. Never write it to a file, a log or a commit, and grep the evidence for it.
+- If the VM holds no usable key, that is the gate: one comment on PR #21, then `next-session.sh --end --blocked 21`.
+
+## The dev VM's disk (only task 4, step 5 needs it)
+
+1.6 GB free on `/`, against the preflight's 5 GB. `create.yml` refused, nothing changed. Reclaimable: the build
+cache (12.2 GB, none active), old `spe-agent`/`spe-chat-ui` tags, `/var/tmp` 19 GB. Pruning is not ours to
+decide (`dev-vm-converge.md`), so ask on the PR when step 5 comes.
+
+## Next
 
 Task 1 (read, set, render, commit), then task 3 (de.NBI session at window 20000), then task 4 (qwen overflow,
 N = ceil(W/3)), then task 4, step 7 (the PR, the review, the merge, the pin, `--end`). Use the plan's commands

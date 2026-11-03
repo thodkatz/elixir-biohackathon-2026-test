@@ -1,4 +1,4 @@
-**Status:** open
+**Status:** taken up by the living AG-UI spec, `docs/specs/2026-10-15-agui-frontend-design/` §13–14 (PR #19, in review); set to *folded* when it merges.
 
 # AG-UI conversation history: injection through the client, and a server-side journal
 

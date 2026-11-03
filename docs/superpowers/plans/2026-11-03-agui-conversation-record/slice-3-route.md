@@ -3054,7 +3054,7 @@ write_agui_run.py and its session format go."
 - Modify (docs): `CHAT/README.md` (*Sessions*, *Shutdown*), `platform/ansible/roles/agui/templates/docker-compose.yml.j2`
   (l. 14 comment), `docs/knowledge/agui-chat-sessions.md` (§5's fix), `BACKLOG.md` (one item)
 - Modify (spec): `docs/specs/2026-10-15-agui-frontend-design/clarifications.md`, `14-archive.md` (l. 8–10,
-  l. 52–55), `06-chat-ui.md` (*Session API*, the `GET /api/sessions/{id}` row), `README.md` (status, latest
+  l. 52–55), `README.md` (status, the note above the decisions table, latest
   clarification)
 - Create: `E/sample-1-request.json`, `E/sample-1-response.sse`, `E/sample-1-journal.jsonl`,
   `E/sample-2-forged-session.md`, `E/sample-2-normal-session.md`, `E/sample-2-index.md`
@@ -3104,6 +3104,11 @@ def received(messages) -> list[dict]:
         return
 ```
 
+  Also give each scripted tool call a unique id (`import uuid`; `tool_call_id=f"call-{len(users)}-{uuid.uuid4().hex[:8]}"`,
+  with a comment saying why): after a compaction the turn count starts again, so `call-1` came back, and
+  `@ag-ui/client` appended the new call's arguments and result to the earlier run's `call-1` (step 2's group 4
+  then failed on the client's side, not the rebuild's).
+
 - [ ] **Step 2: the built-server check on journals.** Replace `CHAT/scripts/check-built-server.mjs` with:
 
 ```js
@@ -3119,8 +3124,9 @@ def received(messages) -> list[dict]:
 //      compaction marker reaches the agent without them (fake_agent.py's echo-input), the browser gets a
 //      MESSAGES_SNAPSHOT right after RUN_STARTED, and run_start records both as fabricated;
 //   4. no false alarm (decision 2): a client that keeps its history as CopilotKit's does (@ag-ui/client's
-//      HttpAgent against the runtime route), over runs with tool calls and a failed run, has nothing ignored,
-//      and GET /api/sessions/{id} rebuilds the messages that client holds (decision 11).
+//      HttpAgent against the runtime route), over runs with tool calls, a failed run, a compaction and a run
+//      after it, has nothing ignored, and GET /api/sessions/{id} rebuilds the messages that client holds,
+//      the compaction marker included (decision 11).
 // Exits non-zero on the first failure, or after DEADLINE_MS if something hangs.
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -3284,7 +3290,7 @@ try {
   // 4. No false alarm, and the rebuild equals what the client holds.
   const d = randomUUID();
   const client = new HttpAgent({ url: `${ui}/api/copilotkit/agent/spe/run`, threadId: d });
-  for (const text of ["list the files", "fail this one", "and once more"]) {
+  for (const text of ["list the files", "fail this one", "compact the history", "and once more"]) {
     client.addMessage(user(text));
     try {
       await client.runAgent({ runId: randomUUID() });
@@ -3293,10 +3299,17 @@ try {
     }
   }
   const jd = await journal(d);
-  check(same(ofType(jd, "run_end").map((e) => e.status), ["completed", "failed", "completed"]), "three runs: completed, failed, completed");
+  check(same(ofType(jd, "run_end").map((e) => e.status), ["completed", "failed", "completed", "completed"]),
+    "four runs: completed, failed, completed (a compaction), completed");
   check(ofType(jd, "run_start").every((s) => s.ignored.length === 0), "a CopilotKit-shaped client's history: nothing ignored");
   const view = (m) => [m.id, m.role, m.content ?? "", m.toolCalls ?? [], m.toolCallId ?? null];
-  check(same((await getSession(d)).messages.map(view), client.messages.map(view)), "GET rebuilds the messages the client holds");
+  const rebuilt = (await getSession(d)).messages;
+  check(rebuilt.some((m) => m.role === "assistant" && String(m.id).startsWith("spe-compaction-")), "the rebuild holds the compaction marker");
+  if (!same(rebuilt.map(view), client.messages.map(view))) {
+    console.error("rebuilt:", JSON.stringify(rebuilt.map(view)));
+    console.error("client: ", JSON.stringify(client.messages.map(view)));
+  }
+  check(same(rebuilt.map(view), client.messages.map(view)), "GET rebuilds the messages the client holds");
   console.log("check-built-server: all checks passed");
 } catch (error) {
   console.error(error instanceof Error ? error.message : error);
@@ -3611,34 +3624,29 @@ uv run --with pytest pytest platform/dev/tests -q
   - `BACKLOG.md`: delete the item *AG-UI chat sessions: `lib/sessions.ts` `list()` reads and parses every
     session file …*: the index answers it (decision 12).
 
-- [ ] **Step 6: the clarification.** In `docs/specs/2026-10-15-agui-frontend-design/clarifications.md`, add the
-  next free number N:
+- [ ] **Step 6: the clarification.** In `docs/specs/2026-10-15-agui-frontend-design/clarifications.md`, add
+  clarification 11 (tasks 1 and 2 added 9 and 10):
 
 ```markdown
-N. **The conversation record is built; the archive exports the journals, and every archive still runs the
-   barrier** (the commit's date; the conversation record's implementation). `chat-ui` keeps `/data/sessions/<uuid>.jsonl`
-   (§13) and serves §6's session API from it; `archive.yml` copies the journals and the run log, exports the
-   journals with the chat UI's exporter and renders them with `write_run.py` (§14); `<uuid>.json` and
-   `write_agui_run.py` are gone. Until the live copy is built, every archive stops `chat-ui` and then the agent
-   before the copy and starts them again after it, as the archive of the chat sessions did, and the bundle says
-   `final`. `GET /api/sessions/{id}` answers the metadata without `last_run_at`, which the browser reads from the
-   list only. *Reason:* the record and its archive ship together, so `main` never holds journals the archive
-   cannot render; the live copy (decision 30) follows separately; one session's view has no use for the last
-   run's time, and decision 13 keeps the view's answer as it was. *Amends:* the README's status line, §6
-   *Session API* (the `GET /api/sessions/{id}` row), §14 (the paragraph on the archive as built, the last
-   paragraph of *Why a live copy is consistent*). *Status:* folded.
+11. **The conversation record is built; the archive exports the journals, and every archive still runs the
+    barrier** (2026-11-03; AG-UI conversation record, slice 3/4). `chat-ui` keeps `/data/sessions/<uuid>.jsonl`
+    (§13) and serves §6's session API from it; `archive.yml` copies the journals and the run log, exports the
+    journals with the chat UI's exporter and renders them with `write_run.py` (§14); `<uuid>.json` and
+    `write_agui_run.py` are gone. Until the live copy is built, every archive stops `chat-ui` and then the agent
+    before the copy and starts them again after it, as the archive of the chat sessions did, and the bundle says
+    `final`. (`GET /api/sessions/{id}` without `last_run_at` is clarification 9.) *Reason:* the record and its
+    archive ship together, so `main` never holds journals the archive cannot render; the live copy (decision 30)
+    follows separately. *Cost if wrong:* until the live copy, an archive taken while participants work pauses
+    their runs for the copy (a run in progress ends `cancelled`), as it did before the record. *Amends:* the
+    README's status line and the note above the decisions table, §14 (the paragraph on the archive as built, the
+    last paragraph of *Why a live copy is consistent*). *Status:* folded.
 ```
 
-  In `06-chat-ui.md`, *Session API*, the `GET /api/sessions/{id}` row becomes:
+  `06-chat-ui.md`'s `GET /api/sessions/{id}` row already drops `last_run_at` (clarification 9, task 1): unchanged
+  here. In `14-archive.md`, l. 8–10 (*Until the record is built, …*) become:
 
 ```markdown
-| `GET /api/sessions/{id}` | `200` with `id`, `title`, `tags`, `pinned`, `hidden`, `created_at`, `updated_at` and `messages`: the tip's branch (§13); no `last_run_at` (the list answers it); `404` if missing or deleted. `version` and `title_source` are no longer answered: the journal keeps neither |
-```
-
-  Then in `14-archive.md`, l. 8–10 (*Until the record is built, …*) become:
-
-```markdown
-As built (clarification N), every archive still runs step 1's barrier, live and final alike, starts the services
+As built (clarification 11), every archive still runs step 1's barrier, live and final alike, starts the services
 again after the copy, and writes `spe_archive_mode: final`; the live copy below is not built yet. Runs archived
 before the record keep the files written for them (`agui-sessions/<uuid>.json`, rendered by the renderer of that
 time); they are not re-rendered.
@@ -3646,10 +3654,14 @@ time); they are not re-rendered.
 
   and in l. 52–55 the sentence "Until the record is built, the archive keeps the barrier … could be torn." goes.
   In the spec `README.md`, the status's sentence "where §6 and decisions 19–30 speak of the journal, … one
-  `<uuid>.json` per session." becomes "built on the journal with the record (clarification N).", the record's
+  `<uuid>.json` per session." becomes "built on the journal with the record (clarification 11).", the record's
   clause "not built yet; the live archive (§14, decision 30) since clarification 2" becomes "built (clarification
-  N) except the live archive (§14, decision 30, since clarification 2), the Playwright checks of decisions 6, 13,
-  24–26, the key check (17) and the threat entry (18)", and **Latest clarification:** becomes N.
+  11) except the live archive (§14, decision 30, since clarification 2), the Playwright checks of decisions 6, 13,
+  24–26, the key check (17) and the threat entry (18)", and **Latest clarification:** becomes 11. The note above
+  the decisions table, "Decisions 1–18 are the conversation record's, approved and not built yet; … (their journal
+  parts are built with it)", becomes "Decisions 1–18 are the conversation record's, built except where the status
+  above says; 19–30 are the chat sessions' as built, restated for the record and built on its journal
+  (clarification 11)."
 
 - [ ] **Step 7: commit.**
 
@@ -3658,14 +3670,14 @@ git add platform/dev/fake_agent.py platform/agui/copilotkit-chat/scripts/check-b
   platform/dev/e2e/sessions.py platform/agui/copilotkit-chat/README.md \
   platform/ansible/roles/agui/templates/docker-compose.yml.j2 docs/knowledge/agui-chat-sessions.md BACKLOG.md \
   docs/specs/2026-10-15-agui-frontend-design/clarifications.md docs/specs/2026-10-15-agui-frontend-design/14-archive.md \
-  docs/specs/2026-10-15-agui-frontend-design/06-chat-ui.md docs/specs/2026-10-15-agui-frontend-design/README.md
+  docs/specs/2026-10-15-agui-frontend-design/README.md
 git commit -s -m "Chat sessions: the checks read journals; echo-input; the record described as built
 
 check-built-server runs the feasibility check (a fabricated turn and a forged
 marker never reach the agent), the no-false-alarm check and the rebuild against
 a CopilotKit-shaped client; the e2e reads journals, restarts the chat UI to
 check the index, and checks that no browser run journals ignored content.
-Spec clarification N: the record is built, every archive still runs the barrier."
+Spec clarification 11: the record is built, every archive still runs the barrier."
 ```
 
 - [ ] **Step 8: the early output.** From the worktree, after `npm run build`, with the built server and the
@@ -3676,7 +3688,8 @@ E=docs/superpowers/plans/2026-11-03-agui-conversation-record/evidence/slice-3
 CHAT=platform/agui/copilotkit-chat
 mkdir -p $E && cp -r $CHAT/.next/static $CHAT/.next/standalone/.next/
 J=$(mktemp -d)/sessions && mkdir -p $J
-uv run --directory platform/agui/pydantic-ai-agent --group dev python ../../dev/fake_agent.py --port 18190 --key sample-key & AGENT=$!
+uv run --directory platform/agui/pydantic-ai-agent --group dev python ../../dev/fake_agent.py --port 18190 --key sample-key \
+  --run-log $J/../runs.jsonl & AGENT=$!
 env -C $CHAT/.next/standalone SPE_SESSIONS_DIR=$J AGENT_URL=http://127.0.0.1:18190/agent AGENT_API_KEY=sample-key \
   PORT=3190 HOSTNAME=127.0.0.1 NEXT_MANUAL_SIG_HANDLE=true node server.js & UI=$!
 until curl -fs http://127.0.0.1:3190/api/sessions >/dev/null; do sleep 0.5; done
@@ -3715,7 +3728,8 @@ for text in ("list the home directory", "and the hidden files"):
 PY
 kill $UI $AGENT
 docker build -t spe-chat-ui:slice3 $CHAT
-O=$(mktemp -d) && mkdir -p $O/run/agui-journals && cp $J/*.jsonl $O/run/agui-journals/
+O=$(mktemp -d) && mkdir -p $O/run/agui-journals && cp $J/*.jsonl $O/run/agui-journals/ \
+  && cp $J/../runs.jsonl $O/run/agent-runs.jsonl  # as write.yml does: the index counts the runs that reached the agent
 docker run --rm --network none --read-only --tmpfs /tmp --user "$(id -u):$(id -g)" --entrypoint node \
   -v "$J:/in:ro" -v "$O:/out" spe-chat-ui:slice3 scripts/export-journals.ts /in /out/bundle.json final
 python3 platform/ansible/roles/run_archive/files/write_run.py $O/bundle.json $O/run "Run report"

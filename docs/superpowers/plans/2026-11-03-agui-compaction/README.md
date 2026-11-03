@@ -76,8 +76,8 @@ Every task's requirements include these.
   work (2026-11-02): slice 1's summary sample, slice 2's early output, slice 3's decision 13 check. Nothing else
   calls a model, except slice 3, task 3: a de.NBI session on qwen that compacts (the user's request, 2026-11-03).
 - **The dev VM's instance** is redeployed in place with `create.yml` from the main checkout and
-  `-e spe_agui_source_dir=<worktree>/platform/agui` (`AGENTS.md`, *Worktrees and deploying*). No cloud instance is created or
-  destroyed.
+  `-e spe_agui_source_dir=<worktree>/platform/agui` (`AGENTS.md`, *Worktrees and deploying*). No cloud instance
+  is created or destroyed.
 - **Upstream-clean:** code, READMEs and Ansible comments name nothing fork-only.
 - **Rulings:** a departure from this plan is recorded in the slice's handoff, as *decision, why, cost if wrong*,
   and the same commit rewrites the plan task text (and, through a clarification, the spec text) it changes, so
@@ -198,7 +198,7 @@ the checks in `AGENTS.md`, *Overrides*, pass.
 |---|---|---|---|---|---|---|---|
 | 1/3 | `impl/agui-compaction-1-agent` | 7 | the agent compacts (both triggers, limits, usage), marker events, input cut, run log, configuration and Ansible; the Haiku summary sample in the handoff | ~1,000 | agent pytest; `npm test` (round trip); `--syntax-check` | [slice-1-agent.md](slice-1-agent.md) | merged #17 |
 | 2/3 | `impl/agui-compaction-2-chat-archive` | 5 | **early output**: divider in the chat, fake agent `compact`, archive `## Compacted` + column, Playwright with screenshots, dev VM session on Haiku at window 20000 | ~600 | `npm test`; `npm run build`; pytest `-k agui_run`; Playwright run with screenshots | [slice-2-chat-archive.md](slice-2-chat-archive.md) | merged #18 |
-| 3/3 | `impl/agui-compaction-3-denbi-docs` | 3 | de.NBI window, docs, decision 13's check | ~150 | `--syntax-check`; `verify.yml` on the dev VM; decision 13's run log lines | [slice-3-denbi-docs.md](slice-3-denbi-docs.md) | planned |
+| 3/3 | `impl/agui-compaction-3-denbi-docs` | 4 | de.NBI window, docs, a de.NBI session on qwen that compacts, decision 13's check | ~150 | `--syntax-check`; `verify.yml` on the dev VM and on de.NBI; the qwen session's `Compactions` ≥ 1; decision 13's run log lines | [slice-3-denbi-docs.md](slice-3-denbi-docs.md) | planned |
 
 Slice 1 is about 1,000 lines with tests and 7 tasks, past the guide's ~5, and stays one unit: the agent half is
 one module and its wiring, and split, the first half (no events) could not be deployed with any visible effect.

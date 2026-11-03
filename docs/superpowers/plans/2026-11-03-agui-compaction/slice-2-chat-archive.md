@@ -515,7 +515,8 @@ git commit -s -m "Archive: render a compaction as '## Compacted' and count them 
 **Files:**
 - Modify: `platform/dev/e2e/sessions.py` (`check_compaction`; `LOCAL`; `main`)
 - Create: `docs/superpowers/plans/2026-11-03-agui-compaction/evidence/slice-2/` (screenshots)
-- Modify: `docs/specs/2026-10-15-agui-frontend-design/clarifications.md` (clarification for §14), `docs/specs/2026-10-15-agui-frontend-design/14-archive.md` (*Write*)
+- Modify: `docs/specs/2026-10-15-agui-frontend-design/clarifications.md` (clarification 3, for §14),
+  `docs/specs/2026-10-15-agui-frontend-design/14-archive.md` (the archive as built)
 
 **Interfaces:**
 - Consumes: task 1's classes and texts; task 2's `compact` keyword and answer text.
@@ -689,8 +690,9 @@ python3 platform/dev/e2e/sessions.py --url http://127.0.0.1:3000 --compose-file 
 ```
 
   Expected: `session <id>, <n> compactions after <t> turns`, with t about 2 (20000 × 0.8 = 16000 tokens; each
-  `seq 1 3000` adds about 5000) and n ≥ 1 (one turn can compact more than once). If it never compacts in 8 turns, read the run log's estimates before changing anything: the trigger or
-  the estimate is wrong, and that is a slice 1 bug to fix here with a test.
+  `seq 1 3000` adds about 5000) and n ≥ 1 (one turn can compact more than once). If it never compacts in 8
+  turns, read the run log's estimates before changing anything: the trigger or the estimate is wrong, and that
+  is a slice 1 bug to fix here with a test.
 
 - [ ] **Step 3: verify and archive.**
   `ansible-playbook playbooks/verify.yml -e @instances/dev-local.yml </dev/null`: the new task shows the rendered
@@ -698,8 +700,9 @@ python3 platform/dev/e2e/sessions.py --url http://127.0.0.1:3000 --compose-file 
   `ansible-playbook playbooks/archive.yml -e @instances/dev-local.yml </dev/null` and, in the output directory it
   prints, read `index.md` (the session's row has `Compactions` ≥ 1), the session's `chats/NN-*.md` (the
   `## Compacted` section where the divider was) and `agent-runs.jsonl`'s `compactions` (trigger, estimated tokens,
-  messages cut, usage, each entry's `next_input_tokens` below 20000). Copy the chat's `.md` into `evidence/slice-2/live/`
-  only after checking it holds no canary or key (the session ran `seq` only; the system prompt is not in it);
+  messages cut, usage, each entry's `next_input_tokens` below 20000). Copy the chat's `.md` into
+  `evidence/slice-2/live/` only after checking it holds no canary or key (the session ran `seq` only; the system
+  prompt is not in it);
   never copy `canaries.json` or the `.json` record.
 
 - [ ] **Step 4: put the VM back.** Leave `spe_agent_context_window_tokens: 20000` in `dev-local.yml` until

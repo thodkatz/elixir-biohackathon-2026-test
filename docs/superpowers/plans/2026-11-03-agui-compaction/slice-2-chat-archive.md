@@ -14,6 +14,10 @@ user to look at.
 **12**'s `verify.yml` part (task 5, step 3). Slice 1 already folded clarification 1, so the spec's decision 7, §6
 and §7 speak of the assistant-message marker; read them as rewritten there.
 
+**Review Focus** (plan README): item 4's chat half is task 1's second recorder test (a run stopped after the
+marker is `cancelled` and keeps it); item 5 is task 3's `SUMMARY` with a backtick run and `## Not a section`.
+Items 1–3 are slice 1's; nothing else here needs a case of its own.
+
 **Branch:** `impl/agui-compaction-2-chat-archive`, from `main` after slice 1 merged. Global constraints, shared
 interfaces, the ruling and Review Focus: [plan README](README.md). Paths are relative to the repository root
 unless a step `cd`s; `CHAT` means `platform/agui/copilotkit-chat`, `AGENT` `platform/agui/pydantic-ai-agent`,
@@ -55,7 +59,7 @@ unless a step `cd`s; `CHAT` means `platform/agui/copilotkit-chat`, `AGENT` `plat
 **Files:**
 - Create: `CHAT/lib/compaction.ts`, `CHAT/lib/compaction.test.ts`, `CHAT/app/compaction-divider.tsx`
 - Modify: `CHAT/app/page.tsx` (imports l. 6–22; `<CopilotChat>` l. 272–285), `CHAT/app/globals.css` (append)
-- Test: `CHAT/lib/recorder.test.ts` (one test)
+- Test: `CHAT/lib/recorder.test.ts` (two tests)
 
 **Interfaces:**
 - Consumes: the marker's form (README, *The marker on the wire*); `lib/test-agent.ts`'s `compact` keyword
@@ -573,9 +577,9 @@ def compaction_live(r: Run, turns: int = 8) -> None:
     for turn in range(1, turns + 1):
         box.fill(f"Turn {turn}: run `seq 1 3000` and tell me only the last line it printed.")
         box.press("Enter")
-        expect(page.locator(".copilotKitMessage, [data-message-id]").last).to_be_visible(timeout=60_000)
-        page.wait_for_function("() => !document.querySelector('[data-testid=copilot-stop-button]')",
-                               timeout=120_000)
+        # New chat is disabled while a run is in flight (as two_turn waits for a run's end).
+        expect(page.get_by_role("button", name="New chat")).to_be_disabled(timeout=10_000)
+        expect(page.get_by_role("button", name="New chat")).to_be_enabled(timeout=120_000)
         if page.locator(".spe-compaction").count():
             break
     expect(page.locator(".spe-compaction")).to_have_count(1)
@@ -586,8 +590,8 @@ def compaction_live(r: Run, turns: int = 8) -> None:
 ```
 
   `INSTANCE = ("stop", "slow-loop", "two-turn", "compaction-live")`, dispatched in the `--url` branch beside
-  `two_turn`. The stop-button selector and the message selector are guesses here: take the ones `slow_loop` and
-  `two_turn` (l. 693–742) already use to wait for a run's end.
+  `two_turn`. It waits for a run's end the way `two_turn` does (sessions.py l. 727–728): New chat disabled,
+  then enabled.
 
 - [ ] **Step 3: run it, light and dark.** `(cd CHAT && npm ci && npm run build)`, then
 

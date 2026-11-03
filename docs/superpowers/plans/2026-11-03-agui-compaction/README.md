@@ -150,7 +150,8 @@ summary, usage: {input_tokens, output_tokens}, next_input_tokens}]`, empty when 
 not in `answer`.
 
 **Chat** (slice 2, task 1): `lib/compaction.ts` exports `MARKER_PREFIX = "spe-compaction-"` and
-`isCompactionMarker(message: { id?: string; role?: string; content?: unknown }): boolean`;
+`isCompactionMarker(message: { id?: string; role?: string; content?: unknown; toolCalls?: unknown[] }): boolean`
+(the agent's rule: string content, no tool calls);
 `app/compaction-divider.tsx` exports `AssistantOrCompaction` (the `messageView.assistantMessage` slot) and
 `CompactionDivider({ summary }: { summary: string })`; CSS classes `.spe-compaction`, `.spe-compaction-rule`,
 `.spe-compaction-label`, `.spe-compaction-summary`.

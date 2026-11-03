@@ -191,19 +191,20 @@ Paid on de.NBI's quota: a scripted session of ordinary commands, no participant 
 - Create: `docs/superpowers/plans/2026-11-03-agui-compaction/evidence/slice-3/denbi/` (screenshots, the archived
   chat `.md`, the run log's `compactions` entry)
 
-- [ ] **Step 0: the instance.** Use a running de.NBI AG-UI instance on `qwen3.8-27b` (the main checkout's
+- [x] **Step 0: the instance.** Use a running de.NBI AG-UI instance on `qwen3.8-27b` (the main checkout's
   `instances/denbi-agui-01.yml`, if it is up) and redeploy its agent and chat from this slice's worktree
   (`-e spe_agui_source_dir=<worktree>/platform/agui`). If none is running, creating one is a cloud instance the
   user has not yet approved for this check: ask on the PR (one comment, `next-session.sh --end --blocked <PR>`),
   do not create it.
-- [ ] **Step 1: the window.** Task 1's `spe_webui_model_context_tokens` is qwen's full window, so a scripted
+- [x] **Step 1: the window.** Task 1's `spe_webui_model_context_tokens` is qwen's full window, so a scripted
   session would take many turns to pass 0.8 of it. For this check only, set `spe_agent_context_window_tokens:
-  20000` in that instance file (as slice 2 did on the dev VM), and say so in the evidence.
-- [ ] **Step 2: the session.** `python3 platform/dev/e2e/sessions.py --url <the instance's chat URL> --compose-file
+  20000` in that instance file (as slice 2 did on the dev VM), and say so in the evidence. (Ran at 40000: at
+  20000 one turn of re-read `seq` output passed the trigger alone; `evidence/slice-3/denbi/README.md`.)
+- [x] **Step 2: the session.** `python3 platform/dev/e2e/sessions.py --url <the instance's chat URL> --compose-file
   <its frontend compose file> --scenario compaction-live --shots <evidence>/denbi` (the dummy conversation: `seq
   1 3000` turns until the agent compacts). Expected: `session <id>, <n> compactions after <t> turns` with
   n ≥ 1, the divider, and a later answer that still knows the task (the summary carried it).
-- [ ] **Step 3: verify and archive.** `verify.yml` shows the `compaction` block; `archive.yml`, then the session's
+- [x] **Step 3: verify and archive.** `verify.yml` shows the `compaction` block; `archive.yml`, then the session's
   `index.md` row (`Compactions` ≥ 1), its `## Compacted` section, and the run log's `compactions` (each entry's
   trigger `threshold`, `next_input_tokens` below the window). Copy only the screenshots, the chat `.md` and the
   run log's `compactions` entry (as `compactions.json`), each grepped for canaries and keys first. Put the window

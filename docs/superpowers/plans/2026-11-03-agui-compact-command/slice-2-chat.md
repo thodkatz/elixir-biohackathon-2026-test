@@ -16,6 +16,9 @@ decisions **31** and **33** (tasks 1 and 3), **32** (task 2), **34** and **37** 
 4/4 (#25) merged. Global Constraints: [plan README](README.md). Paths are relative to
 `platform/agui/copilotkit-chat/` unless they start with `platform/` or `docs/`.
 
+**Mid-slice handoffs** (at the budget, or by plan): after task 3, once the early output is posted on the PR; and
+before task 5's de.NBI step, which waits on the user's OK for the paid run.
+
 **Before step 1 of each task, re-read the functions it names on the branch's `main`:** #25 changes
 `platform/dev/e2e/sessions.py`, this README and possibly `lib/recorder.ts` and `lib/export.ts` (the live
 archive). Where it moved a line this file quotes, apply the change to the new shape and record a ruling only
@@ -511,13 +514,19 @@ def check_compact_command(r: Run) -> None:
     expect(page.locator(".spe-compaction")).to_have_count(1, timeout=10_000)
     expect(page.get_by_text("/compact keep the canary paths", exact=True)).to_have_count(0)
     r.shot("compact-command-reload")
-    r.send("third question", 1)  # turn numbering restarts after a compaction (see check_compaction)
+    # Turn numbering restarts after a compaction (see check_compaction), so this answer is "Turn 1" again, as the
+    # first question's still on the page is: r.send would hit a strict-mode double match. Count the answers.
+    turn1 = page.get_by_text(re.compile(r"Turn 1: the command ran\."))
+    before = turn1.count()
+    box.fill("third question")
+    box.press("Enter")
+    expect(turn1).to_have_count(before + 1, timeout=20_000)
     expect(page.locator(".spe-compaction")).to_have_count(1)
     r.wait_runs(sid, 4)
     r.ok("compact-command: bubble gone, divider in place live and after a reload, run_start holds the command")
 ```
 
-(Check `summary()`'s keys and `send`'s turn text against #25's version of the file; the reply text after a
+(`box` is still the textarea's locator after the reload: Playwright locators resolve lazily. Check `summary()`'s keys and `send`'s turn text against #25's version of the file; the reply text after a
 compaction comes from slice 1's `fake_agent.py`.)
 
 - [ ] **Step 2: Run it.** `(npm ci && npm run build)` here, then from the repository root
@@ -653,7 +662,7 @@ In `admit`, in place of task 1's guarded `NO_NEW_MESSAGE` check:
 if (command) {
   // Spec §15, step 4: nothing after the path's latest marker, or a focus too long. The agent backstops the first.
   const last = classification.path.at(-1);
-  if (!last || isCompactionMarker(last)) return endHere("refused", NOTHING_TO_COMPACT);
+  if (!last || isCompactionMarker(last)) return endHere("refused", NOTHING_TO_COMPACT); // import from ./compaction.ts
   if (command.focus !== null && [...command.focus].length > MAX_FOCUS) return endHere("refused", FOCUS_TOO_LONG);
 } else if (classification.newMessages.length === 0) {
   return endHere("refused", NO_NEW_MESSAGE);
@@ -726,8 +735,10 @@ test("decision 38: every command run's message carries spe_command, refused and 
 ```
 
 (`chat(n)` and `msg` are the file's helpers.) In `platform/dev/tests/test_write_run_agui.py`: add session 6 to
-`NAMES`, change the `rendered` fixture's line to "6 sessions (1 hidden, 1 deleted)" (and the index test's rows),
-and:
+`NAMES`, change the `rendered` fixture's line to "6 sessions (1 hidden, 1 deleted)" (and the index test's rows).
+In `lib/export.test.ts`, the same count moves too: the live chats' `[1, 2, 3, 4, 5].map(J)` becomes
+`[1, 2, 3, 4, 5, 6].map(J)`, and the CLI's `"5 sessions (1 hidden, 1 deleted), final archive\n"` becomes
+`"6 sessions …"`. Then:
 
 ```python
 def test_a_manual_compaction_says_the_participant_asked(rendered):
@@ -740,8 +751,11 @@ def test_a_manual_compaction_says_the_participant_asked(rendered):
 
 def test_a_failed_or_refused_command_shows_the_command_beside_its_status(rendered):
     md = chat(rendered, MANUAL)
+    # one line per command run: r6-2 (failed), r6-3 (its "Compacted" section), r6-4 (refused)
+    assert md.count("*Requested by the participant (`/compact`)*") == 3
     failed = md.index("Compaction is turned off on this instance.")
-    assert "*Requested by the participant (`/compact`)*" in md[failed - 400:failed + 400]
+    assert md.index("*Requested by the participant (`/compact`)*") < md.index("## Compacted")  # r6-2's comes first
+    assert "Compaction is turned off" in md[:md.index("## Compacted")] and failed < md.index("## Compacted")
 
 
 def test_the_index_counts_manual_compactions(rendered):

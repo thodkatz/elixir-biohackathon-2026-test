@@ -139,7 +139,7 @@ def test_second_manual_compaction_pins_the_real_request():  # Review Focus 5
                                                    provider_name=c.PROVIDER_NAME)])
     sent = c.build_sent([user("old"), said("a"), marker, user("new request"), said("b")])
     assert sent[0].parts[0].content == c.frame("EARLIER", manual=True)
-    text = c.transcript(sent)
+    text = c.transcript(sent, max_chars=1)  # forces the cut: only the pinned head survives
     assert text.startswith("User: " + c.FRAME_MANUAL)
     assert "User: new request" in text
 
@@ -207,7 +207,7 @@ def fence(text: str) -> str:
     return f"{ticks}\n{text}\n{ticks}"
 ```
 
-(`FOCUS_HEADING` is defined above `_MANUAL_REASON`.) Every `startswith(FRAME)` becomes `is_framed(...)`
+(`FOCUS_HEADING` is defined above `_MANUAL_REASON`; `fence` needs `import re`, which `compaction.py` lacks.) Every `startswith(FRAME)` becomes `is_framed(...)`
 (`_latest_user`; in `transcript`, `entries[0].startswith("User: " + FRAME)` becomes
 `entries[0].startswith("User: ") and is_framed(entries[0][6:])`, and the same for `requests`). `_head` and
 `compacted` take `manual: bool = False` and pass it to `frame`; `build_sent` passes
@@ -324,7 +324,8 @@ HISTORY = [{"id": "u1", "role": "user", "content": "find the canaries"},
 
 
 def command_body(focus=None, name="compact", messages=None, run="rc"):
-    body = run_body(run=run, messages=messages or HISTORY)
+    body = run_body(run=run)
+    body["messages"] = HISTORY if messages is None else messages  # run_body's `messages or …` would refill []
     body["forwardedProps"] = {"spe_command": {"name": name, "focus": focus}}
     return body
 
@@ -371,40 +372,58 @@ async def test_command_run_started_before_the_model_is_called(tmp_path):
 
 
 async def test_command_summary_overflow_is_retried_shorter(tmp_path):
-    # Overflowing (defined above for the automatic path) rejects the first summary request as too long.
-    model = Overflowing(times=1)
-    app, _ = build(tmp_path, model=model)
-    async with running(app) as client:
-        await until_status(client, 200)
-        evs = await post_body(client, command_body())
-    assert terminal(evs) == ["RUN_FINISHED"] and model.summary_requests == 2
+    # As test_overflowing_summary_without_a_window_is_sent_shorter: the first summary request is rejected as too long.
+    script = Script(summary="SUMMARY")
+    answer, failed = script.function, []
+
+    def function(messages, info):
+        if not failed:
+            failed.append(messages)
+            raise too_long()
+        return answer(messages, info)
+
+    script.function = function
+    evs = await command_run(tmp_path, script, command_body())
+    assert terminal(evs) == ["RUN_FINISHED"]
+    assert len(failed) + len(script.summaries) == 2  # two summary requests: one rejected, one answered
+    assert "earlier entries left out]" in script.summaries[0][0][-1].parts[-1].content
 
 
 async def test_command_disconnect_during_summary_sends_no_marker(tmp_path):
-    gate = asyncio.Event()
+    entered, gate = asyncio.Event(), asyncio.Event()
+
     async def slow(messages, info):
+        entered.set()  # the summary request has started
         await gate.wait()
         return ModelResponse(parts=[TextPart("never")])
+
     app, _ = build(tmp_path, model=FunctionModel(function=slow))
+    seen = []
+
+    async def consume():
+        async for event in app.state.service.run(RunAgentInput.model_validate(command_body())):
+            seen.append(event.type)
+
     async with running(app) as client:
         await until_status(client, 200)
-        seen = []
-        stream = app.state.service.run(RunAgentInput.model_validate(command_body()))
-        async for event in stream:
-            seen.append(event.type)
-            break
-        await stream.aclose()
-    assert seen == ["RUN_STARTED"]
+        task = asyncio.create_task(consume())
+        await asyncio.wait_for(entered.wait(), 5)
+        task.cancel()  # the participant disconnects during the summary request
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert seen == ["RUN_STARTED"]  # no TEXT_MESSAGE_*: no marker
     (record,) = log_records(tmp_path)
     assert record["status"] == "cancelled" and record["compactions"] == []
 
 
-async def test_command_usage_is_recorded_and_limited(tmp_path):
+async def test_command_usage_is_recorded_and_limited(tmp_path, monkeypatch):
     evs = await command_run(tmp_path, Script(), command_body())
     (record,) = log_records(tmp_path)
     assert record["usage"]["requests"] == 1
     script = Script()
-    evs = await command_run(tmp_path / "limited", script, command_body(), limits={"request_limit": 0})
+    # LimitsCfg.request_limit is a PositiveInt, so 0 cannot come through config(): patch the limits it builds.
+    monkeypatch.setattr(LimitsCfg, "usage_limits", lambda self: UsageLimits(request_limit=0))
+    evs = await command_run(tmp_path / "limited", script, command_body())
     assert terminal(evs) == ["RUN_ERROR"] and "request_limit" in evs[-1]["message"]
     assert script.summaries == []
 
@@ -413,8 +432,10 @@ async def test_command_errors(tmp_path):
     off = await command_run(tmp_path / "off", Script(), command_body(), compaction={"enabled": False})
     empty = await command_run(tmp_path / "empty", Script(), command_body(messages=[]))
     unknown = await command_run(tmp_path / "unknown", Script(), command_body(name="nope"))
+    marker = {"id": cmp.MANUAL_MARKER_PREFIX + "1", "role": "assistant", "content": "SUMMARY"}
+    after = await command_run(tmp_path / "after", Script(), command_body(messages=[*HISTORY, marker]))
     for evs, message in ((off, "Compaction is turned off on this instance."), (empty, "Nothing to compact yet."),
-                         (unknown, "Unknown command.")):
+                         (after, "Nothing to compact yet."), (unknown, "Unknown command.")):
         assert [e["type"] for e in evs] == ["RUN_STARTED", "RUN_ERROR"] and evs[-1]["message"] == message
 
 
@@ -488,8 +509,9 @@ delegates: `async for event in self._command_events(adapter, command): yield eve
                 return
             recorder.command_input("/compact" + (f" {focus}" if focus else ""))
             history = build_sent(adapter.messages)
+            # on the raw messages: build_sent replaces our marker with a framed head, which is_ours never matches
             error = (COMPACTION_OFF if not self.config.compaction.enabled
-                     else NOTHING_TO_COMPACT if nothing_to_compact(history) else None)
+                     else NOTHING_TO_COMPACT if nothing_to_compact(adapter.messages) else None)
             if error is not None:
                 status = "failed"
                 yield end(RunErrorEvent(message=error))
@@ -517,7 +539,8 @@ delegates: `async for event in self._command_events(adapter, command): yield eve
                 log.exception("could not write the run log")
 ```
 
-`messages_cut` counts the run input's messages (`len(adapter.messages)`), the same unit the automatic path's
+`LimitsCfg` (config) and `UsageLimits` (`pydantic_ai.usage`) are imported in `tests/test_app.py` if they are not
+already. `messages_cut` counts the run input's messages (`len(adapter.messages)`), the same unit the automatic path's
 `len(history)` uses, so `HISTORY`'s four messages give 4. `RunStartedEvent` comes from `ag_ui.core`, `RunUsage`
 from `pydantic_ai.usage`. `runlog.py`:
 
@@ -582,14 +605,15 @@ uv run --group dev python ../../dev/fake_agent.py --port 18100 --key k &
 until curl -sf localhost:18100/healthz >/dev/null; do sleep 0.5; done
 curl -sN localhost:18100/agent -H 'authorization: Bearer k' -H 'accept: text/event-stream' -H 'content-type: application/json' \
   -d '{"threadId":"t","runId":"r1","state":{},"tools":[],"context":[],"messages":[{"id":"u1","role":"user","content":"hi"},{"id":"a1","role":"assistant","content":"hello"}],"forwardedProps":{"spe_command":{"name":"compact","focus":"keep the canary paths"}}}'
-for n in 1 2; do curl -sN localhost:18100/agent -H 'authorization: Bearer k' -H 'accept: text/event-stream' -H 'content-type: application/json' \
-  -d "{\"threadId\":\"t\",\"runId\":\"c$n\",\"state\":{},\"tools\":[],\"context\":[],\"forwardedProps\":{},\"messages\":[{\"id\":\"u1\",\"role\":\"user\",\"content\":\"compact\"}]}" | grep -c spe-compaction-; done
+curl -sN localhost:18100/agent -H 'authorization: Bearer k' -H 'accept: text/event-stream' -H 'content-type: application/json' \
+  -d '{"threadId":"t","runId":"c2","state":{},"tools":[],"context":[],"forwardedProps":{},"messages":[{"id":"u1","role":"user","content":"compact"},{"id":"spe-compaction-1","role":"assistant","content":"S"},{"id":"u2","role":"user","content":"compact"}]}' | grep -c spe-compaction-
 kill %1
 ```
 
 Expected: the first `curl` prints `RUN_STARTED`, a `spe-compaction-manual-` marker whose content is "Scripted
-summary on request of … Focus: keep the canary paths", `RUN_FINISHED`. The loop prints a non-zero count twice
-(each `compact` compacts). Paste the output into the PR body.
+summary on request of … Focus: keep the canary paths", `RUN_FINISHED`. The second `curl`, whose history already holds a
+marker before a new `compact`, prints a non-zero count: it compacts again (the old once-per-session check printed
+0 here). Paste the output into the PR body.
 
 - [ ] **Step 3: Run the e2e compaction scenario still passes** (it uses `compact`):
 `(cd platform/agui/copilotkit-chat && npm ci && npm run build) && uv run --with playwright python platform/dev/e2e/sessions.py --scenario compaction`

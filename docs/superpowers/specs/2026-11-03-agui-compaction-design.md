@@ -1,6 +1,6 @@
 # AG-UI compaction — design
 
-**Status:** approved, PR #15. **Latest clarification:** none.
+**Status:** approved, PR #15. **Latest clarification:** 1 (2026-11-03, slice 1).
 Read against this repo at `4a59a6c` (`main`), with `pydantic-ai-slim` 2.56.0, `ag-ui-protocol` 0.1.22,
 `@ag-ui/core`/`@ag-ui/client` 1.0.2 and CopilotKit 1.79.0 as pinned there.
 
@@ -20,8 +20,8 @@ bar, and **every later message in that session fails the same way**, because the
 the model would be sent is estimated past a share of the model's context window, or when the provider
 rejects a request as too long, it asks the same model for a summary of the history so far. The model is then
 sent the system prompt, the summary, the latest user request and whatever came after the cut. The summary
-goes into the run's AG-UI stream as one **activity message** (`activityType: "pydantic_ai_compaction"`,
-pydantic-ai's own `CompactionPart` carrier), so the chat keeps it in its history. The session record, which
+goes into the run's AG-UI stream as one **assistant message** whose id starts with `spe-compaction-` and
+whose text is the summary, so the chat keeps it in its history. The session record, which
 still holds every original message, therefore holds the summary too, at the point where it was made. On later
 runs the agent cuts the history at the latest compaction. The chat shows a divider with the summary, and the
 archive renders it. The browser always keeps and sends the full history; only what the model sees shrinks.
@@ -36,10 +36,10 @@ archive renders it. The browser always keeps and sends the full history; only wh
 | 4 | What is sent after a compaction: the system prompt, one user message holding the framed summary, the latest user request verbatim if it lies before the cut, then the messages after our latest marker, unchanged; no `CompactionPart` (ours or anyone's) is ever sent | [What the model sees](#3-what-the-model-sees) | `pytest`: requests after a compaction, in the same run and in a later run rebuilt from AG-UI messages, have exactly that shape; the system prompt is present in both; a marker from another producer (`provider_name` not `spe-agent`, `anthropic` included) is neither a cut point nor sent; a marker merged into the following `ModelResponse` on reload cuts at part level; a marker followed directly by a user message (a run that failed after compacting) cuts the same way |
 | 5 | The summary request uses the same model, no tools, a fixed prompt kept in the package, a transcript with each tool result cut to 2000 characters and marked as tool output, at most `summary_max_tokens` of output; it counts as a request towards the run's usage and limits, checked before it is sent | [The summary request](#4-the-summary-request) | `pytest`: the summary request carries no tool definitions, the cut and marked tool results and the package prompt; `result.usage.requests` and tokens after a compacting run include it; a run at `request_limit` - 1 that needs a compaction ends with the usage-limit error before the summary request is sent; the framed summary says it is not the participant's words |
 | 6 | At most one compaction per model request and three per run; past that the run fails with "The conversation is still too long after compacting it. Start a new chat." | [Trigger](#2-trigger) | `pytest`: a summary that is itself past the trigger does not compact again for the same request; a fourth compaction in one run gives `RUN_ERROR` with that message |
-| 7 | The marker is an AG-UI `ACTIVITY_SNAPSHOT` (`activityType: "pydantic_ai_compaction"`, content as pydantic-ai's `compaction_payload` of a `CompactionPart` with `provider_name: "spe-agent"`), emitted before the events of the model response it preceded, so it is stored as an `ActivityMessage` in the chat's history and read back as a `CompactionPart` | [The marker](#5-the-marker) | `pytest` (agent): the event stream of a compacting run has the snapshot right before that response's first event; feeding the run's messages, including the `ActivityMessage`, back in as a new run's input cuts there. `npm test` (chat): the recorder, given a scripted stream with the snapshot, stores the `ActivityMessage` in `messages` in order; reopening the session and running again sends it back to the agent (a test of CopilotKit's runtime path, see *Inputs for the plan*) |
-| 8 | The chat renders a `pydantic_ai_compaction` activity as a divider ("Earlier conversation compacted") with the summary in a collapsed `<details>`, as text; nothing else in the chat changes | [The chat](#6-the-chat) | Playwright against `fake_agent.py` scripted to emit a compaction: the divider appears in place, live and after a reload; expanding shows the summary as literal text (a summary holding `<img src=x onerror=…>` shows the markup); screenshots light and dark in the slice's handoff |
-| 9 | The session record keeps every message the browser sent plus the `ActivityMessage`; schema `version` stays 1; title, runs and the session API are unchanged | [Session record and archive](#7-session-record-and-archive) | `npm test`: a recorded compacting run validates against the existing schema; the auto title is still the first user message |
-| 10 | The archive renders a `pydantic_ai_compaction` activity as a marked section with the fenced summary, between the messages it sits between; all original messages are still rendered | [Session record and archive](#7-session-record-and-archive) | `pytest platform/dev/tests -k agui_run`: a fixture session with a compaction renders every original message, then the "Compacted" section with the summary in a fence longer than any backtick run inside it; the index gains a `compactions` count per session |
+| 7 | The marker is an assistant text message (`messageId` `spe-compaction-<uuid4>`, content the summary), emitted as `TEXT_MESSAGE_START`/`CONTENT`/`END` before the events of the model response it preceded, so it is stored in the chat's history; on input the agent rewrites it into pydantic-ai's `pydantic_ai_compaction` activity, read as a `CompactionPart` (clarification 1) | [The marker](#5-the-marker) | `pytest` (agent): the event stream of a compacting run has the three marker events right before that response's first event; feeding the run's messages, marker included, back in as a new run's input cuts there. `npm test` (chat): a marker recorded through CopilotKit's runtime path is stored, and sent back to the agent on the next run of the reopened session |
+| 8 | The chat renders a compaction marker (an assistant message with id prefix `spe-compaction-`) as a divider ("Earlier conversation compacted") with the summary in a collapsed `<details>`, as text; nothing else in the chat changes | [The chat](#6-the-chat) | Playwright against `fake_agent.py` scripted to emit a compaction: the divider appears in place, live and after a reload; expanding shows the summary as literal text (a summary holding `<img src=x onerror=…>` shows the markup); screenshots light and dark in the slice's handoff |
+| 9 | The session record keeps every message the browser sent plus the marker message; schema `version` stays 1; title, runs and the session API are unchanged | [Session record and archive](#7-session-record-and-archive) | `npm test`: a recorded compacting run validates against the existing schema; the auto title is still the first user message |
+| 10 | The archive renders a compaction marker as a marked section with the fenced summary, between the messages it sits between; all original messages are still rendered | [Session record and archive](#7-session-record-and-archive) | `pytest platform/dev/tests -k agui_run`: a fixture session with a compaction renders every original message, then the "Compacted" section with the summary in a fence longer than any backtick run inside it; the index gains a `compactions` count per session |
 | 11 | The run log records each compaction: trigger (`threshold` or `overflow`), estimated tokens before, messages cut, the summary text, the summary request's usage and the input tokens of the first request after it; redacted like every record | [Run log](#8-run-log) | `pytest`: a compacting run's record has a `compactions` list with those fields; a summary containing the sandbox key is written redacted |
 | 12 | Configuration: `compaction.enabled` (default true), `compaction.context_window_tokens` (default null), `compaction.trigger_ratio` (default 0.8, in (0, 1)), `compaction.summary_max_tokens` (default 4096), rendered by Ansible from `spe_agent_compaction_*` variables; the de.NBI model's window is set beside `spe_webui_model_id` in `inventory/group_vars/all.yml`, the dev VM's in its private instance file | [Configuration](#9-configuration) | `pytest` (config): defaults, a ratio of 0 or 1 or an unknown key refused; with `enabled: false` neither trigger acts; `ansible-playbook --syntax-check`; `verify.yml` on the dev VM shows the rendered `compaction` block (a new task in `roles/agui/tasks/checks.yml`) |
 | 13 | A session that already fails with an overflow recovers: its next message compacts (decision 3) and the run completes | [Trigger](#2-trigger) | On the dev VM (Haiku, approved): a session pushed past a small configured window (`context_window_tokens: 20000`) by tool output keeps working, the divider shows, and the run log's input tokens of the first request after the compaction (decision 11) are below the window; the same session with compaction disabled fails with the provider's error |
@@ -61,7 +61,7 @@ rendering before the de.NBI value and the docs are done.
 |---|---|
 | window | the model's context window in tokens (`context_window_tokens`) |
 | compaction | replacing, for the model, the history up to a point with a summary of it |
-| marker | the `ActivityMessage` (in AG-UI) or `CompactionPart` (in pydantic-ai) that holds a summary; the cut point |
+| marker | the assistant message with id prefix `spe-compaction-` (in AG-UI and the session record), the `CompactionPart` (in pydantic-ai) that holds a summary; the cut point |
 | our marker | a marker with `provider_name: "spe-agent"`; markers from any other producer are not cut points |
 | what is sent | the messages of one model request after the cut: system prompt, framed summary, latest user request, the rest |
 
@@ -176,26 +176,26 @@ fails, or that a limit refuses, fails the run with that error, as a model reques
 
 ## 5. The marker
 
-The snapshot: `messageId` a new UUID, `activityType: "pydantic_ai_compaction"`
-(`COMPACTION_ACTIVITY_TYPE`, `pydantic_ai/ui/ag_ui/_utils.py:71`), `content` = pydantic-ai's
-`compaction_payload(CompactionPart(content=summary, provider_name="spe-agent"))`, `replace: true`. The AG-UI
-client turns it into an `ActivityMessage` in the thread's messages, so it is stored, shown and sent back. On
-the next run, pydantic-ai's AG-UI adapter reads it back into a `CompactionPart` at the same position, which
-§3 cuts at. The adapter's `ag_ui_version` for the input CopilotKit sends is 0.1.22, past the 0.1.19 that
-activity events need.
+Three events, in this order: `TEXT_MESSAGE_START` (`messageId`
+`spe-compaction-` + a new UUID, `role: "assistant"`), `TEXT_MESSAGE_CONTENT` (the summary; never an empty
+delta), `TEXT_MESSAGE_END`. The AG-UI client turns them into an assistant message in the thread's messages,
+so it is stored, shown and sent back. On the next run, `_Adapter` rewrites each such assistant message (string
+content, no tool calls) into an `ActivityMessage` with `activity_type` `COMPACTION_ACTIVITY_TYPE` and content
+`compaction_payload(CompactionPart(content=…, provider_name="spe-agent"))` before pydantic-ai converts the
+input, so pydantic-ai reads it back as a `CompactionPart` at the same position, which §3 cuts at.
 
-**Order is the contract, not the mechanism.** The snapshot reaches the stream before the first event of the
-response it preceded, and before a terminal event. It can go through pydantic-ai's own event stream (a
-`CustomEvent` carrying the `ActivitySnapshotEvent`, or the event stream's `handle_compaction`), or through a
-per-run queue in `RunDeps` that `Service._events`, which already rewrites the stream (`RUN_ERROR`
-sanitising), drains before the next event it forwards. The plan picks one; decision 7's test pins the order.
+**Order is the contract, not the mechanism.** The marker's events reach the stream before the first event of
+the response it preceded, and before a terminal event. The capability queues the summary in `RunDeps`;
+`Service._events` drains the queue before the next event that opens a response or ends the run.
 
 ## 6. The chat
 
-CopilotKit has no renderer for a `pydantic_ai_compaction` activity. The chat registers one: a full-width
-divider, "Earlier conversation compacted", with a `<details>` whose summary line is "Summary the model
-continues from" and whose body is the summary as React text (`white-space: pre-wrap`), in the chat's
-existing colours, light and dark. Nothing else changes: the composer, the stop button, the red bar and the
+CopilotKit renders an assistant message as a reply. The chat replaces its assistant-message view
+(`CopilotChat`'s `messageView.assistantMessage` slot) with one that renders a marker as the divider and every
+other assistant message with CopilotKit's own `CopilotChatAssistantMessage`. The divider reads "Earlier
+conversation compacted", with a `<details>` whose summary line is "Summary the model continues from" and
+whose body is the summary as React text (`white-space: pre-wrap`), in the chat's existing colours, light and
+dark. Nothing else changes: the composer, the stop button, the red bar and the
 sidebar behave as before; an overflow that compaction could not fix still shows in the red bar.
 
 No manual "compact" action (*Out of scope*).
@@ -205,13 +205,13 @@ No manual "compact" action (*Out of scope*).
 How the chat sessions spec's constraints change:
 
 - **§1, the record stores the full messages the browser sends**: unchanged. `messages` holds every original
-  message plus one `ActivityMessage` per compaction, at the point it was made. It is still AG-UI `Message[]`,
+  message plus one marker message per compaction, at the point it was made. It is still AG-UI `Message[]`,
   so `version` stays 1 and `agent.setMessages()` takes it as before. The record grows as it does today; the
   summary adds at most `summary_max_tokens` of text per compaction.
 - **§2, the recorder writes what the run ends with**: unchanged code; what the run ends with now includes
-  the `ActivityMessage`. The admission, finalisation and status rules are untouched.
-- **§4, the archive renders every message**: still every message. `write_agui_run.py` renders an
-  `ActivityMessage` with `activityType: "pydantic_ai_compaction"` as a section `## Compacted` with the line
+  the marker message. The admission, finalisation and status rules are untouched.
+- **§4, the archive renders every message**: still every message. `write_agui_run.py` renders a marker (an
+  assistant message whose id starts with `spe-compaction-`) as a section `## Compacted` with the line
   "From here the model saw this summary instead of the messages above." and the summary in a fence (decision
   14 of the chat sessions spec). Other activity messages keep today's JSON rendering. `index.md` gains a
   `compactions` column.
@@ -297,4 +297,13 @@ this work (`docs/guides/contributing-upstream.md`). No upstream PR is part of th
 
 ## Clarifications
 
-None yet.
+### 1. The marker is an assistant message, not an activity message — folded
+
+**2026-11-03, slice 1, task 1.** `@ag-ui/client` 1.0.2 `AbstractAgent.prepareRunAgentInput` drops every
+`role: "activity"` message from a run's input, in the browser and again in CopilotKit's runtime
+(`handle-run.mjs:40`, `runner/in-memory.mjs:387`), and the recorder overwrites the stored `messages` with what
+the run ends with, so an `ACTIVITY_SNAPSHOT` marker would neither reach the agent again nor stay in the record.
+The fallback named in *Inputs for the plan* applies: an assistant text message with id prefix `spe-compaction-`,
+which round-trips unchanged and which the agent rewrites into pydantic-ai's compaction activity on input.
+`lib/recorder.test.ts`, "a compaction marker survives the round trip", pins both. Decisions 7–10, §5, §6, §7 and
+the glossary are rewritten to match.

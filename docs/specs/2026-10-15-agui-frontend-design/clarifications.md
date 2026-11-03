@@ -119,3 +119,16 @@ in the parts it amends.
     lacks activity messages (the browser keeps its own, which the snapshot does not mark authoritative); recording
     them later is a change to `classify` alone. *Amends:* §13 *The run route*, steps 2 and 5; decision 2.
     *Status:* folded.
+
+11. **The conversation record is built; the archive exports the journals, and every archive still runs the
+    barrier** (2026-11-03; AG-UI conversation record, slice 3/4). `chat-ui` keeps `/data/sessions/<uuid>.jsonl`
+    (§13) and serves §6's session API from it; `archive.yml` copies the journals and the run log, exports the
+    journals with the chat UI's exporter and renders them with `write_run.py` (§14); `<uuid>.json` and
+    `write_agui_run.py` are gone. Until the live copy is built, every archive stops `chat-ui` and then the agent
+    before the copy and starts them again after it, as the archive of the chat sessions did, and the bundle says
+    `final`. (`GET /api/sessions/{id}` without `last_run_at` is clarification 9.) *Reason:* the record and its
+    archive ship together, so `main` never holds journals the archive cannot render; the live copy (decision 30)
+    follows separately. *Cost if wrong:* until the live copy, an archive taken while participants work pauses
+    their runs for the copy (a run in progress ends `cancelled`), as it did before the record. *Amends:* the
+    README's status line and the note above the decisions table, §14 (the paragraph on the archive as built, the
+    last paragraph of *Why a live copy is consistent*). *Status:* folded.

@@ -69,7 +69,7 @@ an async drain, since a detached run holds no HTTP response open for Next.js to 
 
 **Fix.** Set `NEXT_MANUAL_SIG_HANDLE=true` in the image so Next.js installs no handler of its own, and let
 `lib/shutdown.ts`'s `installShutdown()` (registered from `instrumentation.ts`) be the only `SIGTERM` listener:
-it refuses new runs, cancels every run in progress (saved `cancelled`), drains the session queue (at most 25s)
+it refuses new runs, cancels every run in progress (each ends `cancelled` in its journal), drains the session queue (at most 25s)
 and then exits. `node scripts/check-shutdown.mjs` checks this end to end, both standalone and in the built
 image.
 

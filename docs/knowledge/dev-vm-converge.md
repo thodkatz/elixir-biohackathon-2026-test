@@ -22,3 +22,14 @@ cd platform/ansible && set -a && . ~/.config/spe-dev/llm.env && set +a \
 ```
 
 `archive.yml` needs neither.
+
+**"dev-local-api not reset, nothing changed: compose project spe-frontend has containers from
+…/platform/dev/fake-agent.compose.yml, not /home/ubuntu/spe-frontend/docker-compose.yml".** `destroy.yml`'s reset
+refuses a project whose containers were created from another compose file, and the fake agent
+(`fake-agent.compose.yml`) is one. Found 2026-11-03 (slice 4 of the AG-UI conversation record): the final
+archive had already run, so remove the stopped fake container by name (`docker rm spe-frontend-agent-1`;
+`docker compose … rm` needs `SPE_DEV_PLATFORM` set) and re-run with `-e spe_archive_skip=true`. Before a
+destroy that should archive, `create.yml` first to put the real agent back.
+
+**`[Errno 24] Too many open files`** once in `create.yml`'s *Build-context files* task, the same day, with
+`ulimit -n` at 1048576 and the system far from `file-max`: transient, a plain re-run passed.

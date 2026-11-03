@@ -99,7 +99,7 @@ Every task's requirements include these.
   refusal and failure messages `invalid session`, `this session was deleted`, `the chat UI is shutting down`,
   `this session could not be saved`, `this run carries no new message`, `this run was already recorded`;
   `globalThis` keys `Symbol.for("spe.sessions.queue")` and `Symbol.for("spe.sessions.index")`; archive paths `agui-journals/<uuid>.jsonl`, `agent-runs.jsonl`; bundle field
-  `spe_archive_mode` `live` | `final`; chat fields `spe_run` (`run_id`, `status`, `started_at`, `ended_at`),
+  `spe_archive_mode` `live` | `final`; chat fields `spe_run` (`run_id`, `status`, `started_at`, `ended_at`, `error`),
   `spe_ignored`, `meta.spe_deleted_at`; the block heading "sent by the client, not used".
 - **Never stored:** request headers and the chat UI's configuration (the agent key) are never in a journal, a
   log line or the archive; message content is stored unchanged (decision 27). Log lines name ids, never content.

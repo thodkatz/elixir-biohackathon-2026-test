@@ -31,5 +31,6 @@ archive had already run, so remove the stopped fake container by name (`docker r
 `docker compose … rm` needs `SPE_DEV_PLATFORM` set) and re-run with `-e spe_archive_skip=true`. Before a
 destroy that should archive, `create.yml` first to put the real agent back.
 
-**`[Errno 24] Too many open files`** once in `create.yml`'s *Build-context files* task, the same day, with
-`ulimit -n` at 1048576 and the system far from `file-max`: transient, a plain re-run passed.
+**`[Errno 24] Too many open files`** (and `npm error code EMFILE` in `npm ci`), twice on 2026-11-03: in
+`create.yml`'s *Build-context files* task and in `npm ci`. `ulimit -n` was 1048576, the system was far from
+`file-max`, and no process held many descriptors afterwards. Transient: a plain re-run passed both times.

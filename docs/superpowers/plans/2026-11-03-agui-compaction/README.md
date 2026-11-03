@@ -256,7 +256,8 @@ Each is added by the slice that verifies it, with status `folded`, and the spec 
 5. **Decision 13 is checked against the model's own window, on qwen**: at `context_window_tokens: 20000` the
    proactive trigger compacts long before the model's own window, so compaction disabled does not fail there.
    The check overflows qwen's own window (de.NBI's vLLM, `max_model_len`) with one large tool result
-   (compaction off: vLLM's "maximum context length" error), then recovers the same session through the reactive
+   (compaction off: the provider's context-window error, in the run de.NBI's LiteLLM gateway's
+   "Context Window exceeded", refused before vLLM), then recovers the same session through the reactive
    trigger (compaction on, no window); the proactive half is slice 2's early output. It was planned on Haiku and
    moved to qwen at the user's request (2026-11-03, slice 3), to spare Haiku's tokens. Decision 13's acceptance
    check is rewritten: **an approved acceptance check changes, so the user is pointed at this clarification** in

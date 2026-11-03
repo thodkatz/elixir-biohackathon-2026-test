@@ -24,4 +24,6 @@ Compare hashes, never print the key. For a deployment, read it into the environm
 
 **The window.** LiteLLM's `/v1/models` has no `max_model_len`; `/v1/model/info` (free, no completion) gives
 `qwen3.8-27b` `max_input_tokens: 262144` (2026-11-03). That is LiteLLM's model info, not read from vLLM itself,
-so a run past it (compaction plan, slice 3, task 4) is what confirms vLLM enforces the same figure.
+and LiteLLM enforces it itself: a request past it gets 400 `litellm.ContextWindowExceededError` ("Context
+Window exceeded for given call … Max Input Tokens=262144, Got=…") before vLLM sees it (compaction plan, slice 3,
+task 4, 2026-11-03). Whether vLLM's own `max_model_len` is the same figure is still unread.

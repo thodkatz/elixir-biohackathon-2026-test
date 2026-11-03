@@ -189,8 +189,8 @@ is open (`docs/guides/contributing-upstream.md`, step 6).
 
 - **Canary evaluation ladder** (biohackathon 0013): spec (#1) and plan (#2) merged. **Next: slice 1/9**
   `impl/canary-eval-ladder-1-scoring`. Handoff: `ls docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs | tail -1`.
-- **AG-UI compaction** (Full mode): spec (#15), plan (#16) and slice 1/3 (#17, the agent) merged. **Next: slice 2/3**
-  `impl/agui-compaction-2-chat-archive`. Handoff: `ls docs/superpowers/plans/2026-11-03-agui-compaction/handoffs | tail -1`.
+- **AG-UI compaction** (Full mode): spec (#15), plan (#16), slices 1/3 (#17, the agent) and 2/3 (#18, chat and
+  archive) merged. **Next: slice 3/3** `impl/agui-compaction-3-denbi-docs`. Handoff: `ls docs/superpowers/plans/2026-11-03-agui-compaction/handoffs | tail -1`.
 - **AG-UI conversation record** (Full mode): `chat-ui` owns the history as an append-only journal, the agent
   stays stateless. Spec merged (#19): §13–14 of the living AG-UI spec `docs/specs/2026-10-15-agui-frontend-design/`.
   Plan merged (#20): `docs/superpowers/plans/2026-11-03-agui-conversation-record/`, 4 slices; slices 2–4 wait for

@@ -70,17 +70,25 @@ export function pathTo(conv: Conversation, id: string | null): Message[] {
   return path.reverse();
 }
 
-// A point the agent may continue from: a user message, or the last message a run added, unless that message
-// holds a tool call with no tool result later in its run (a run cancelled, failed or cut mid tool call), which
-// would send the agent a dangling tool call (§13).
+// A point the agent may continue from: a user message, or the last message a run added, but only if every
+// tool call any message that run added holds is answered by a `tool` message the same run added (a call the
+// last message itself holds, with nothing later in the run to answer it, is the special case this excludes:
+// a run cancelled, failed or cut mid tool call), so the agent is never sent a dangling tool call (§13).
 export function isBoundary(conv: Conversation, id: string): boolean {
   const node = conv.nodes.get(id);
   if (!node) return false;
   if (node.message.role === "user") return true;
-  if (!conv.runs.some((run) => run.added.at(-1) === id)) return false;
-  // The run's last message: nothing follows it in its run, so a tool call it holds has no result.
-  const calls = (node.message as { toolCalls?: unknown[] }).toolCalls ?? [];
-  return calls.length === 0;
+  const run = conv.runs.find((r) => r.added.at(-1) === id);
+  if (!run) return false;
+  const calls = new Set<string>();
+  const answered = new Set<string>();
+  for (const addedId of run.added) {
+    const message = conv.nodes.get(addedId)!.message;
+    for (const call of (message as { toolCalls?: { id: string }[] }).toolCalls ?? []) calls.add(call.id);
+    const toolCallId = (message as { toolCallId?: string }).toolCallId;
+    if (message.role === "tool" && toolCallId !== undefined) answered.add(toolCallId);
+  }
+  return [...calls].every((callId) => answered.has(callId));
 }
 
 export function branchOfTip(conv: Conversation): Message[] {

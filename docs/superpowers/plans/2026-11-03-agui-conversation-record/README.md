@@ -71,8 +71,9 @@ the task text it changes.
    resent from another branch): the journal already holds it verbatim, and `run_start.anchor` shows which branch
    the run continued; (c) messages cut when the anchor moves back to a boundary are `deleted` even if the client
    sent them; (d) a message without a string id is `fabricated`, and a repeated new id counts once; (e) `ignored`
-   lists client-order entries first, then `deleted` in path order. A run's last message holding a tool call is no
-   boundary (`isBoundary`). Slice 1 folds them into §13 step 2 with a clarification. *Cost if wrong:* an analyst
+   lists client-order entries first, then `deleted` in path order. A run's last message is no boundary while a
+   tool call the run made has no result in that run (`isBoundary`). Slice 1 folds them into §13 step 2 with a
+   clarification. *Cost if wrong:* an analyst
    cannot see that a client resent an unchanged message from another branch; recording it later is one more
    `ignored` kind and its rendering in `write_run.py`, absent from journals written before.
 

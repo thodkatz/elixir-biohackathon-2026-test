@@ -98,6 +98,41 @@ test("tool calls, a compaction marker and a failed run rebuild as the browser ho
   assert.deepEqual(pathTo(conv, null), []);
 });
 
+test("a run that leaves one of two tool calls unanswered is no boundary even at its last message", async () => {
+  const conv = await rebuild(ID, [
+    created(), start("r1", null, [user("u1", "list and count")]),
+    ev("r1", { type: EventType.RUN_STARTED, threadId: ID, runId: "r1" }),
+    ev("r1", { type: EventType.TOOL_CALL_START, toolCallId: "c1", toolCallName: "execute", parentMessageId: "a1" }),
+    ev("r1", { type: EventType.TOOL_CALL_ARGS, toolCallId: "c1", delta: '{"cmd":"ls"}' }),
+    ev("r1", { type: EventType.TOOL_CALL_END, toolCallId: "c1" }),
+    ev("r1", { type: EventType.TOOL_CALL_START, toolCallId: "c2", toolCallName: "execute", parentMessageId: "a1" }),
+    ev("r1", { type: EventType.TOOL_CALL_ARGS, toolCallId: "c2", delta: '{"cmd":"wc"}' }),
+    ev("r1", { type: EventType.TOOL_CALL_END, toolCallId: "c2" }),
+    ev("r1", { type: EventType.TOOL_CALL_RESULT, messageId: "t1", toolCallId: "c1", content: "a.txt", role: "tool" }),
+    end("r1", "cancelled"),
+  ]);
+  assert.deepEqual(conv.runs[0].added, ["u1", "a1", "t1"]);
+  assert.equal(isBoundary(conv, "t1"), false);
+});
+
+test("a run that answers every tool call it made is a boundary at its last message", async () => {
+  const conv = await rebuild(ID, [
+    created(), start("r1", null, [user("u1", "list and count")]),
+    ev("r1", { type: EventType.RUN_STARTED, threadId: ID, runId: "r1" }),
+    ev("r1", { type: EventType.TOOL_CALL_START, toolCallId: "c1", toolCallName: "execute", parentMessageId: "a1" }),
+    ev("r1", { type: EventType.TOOL_CALL_ARGS, toolCallId: "c1", delta: '{"cmd":"ls"}' }),
+    ev("r1", { type: EventType.TOOL_CALL_END, toolCallId: "c1" }),
+    ev("r1", { type: EventType.TOOL_CALL_START, toolCallId: "c2", toolCallName: "execute", parentMessageId: "a1" }),
+    ev("r1", { type: EventType.TOOL_CALL_ARGS, toolCallId: "c2", delta: '{"cmd":"wc"}' }),
+    ev("r1", { type: EventType.TOOL_CALL_END, toolCallId: "c2" }),
+    ev("r1", { type: EventType.TOOL_CALL_RESULT, messageId: "t1", toolCallId: "c1", content: "a.txt", role: "tool" }),
+    ev("r1", { type: EventType.TOOL_CALL_RESULT, messageId: "t2", toolCallId: "c2", content: "3", role: "tool" }),
+    end("r1"),
+  ]);
+  assert.deepEqual(conv.runs[0].added, ["u1", "a1", "t1", "t2"]);
+  assert.equal(isBoundary(conv, "t2"), true);
+});
+
 test("two runs from one anchor are siblings; the tip is the run that ended last", async () => {
   // r2 and r3 both continue from a1 and interleave; r2 starts first and ends last.
   const conv = await rebuild(ID, [

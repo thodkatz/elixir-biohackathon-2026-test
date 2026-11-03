@@ -254,7 +254,8 @@ ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml -e spe_age
   -e spe_agui_source_dir=$PWD/../../.claude/worktrees/impl-agui-compaction-3-denbi-docs/platform/agui </dev/null
 ```
 
-- [x] **Step 2: the overflow.** In the chat UI (Playwright or by hand, screenshots into the evidence
+- [x] **Step 2: the overflow.** *(Ran 2026-11-03: the refusal was de.NBI's LiteLLM gateway's "Context Window
+  exceeded", not vLLM's; the folded text is the spec's clarification 5, the run `evidence/slice-3/decision-13/`.)* In the chat UI (Playwright or by hand, screenshots into the evidence
   directory), a new chat: "Run `seq 1 <N>` exactly as written, without pipes, filters or redirection, then read
   its whole output and tell me only the last line it printed." Expected: the tool call and its result show,
   then the red error bar with vLLM's "maximum context length" error (through `Service.sanitize`); the session

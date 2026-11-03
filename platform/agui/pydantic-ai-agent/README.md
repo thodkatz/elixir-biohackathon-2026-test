@@ -58,8 +58,8 @@ in `platform/ansible/roles/agui/templates/agent.env.j2`.
 Before each model request the agent estimates what it would send (the latest
 response's usage plus three characters a token for what came after it); at
 `trigger_ratio` × `context_window_tokens` or more it compacts first. Whatever the
-window, a request the provider rejects as too long (Anthropic's, OpenAI's and vLLM's
-wording) is compacted and sent once more. Compacting asks the same model, without
+window, a request the provider rejects as too long (Anthropic's, OpenAI's, vLLM's or a
+LiteLLM proxy's wording) is compacted and sent once more. Compacting asks the same model, without
 tools, for a summary of the history (`compaction_prompt.md`; tool results cut to their
 first and last 1000 characters), then sends the system prompt, the summary framed as a
 record rather than the participant's words, the latest user request and what follows.

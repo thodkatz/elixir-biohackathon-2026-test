@@ -1,6 +1,6 @@
 # AG-UI compaction — design
 
-**Status:** approved, PR #15. **Latest clarification:** 8 (2026-11-03, slice 2).
+**Status:** approved, PR #15. **Latest clarification:** 8 (2026-11-03, slice 2); 5 folded in slice 3.
 Read against this repo at `4a59a6c` (`main`), with `pydantic-ai-slim` 2.56.0, `ag-ui-protocol` 0.1.22,
 `@ag-ui/core`/`@ag-ui/client` 1.0.2 and CopilotKit 1.79.0 as pinned there.
 
@@ -256,7 +256,8 @@ Ansible renders it from `spe_agent_compaction_enabled`, `spe_agent_context_windo
 `inventory/group_vars/all.yml`, rendering in `roles/agui/tasks/main.yml`), and `roles/agui/tasks/checks.yml`
 gains a task that shows the rendered block, so `verify.yml` does. The de.NBI model is fixed in
 `inventory/group_vars/all.yml` (`spe_webui_model_id: qwen3.8-27b`, which `spe_agent_model` derives from), so
-`spe_agent_context_window_tokens` is set beside it to that model's `max_model_len`; the Coder testbed presets
+its window is set beside it (`spe_webui_model_context_tokens`, the de.NBI gateway's `max_input_tokens`), and
+`spe_agent_context_window_tokens` is derived from it while the agent uses that model; the Coder testbed presets
 can only set existing `coder_parameter`s and are not touched. The dev VM's private instance file sets Haiku's.
 `docs/getting-started.md` says how to set it for another model; `platform/ansible/README.md` and the agent's
 README describe the block.

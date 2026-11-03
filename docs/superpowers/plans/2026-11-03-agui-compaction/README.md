@@ -255,7 +255,7 @@ Each is added by the slice that verifies it, with status `folded`, and the spec 
    `test_transcript_keeps_the_latest_request` pins it).
 5. **Decision 13 is checked against the model's own window, on qwen**: at `context_window_tokens: 20000` the
    proactive trigger compacts long before the model's own window, so compaction disabled does not fail there.
-   The check overflows qwen's own window (de.NBI's vLLM, `max_model_len`) with one large tool result
+   The check overflows qwen's own window (262144, de.NBI's LiteLLM gateway's `max_input_tokens`) with one large tool result
    (compaction off: the provider's context-window error, in the run de.NBI's LiteLLM gateway's
    "Context Window exceeded", refused before vLLM), then recovers the same session through the reactive
    trigger (compaction on, no window); the proactive half is slice 2's early output. It was planned on Haiku and

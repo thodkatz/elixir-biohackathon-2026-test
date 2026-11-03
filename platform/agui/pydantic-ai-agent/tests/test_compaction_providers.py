@@ -153,7 +153,7 @@ async def test_vllm_wording_is_recognised(tmp_path):
 
 
 async def test_litellm_gateway_wording_is_recognised(tmp_path):
-    """de.NBI's LiteLLM proxy rejects an overlong request itself, in its own words (2026-11-03, slice 3)."""
+    """de.NBI's LiteLLM proxy rejects an overlong request itself, in its own words (2026-11-03)."""
     wire = Wire(httpx.Response, {"error": {"message": "litellm.ContextWindowExceededError: litellm.BadRequestError: "
                                                       "litellm._pre_call_checks: Context Window exceeded for given "
                                                       "call. No models have context window large enough for this "

@@ -3,7 +3,7 @@
 **Status:** draft. **Latest clarification:** none.
 Read against this repo at `1a30ac9` (`main`), with `@ag-ui/client` 1.0.2 and CopilotKit 1.79.0
 (`@copilotkit/runtime`, `@copilotkit/react-core`) as pinned there, and Open WebUI v0.11.3 (the image
-`spe_frontend_webui_image` pins) as the model to follow.
+`spe_frontend_webui_image` pins) as the model to follow, read in its source at tag `v0.11.3` (`2a960a5`).
 
 **Who reads it:** whoever plans or implements how the AG-UI chat (`platform/agui/copilotkit-chat/`, "`chat-ui`")
 stores conversations, the archive (`roles/run_archive`), and whoever analyses archived AG-UI runs and needs to
@@ -187,9 +187,13 @@ reads for Open WebUI (`{chats: [...], tags: [...], notes: []}`), one chat per se
   `chat.history.currentId`: the tip;
 - a user message as Open WebUI's: `role`, `content`;
 - **one assistant message per run**, parent the run's last new user message, with `output` items in the order
-  their first event arrived: a text message as `message`, a tool call as `function_call` (`call_id`, `name`,
-  `arguments`), a tool result as `function_call_output` (`call_id`, `output`), reasoning as `reasoning`; a
-  compaction marker as a `message` item keeping its id; `content` is the run's text joined;
+  their first event arrived, in v0.11.3's shapes (`utils/middleware.py`, `utils/ask_user.py`): a text message as
+  `{type: "message", id, role: "assistant", content: [{type: "output_text", text}]}`, a tool call as
+  `{type: "function_call", id, call_id, name, arguments}` (`arguments` a JSON string), a tool result as
+  `{type: "function_call_output", id, call_id, output: [{type: "input_text", text}]}`, reasoning as
+  `{type: "reasoning", id, content}`, each with `status: "completed"`; a compaction marker as a `message` item
+  keeping its id; `content` is the run's text joined. These are the items Open WebUI itself replays to a model
+  (`MESSAGE_REPLAY_KEYS`, `process_messages_with_output`), so the export is a chat Open WebUI could continue;
 - `spe_run` on that assistant message (`run_id`, `status`, `started_at`, `ended_at`), and `spe_ignored` (the
   run's ignored content) on it too, so a refused run still has a message to carry what it was sent.
 

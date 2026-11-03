@@ -1429,6 +1429,9 @@ ls -A $R4/agui-journals | wc -l; test -e $R4/agent-runs.jsonl || echo no-run-log
 
 ## Notes for the plan author
 
+*Folded into the README's Shared interfaces, File structure and clarifications on 2026-11-03; the notes stay as
+the record of why.*
+
 - **Files beyond the README's *File structure* row for slice 4:** `platform/dev/tests/test_archive_export.py`
   (task 1: a stub-`docker` test of the export tasks and the two playbooks; `ansible-playbook` on `PATH`, skipped
   without it), `platform/ansible/inventory/group_vars/all.yml` (`spe_archive_final: false`),

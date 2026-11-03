@@ -235,7 +235,7 @@ an upstream PR (`docs/guides/contributing-upstream.md`).
 
 Private instance files and `platform/ansible/output/` exist only in the main checkout,
 not in a worktree. To deploy a worktree's agent or chat UI before it is merged,
-run Ansible from the main checkout with `-e spe_agui_source_dir=<worktree>`.
+run Ansible from the main checkout with `-e spe_agui_source_dir=<worktree>/platform/agui`.
 
 When this repository is a submodule (of `biohackathon`), the parent records the
 pinned commit; move the pin there after the push.

@@ -1595,6 +1595,9 @@ Reordered histories and known ids resent from another branch flag nothing."
 
 ## Notes for the plan author
 
+*Folded into the README's Shared interfaces, File structure and clarifications on 2026-11-03; the notes stay as
+the record of why.*
+
 Deviations from, and readings of, the README's contract; each is small and none changes another slice's names.
 
 1. **`rebuildText(id, text)` is an extra export of `lib/rebuild.ts`.** `rebuild(id, lines)` receives lines that

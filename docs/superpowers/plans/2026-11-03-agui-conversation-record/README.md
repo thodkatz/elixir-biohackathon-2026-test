@@ -43,7 +43,8 @@ touches files this plan rewrites: `lib/recorder.test.ts` (a recorder test that t
 `files/write_agui_run.py` (`## Compacted`, a `Compactions` column), `platform/dev/fake_agent.py` and
 `platform/dev/e2e/sessions.py`. Its slice 3/3 touches only Ansible variables for de.NBI and docs.
 
-- **Slice 1 starts now**: it adds new files only and changes nothing #18 touches.
+- **Slice 1 starts now**: it adds new files, plus the `echo-input` keyword in `lib/test-agent.ts`, and changes
+  nothing #18 touches.
 - **Slices 2–4 start from `main` after #18 has merged**, and do **not** wait for compaction 3/3: they share no
   file with it, so whichever merges second rebases. Slice 2's first step checks `gh pr view 18 --repo
   thodkatz/elixir-biohackathon-2026-test --json state` is `MERGED`; if not, the session ends blocked on it
@@ -153,6 +154,8 @@ export const FSYNC_INTERVAL_MS = 1000;
 export function journalPath(dir: string, id: string): string;     // throws ValidationError unless isSessionId(id)
 export function idOfJournal(name: string): string | null;          // "<uuid>.jsonl" → uuid, anything else → null
 export function parseJournal(text: string): { lines: Line[]; skipped: number };   // logs each skipped line's number only
+// ValidationError and isSessionId are imported from ./sessions.ts, where they live; slice 3's sessions.ts keeps
+// exporting both (the import cycle is safe: journal.ts uses them only at call time).
 
 export type Durability = "now" | "soon";                          // "now": fsync before resolving; "soon": within FSYNC_INTERVAL_MS
 export type Clock = { now: () => number; setTimeout: (fn: () => void, ms: number) => unknown; clearTimeout: (h: unknown) => void };
@@ -192,7 +195,8 @@ export type Conversation = {
   last_line_at: string | null;
   skipped: number;                                                  // torn or unparsable lines
 };
-export function rebuild(id: string, lines: Line[]): Promise<Conversation>;
+export function rebuild(id: string, lines: Line[]): Promise<Conversation>;     // skipped: 0
+export function rebuildText(id: string, text: string): Promise<Conversation>;  // parseJournal + rebuild, skipped filled
 export function pathTo(conv: Conversation, id: string | null): Message[];   // root → id, inclusive; [] for null
 export function isBoundary(conv: Conversation, id: string): boolean;        // a user message or a run's last added message
 export function branchOfTip(conv: Conversation): Message[];                 // pathTo(conv, conv.tip)
@@ -221,19 +225,27 @@ export type OpenWebUIChat = {
   chat: { title: string; history: { messages: Record<string, unknown>; currentId: string | null }; messages: unknown[] };
 };
 export type Bundle = { exported_at: number; spe_archive_mode: ArchiveMode; chats: OpenWebUIChat[]; tags: { id: string; name: string }[]; notes: [] };
-export function toOpenWebUIChat(conv: Conversation): OpenWebUIChat;
-export function exportJournals(dir: string, mode: ArchiveMode): Promise<Bundle>;   // every <uuid>.jsonl, hidden and deleted included
+export type OutputItem = Record<string, unknown> & { type: string; id: string };
+export type SpeRun = { run_id: string; status: RunView["status"]; started_at: string; ended_at: string | null; error: string | null };
+export type ExportedMessage = /* an Open WebUI message, plus `output?: OutputItem[]`, `spe_run?: SpeRun`, `spe_ignored?: Ignored[]` */;
+export function runMessageId(runId: string): string;                  // "spe-run-<run id>": a run's exported assistant message
+export function outputItems(message: unknown): OutputItem[];
+export function toOpenWebUIChat(conv: Conversation): OpenWebUIChat;   // chat.history.messages: Record<string, ExportedMessage>
+export function exportJournals(dir: string, mode: ArchiveMode, opts?: { now?: () => Date }): Promise<Bundle>;   // every <uuid>.jsonl, hidden and deleted included
+export function bundleJson(bundle: Bundle): string;                   // the file's exact text, shared by the script and the fixtures
 ```
 
 `node scripts/export-journals.ts <journals dir> <bundle.json> <live|final>` (run in the image as
 `docker run --rm --entrypoint node -v <dir>:/in:ro -v <out>:/out <chat-ui image> scripts/export-journals.ts /in /out/bundle.json <mode>`).
+Slice 3 registers the image as `agui_chat_ui_image` in `export.yml` and always passes `final` (every archive still
+stops both services); slice 4 passes `live` or `final` from `spe_archive_final`.
 
 **`lib/sessions.ts`** (slice 3, task 1)
 
 ```ts
 export type SessionMeta = { id: string; title: string; tags: string[]; pinned: boolean; hidden: boolean;
   created_at: string; updated_at: string; last_run_at: string | null };          // the browser's shape, unchanged
-export type SessionView = Omit<SessionMeta, "last_run_at"> & { messages: Message[] };   // GET one: the tip's branch
+export type SessionView = Omit<SessionMeta, "last_run_at"> & { messages: Message[] };   // GET one: the tip's branch (§6's row listing last_run_at is corrected by a slice 3 clarification)
 export type MetaPatch = Partial<Pick<SessionMeta, "title" | "tags" | "pinned" | "hidden">>;
 export type RunHandle = { cancel: () => void };
 export type Shared = { queue: Map<string, Promise<unknown>>; running: Map<string, RunHandle>; closing: boolean };  // running keyed by runKey(threadId, runId)
@@ -253,6 +265,8 @@ export function defaultJournals(): Journals;
 ```
 
 `normaliseTags`, `parsePatch`, `autoTitle`, `ValidationError` and `isSessionId` keep their names and behaviour.
+The index is built once per process: a journal written behind the server's back lists after a restart.
+`SPE_SESSIONS_TEST_SAVE_DELAY_MS` stays as the test hook that delays each `run_end` append (decisions 25, 26).
 
 **`lib/recorder.ts`** (slice 3, task 2): `export class SessionRecorder extends Middleware { constructor(journals: () => Journals, now?: () => Date); readonly fetch; run(input, next) }`;
 `REFUSAL_MESSAGES` lists the four messages above; `SAVE_FAILED` and the "already running" refusal are gone.
@@ -265,7 +279,10 @@ same keyword, through `FunctionModel`, answers with the roles and ids pydantic-a
 `spe-compaction-`), `render_ignored(entries: list[dict]) -> str`, `render_status(run: dict) -> str`; `index.md` for
 a bundle with `spe_archive_mode` gets `| # | Session | Tags | Created | Runs | Compactions | State |` (the as-built
 AG-UI columns, inputs-for-plan, bullet 8) and the live/final line; an Open WebUI bundle (no `spe_archive_mode`)
-renders byte-identically to before.
+renders byte-identically to before. `render_status` appends a failed run's `spe_run.error`. A chat file shows the
+active branch, then *Other branches* (every message off it, so a refused run's ignored content is in some file;
+a spec clarification in slice 2). `write.yml` copies `agui-journals/` and `agent-runs.jsonl` into the run
+directory before `write_run.py` runs on `<bundle dir>/bundle.json`.
 
 ## File structure
 
@@ -278,16 +295,17 @@ renders byte-identically to before.
 | `CHAT/lib/export.ts`, `lib/export.test.ts`, `CHAT/scripts/export-journals.ts`, `CHAT/Dockerfile` | 2 | exporter in the image |
 | `platform/dev/tests/fixtures/agui-record/*.jsonl`, `*.bundle.json` | 2 | fixture journals and the bundles exported from them (committed) |
 | `ARCHIVE/write_run.py`, `platform/dev/tests/test_write_run_agui.py` | 2 | status, ignored, compaction, AG-UI index |
-| `CHAT/lib/sessions.ts`, `lib/sessions.test.ts`, `lib/api.ts`, `lib/api.test.ts`, `app/api/sessions/**` | 3 | the store on journals |
+| `CHAT/lib/sessions.ts`, `lib/sessions.test.ts`, `lib/test-journals.ts`, `lib/api.ts`, `lib/api.test.ts`, `app/api/sessions/**` | 3 | the store on journals |
 | `CHAT/lib/recorder.ts`, `lib/recorder.test.ts`, `lib/clone.test.ts`, `lib/shutdown.ts`, `lib/reconcile.ts`, `app/api/copilotkit/[[...slug]]/route.ts` | 3 | the route on journals |
 | `platform/ansible/roles/run_archive/tasks/export.yml`, `tasks/write.yml`; `ARCHIVE/write_agui_run.py` (deleted), `platform/dev/tests/test_write_agui_run.py` (deleted or reduced to `write_run.py` cases) | 3 | archive switch (barrier kept) |
 | `platform/dev/fake_agent.py`, `CHAT/scripts/check-built-server.mjs`, `scripts/check-shutdown.mjs`, `platform/dev/e2e/sessions.py` | 3 | `echo-input`, checks read journals |
 | `CHAT/README.md`, `docs/getting-started.md`, `platform/ansible/README.md`, `platform/coder/README.md`, `docs/knowledge/agui-chat-sessions.md` | 3 | storage described |
 | `docs/superpowers/plans/2026-11-03-agui-conversation-record/evidence/slice-3/` | 3 | early output samples 1 and 2 |
-| `platform/ansible/roles/run_archive/tasks/export.yml`, `playbooks/destroy.yml`, `playbooks/archive.yml` | 4 | live copy, final barrier (`spe_archive_final`) |
+| `platform/ansible/roles/run_archive/tasks/export.yml`, `playbooks/destroy.yml`, `playbooks/archive.yml`, `inventory/group_vars/all.yml`, a new archive test in `platform/dev/tests/` | 4 | live copy, final barrier (`spe_archive_final`) |
+| `platform/dev/fake_agent.py`, `fake-agent.compose.yml` | 4 | `SPE_FAKE_SLOW_STEP_SECONDS`, so a scripted run outlasts the archive's copy |
 | `platform/dev/e2e/sessions.py` | 4 | devtools edit, close tab, restore on tip |
 | `platform/ansible/roles/agui/tasks/checks.yml` | 4 | agent key not in the sandbox (17) |
-| `threats/TM-007-*.md` | 4 | decision 18 |
+| `threats/TM-007-*.md`, `threats/TM-005-*.md` (related list) | 4 | decision 18 |
 | spec `README.md` status, `06-chat-ui.md`, `14-archive.md` (as-built paragraph), `clarifications.md` | 3, 4 | built |
 
 `CHAT` is `platform/agui/copilotkit-chat`, `ARCHIVE` `platform/ansible/roles/run_archive/files`.
@@ -346,8 +364,8 @@ updated in the same commit.
 
 - **Slice 3: the as-built archive paragraph goes.** §14's "Until the record is built…" paragraph and the
   README's status line are rewritten as built (the barrier still runs in every archive until slice 4).
-- **Slice 4: the record is built.** The README status, §6's "wait for the record" sentence and §14's barrier
-  sentence for the as-built sessions are rewritten.
+- **Slice 4: the record is built.** The spec README's status line (which holds the "wait for the record"
+  sentence, not §6) and §14's barrier sentence for the as-built sessions are rewritten.
 
 ## Handoffs
 

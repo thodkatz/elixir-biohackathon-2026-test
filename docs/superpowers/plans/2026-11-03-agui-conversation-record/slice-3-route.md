@@ -84,7 +84,7 @@ commit it on the branch, push, and end with `.methodology/shared/claude/next-ses
 
 **Interfaces:**
 - Consumes: `JournalWriter`, `journalPath`, `idOfJournal`, `parseJournal`, `NewLine`, `Line`, `Durability`,
-  `Clock`, `JournalFs` (slice 1, `lib/journal.ts`); `rebuild`, `branchOfTip`, `Conversation` (slice 1,
+  `Clock`, `JournalFs` (slice 1, `lib/journal.ts`); `rebuildText`, `branchOfTip`, `Conversation` (slice 1,
   `lib/rebuild.ts`).
 - Produces: README *Shared interfaces*, `lib/sessions.ts`, exactly; `seedRun(journals, text, opts)` in
   `lib/test-journals.ts` for tasks 2–3's tests.
@@ -485,7 +485,7 @@ import path from "node:path";
 import type { Message } from "@ag-ui/client";
 import { JournalWriter, idOfJournal, journalPath, parseJournal } from "./journal.ts";
 import type { Clock, Durability, JournalFs, Line, NewLine } from "./journal.ts";
-import { branchOfTip, rebuild } from "./rebuild.ts";
+import { branchOfTip, rebuildText } from "./rebuild.ts";
 import type { Conversation } from "./rebuild.ts";
 import { isSessionId } from "./session-id.ts";
 export { isSessionId };
@@ -675,7 +675,7 @@ export class Journals {
   /** The journal's conversation, or null when the session has no journal. */
   async load(id: string): Promise<Conversation | null> {
     const text = await readText(this.fs, this.file(id));
-    return text === null ? null : rebuild(id, parseJournal(text).lines);
+    return text === null ? null : rebuildText(id, text);
   }
 
   /** Appends one line (stamped by the writer) and folds it into the index. The caller holds
@@ -3645,6 +3645,9 @@ git commit -s -m "Evidence: the conversation record's early output, samples 1 an
 ---
 
 ## Notes for the plan author
+
+*Folded into the README's Shared interfaces, File structure and clarifications on 2026-11-03; the notes stay as
+the record of why.*
 
 Departures from the README, or places the README leaves to a slice, each with *why* and *cost if wrong*:
 

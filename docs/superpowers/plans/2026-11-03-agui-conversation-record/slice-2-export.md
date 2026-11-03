@@ -326,7 +326,7 @@ test("one assistant message per run, its output items in the order they first ap
   ]);
   assert.equal(run.content, "There is one file: notes.txt.");
   assert.deepEqual(run.spe_run, { run_id: "r1-1", status: "completed", started_at: "2026-11-03T10:00:00.010Z",
-    ended_at: "2026-11-03T10:00:01.210Z" });
+    ended_at: "2026-11-03T10:00:01.210Z", error: null });
   assert.deepEqual(run.spe_ignored, []);
   assert.equal(msg(c, "u2").parentId, "spe-run-r1-1"); // anchor a2 lives in run r1-1's message
 });
@@ -411,7 +411,7 @@ import { autoTitle } from "./sessions.ts";
 
 export type ArchiveMode = "live" | "final";
 export type OutputItem = Record<string, unknown> & { type: string; id: string };
-export type SpeRun = { run_id: string; status: RunView["status"]; started_at: string; ended_at: string | null };
+export type SpeRun = { run_id: string; status: RunView["status"]; started_at: string; ended_at: string | null; error: string | null };
 export type ExportedMessage = {
   id: string; parentId: string | null; childrenIds: string[]; role: string; content: string; timestamp: number;
   output?: OutputItem[]; spe_run?: SpeRun; spe_ignored?: Ignored[];
@@ -527,7 +527,7 @@ export function toOpenWebUIChat(conv: Conversation): OpenWebUIChat {
     put({
       id, parentId: parent, childrenIds: [], role: "assistant", content: replyText(output),
       timestamp: seconds(run.ended_at ?? run.last_at), output,
-      spe_run: { run_id: run.run_id, status: run.status, started_at: run.started_at, ended_at: run.ended_at },
+      spe_run: { run_id: run.run_id, status: run.status, started_at: run.started_at, ended_at: run.ended_at, error: run.error },
       spe_ignored: run.ignored,
     });
   }
@@ -1113,6 +1113,7 @@ def test_helpers():
     assert not wr.is_compaction({"type": "message", "id": "a1", "role": "assistant"})
     assert wr.render_status({"status": "completed"}) == "" and wr.render_status(None) == ""
     assert wr.render_status({"status": "x|y"}) == r"**Run x\|y**: a status this script does not know."
+    assert wr.render_status({"status": "x", "error": "boom|bang"}).endswith(r" Error: boom\|bang")
     assert wr.render_ignored([]) == ""
     block = wr.render_ignored([{"kind": "deleted", "message": "a`2"}])
     assert block.startswith("## sent by the client, not used\n") and block.endswith("**deleted**: message ``a`2``")
@@ -1223,7 +1224,8 @@ def render_status(run):
     status = run.get("status") if isinstance(run, dict) else None
     if not status or status == "completed":
         return ""
-    return f"**Run {md_inline(status)}**: {STATUS_NOTES.get(status, 'a status this script does not know')}."
+    line = f"**Run {md_inline(status)}**: {STATUS_NOTES.get(status, 'a status this script does not know')}."
+    return f"{line} Error: {md_inline(run['error'])}" if run.get("error") else line
 
 
 def render_ignored(entries):
@@ -1464,16 +1466,17 @@ branch. Every text is fenced or escaped. Open WebUI bundles are untouched."
 
 ## Notes for the plan author
 
+*Folded into the README's Shared interfaces, File structure and clarifications on 2026-11-03; the notes stay as
+the record of why.*
+
 - **`ExportedMessage` and three helpers.** The README types `chat.history.messages` as `Record<string,
   unknown>`; this file types it as `Record<string, ExportedMessage>` (narrower, same JSON) and adds
   `exportJournals`'s optional `{ now }`, `bundleJson`, `runMessageId`, `outputItems`. Names in the README are
   unchanged; consider adding these to *Shared interfaces*.
 - **A run's exported message id is `spe-run-<run id>`.** §14 does not name it; `currentId` and every `parentId`
   that points at a run use it.
-- **`spe_run` carries no `error`.** The README fixes its fields (`run_id`, `status`, `started_at`, `ended_at`), so
-  a failed run's error message (in `run_end.error`) is not in the bundle or the chat file; it stays in the raw
-  journal. Adding `error` to `spe_run` would let `render_status` show it; it is a one-line change in each of
-  `export.ts` and `write_run.py` if wanted.
+- **`spe_run` carries no `error`.** *Folded by the plan author:* `spe_run` gains `error` (from `run_end.error`),
+  and `render_status` appends it, escaped by `md_inline`, so a failed run's reason reaches the archive.
 - **"Other branches" goes beyond §14's text** (task 3, step 7 adds clarification N): without it, a refused run's
   ignored content would be in no Markdown file. Slice 3's early-output sample shows it to the user.
 - **The run's `content` leaves out a compaction marker's summary** (§14 says "the run's text joined"); the marker

@@ -8,6 +8,10 @@ reclaimed only ~5 GB (to 8 GB free). A re-converge, whose images are already pre
 `-e spe_min_free_gb=5` (`platform/ansible/README.md` says the same for de.NBI). Images, volumes and other
 projects' containers on the VM are not ours to prune.
 
+On 2026-11-03 (slice 4 of the AG-UI conversation record) even `spe_min_free_gb=5` failed ("only 4 GB free …,
+need 5"): `docker builder prune -f` freed ~1 MB. `docker image prune -f` (dangling, untagged images only: our
+rebuilds leave them behind, and other projects' tagged images stay) freed ~7.8 GB, to 12 GB free.
+
 **"The agent's LLM key is empty. Export SPE_LLM_API_KEY …".** The dev VM's key (Anthropic) is in
 `~/.config/spe-dev/llm.env` (0600, `ANTHROPIC_API_KEY=`), outside every repository. Export it for the run only;
 with `spe_agui_smoke: false` in `dev-local.yml` a converge makes no model call:

@@ -1076,18 +1076,21 @@ class InstanceRun(Run):
         super().__init__(page, Path("/nonexistent"), shots)
         self.compose_file = compose_file
 
+    def _exec(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
+        """`docker compose exec -T chat-ui <args>` against this instance's compose file."""
+        return subprocess.run(["docker", "compose", "-p", "spe-frontend", "-f", self.compose_file, "exec", "-T",
+                               "chat-ui", *args], check=check, capture_output=True, text=True)
+
     def files(self) -> dict[str, dict]:
         script = ("const fs=require('fs');const d='/data/sessions';const o={};"
                   "for(const f of fs.readdirSync(d))if(f.endsWith('.jsonl'))"
                   "o[f.slice(0,-6)]=fs.readFileSync(d+'/'+f,'utf8');"
                   "process.stdout.write(JSON.stringify(o))")
-        out = subprocess.run(["docker", "compose", "-p", "spe-frontend", "-f", self.compose_file, "exec", "-T",
-                              "chat-ui", "node", "-e", script], check=True, capture_output=True, text=True)
+        out = self._exec("node", "-e", script, check=True)
         return {sid: summary(read_journal(text)) for sid, text in json.loads(out.stdout).items()}
 
     def raw(self, sid: str) -> list[dict]:
-        out = subprocess.run(["docker", "compose", "-p", "spe-frontend", "-f", self.compose_file, "exec", "-T",
-                              "chat-ui", "cat", f"/data/sessions/{sid}.jsonl"], capture_output=True, text=True)
+        out = self._exec("cat", f"/data/sessions/{sid}.jsonl")
         return read_journal(out.stdout if out.returncode == 0 else "")
 
 

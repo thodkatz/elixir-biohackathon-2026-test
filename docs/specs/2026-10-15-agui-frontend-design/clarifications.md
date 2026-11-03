@@ -132,3 +132,21 @@ in the parts it amends.
     their runs for the copy (a run in progress ends `cancelled`), as it did before the record. *Amends:* the
     README's status line and the note above the decisions table, §14 (the paragraph on the archive as built, the
     last paragraph of *Why a live copy is consistent*). *Status:* folded.
+
+12. **Decision 9's overlap is the recorder's; the route admits one run per thread** (2026-11-03; AG-UI
+    conversation record, slice 4, task 2's Playwright checks). `lib/recorder.ts` supports two runs from one
+    anchor overlapping and becoming sibling branches, proved by `npm test` driving `recorder.run()` directly;
+    through `app/api/copilotkit/[[...slug]]/route.ts`, `CopilotRuntime` is constructed with no `runner`
+    override, so its default `InMemoryAgentRunner` (`onConcurrentRun: "throw"`) admits one run per thread id at
+    a time and refuses a second in-flight run on the same session with "Thread already running" before the
+    recorder is ever called. §13 *Concurrency and branches* now says so, and slice 4's `check_restore_tip`
+    proves decision 13's restore-to-tip and decision 2's no-false-alarm over two tabs without ever sending two
+    runs on one session at once: it waits for tab A's run to end before tab B sends, so the two requests never
+    collide with the route's lock, and the sibling-branch property still holds because neither tab refetches
+    the other's work, so both still anchor at the one reply they last knew. *Reason:* no one had driven two
+    truly overlapping runs on one session through the real route before this check; the gap is tracked in
+    `BACKLOG.md` rather than fixed here because it fails safe (the second run errors; nothing is recorded
+    wrong) and a fix needs a `runner` override or a different `AgentRunner`, outside this slice. *Cost if
+    wrong:* a future regression specific to the route's own concurrent-run handling would not be caught by a
+    Playwright check, only by `npm test`'s recorder-level coverage, until the route is fixed. *Amends:* §13
+    *Concurrency and branches*; decision 9 (true of `lib/recorder.ts`, not yet of the route). *Status:* folded.

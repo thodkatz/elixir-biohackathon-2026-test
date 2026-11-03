@@ -65,6 +65,18 @@ test("canonical compares role, content, tool calls and tool call id only", () =>
   assert.notEqual(canonical(call('{"cmd":"ls"}')), canonical(call('{"cmd":"rm -rf /"}')));
 });
 
+test("a toolCalls value that is not a list takes part in the comparison", async () => {
+  const plain = assistant("x", "a");
+  for (const garbage of ["forged", 1, { id: "c" }, true]) {
+    assert.notEqual(canonical({ ...plain, toolCalls: garbage } as unknown as Message), canonical(plain), String(garbage));
+  }
+  assert.equal(canonical({ ...plain, toolCalls: null } as unknown as Message), canonical(plain), "null is blank");
+  const conv = await journal();
+  const [u1, a1, ...rest] = branch(conv);
+  const c = classify(conv, [u1, { ...a1, toolCalls: "rm -rf /" } as unknown as Message, ...rest, user("u4", "next")]);
+  assert.deepEqual(kinds(c), [["edited", "a1"]]);
+});
+
 test("a session's first run has no anchor; its user message is new", () => {
   const c = classify(null, [user("u1", "hello")]);
   assert.deepEqual(c, { anchor: null, path: [], newMessages: [user("u1", "hello")], ignored: [] });

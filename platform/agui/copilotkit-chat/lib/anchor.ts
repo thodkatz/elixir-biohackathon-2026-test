@@ -30,6 +30,8 @@ export function canonical(message: Message): string {
   if (Array.isArray(m.toolCalls) && m.toolCalls.length > 0) {
     fields.toolCalls = m.toolCalls.map((call: { id?: unknown; function?: { name?: unknown; arguments?: unknown } }) =>
       ({ id: call?.id, name: call?.function?.name, arguments: call?.function?.arguments }));
+  } else if (!blank(m.toolCalls)) {
+    fields.toolCalls = m.toolCalls; // not a list: compared as sent, so a garbage value counts as edited
   }
   if (!blank(m.toolCallId)) fields.toolCallId = m.toolCallId;
   return JSON.stringify(sorted(fields));

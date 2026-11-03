@@ -118,5 +118,6 @@ Keys (LLM, agent, sandbox) come from `agent.env`, never from `agent.yaml`.
 ### History
 
 The client sends the conversation with each AG-UI run (`RunAgentInput`),
-as AG-UI defines; the agent keeps no session state. Accepted for #1 (0002,
-0004).
+as AG-UI defines; the agent keeps no session state and trusts the history
+it is sent. Through the chat, that client is `chat-ui`, which sends the
+history from its journal, not the browser's (§13).

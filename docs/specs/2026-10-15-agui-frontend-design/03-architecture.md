@@ -24,7 +24,7 @@ with the other on a VM):
 
 | Container | Holds | Never holds |
 |---|---|---|
-| `chat-ui` | the agent's bearer key (server side only, in the runtime route) | the LLM key, the sandbox key |
+| `chat-ui` | the agent's bearer key (server side only, in the runtime route), the sessions' journals (§13) | the LLM key, the sandbox key |
 | `agent` | the LLM key, the agent key, the sandbox key, the prompt | — (runs no model-chosen commands) |
 | `sandbox` | the sandbox key (visible to its commands), CA, API bases, runbook | the LLM key, the agent key |
 

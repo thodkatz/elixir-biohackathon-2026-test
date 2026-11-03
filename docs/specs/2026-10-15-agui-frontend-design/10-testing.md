@@ -16,8 +16,26 @@ image's build stage; no LLM, no network):
 - usage limit: a scripted model that loops hits `RUN_ERROR`.
 - run log: one JSONL record per run, keys redacted.
 
-**chat-ui**: `next build` must succeed (type check); no unit tests for a
-two-file app. Exercised end to end by the role's checks and by hand.
+**chat-ui**: `npm run build` must succeed (type check), and so must the
+image build (`docker build`), which alone shows the image resolves `lib/`.
+Unit tests in `lib/*.test.ts`, run by `node --test` (Node 24 strips types)
+as `npm test`, no new dependencies: the session store and its validation,
+the run route's hook with `lib/test-agent.ts` as the agent (recording the
+input it receives), the journal, the rebuild and the session API. Two
+properties need the built server, not a store instance: the queue shared
+across route bundles and the hook's per-run state across clones, checked
+against `node .next/standalone/server.js` with `platform/dev/fake_agent.py`
+behind it; so is the history CopilotKit's browser really sends (decision 2's
+no-false-alarm check). End to end, no model: the built chat UI against
+`fake_agent.py`, driven by Playwright (`platform/dev/e2e/sessions.py`)
+through every sidebar action, with the journals checked after each step.
+`fake_agent.py` has a slow scripted run (a user message containing "slow"
+streams its answer over about 10 s) for stopping and archiving a run in
+progress.
+
+**Archive**: `pytest platform/dev/tests` over fixture journals: the
+exporter's bundle and `write_run.py`'s rendering of it (decisions 15, 16),
+an empty bundle, and an existing Open WebUI fixture rendering as before.
 
 **promptfoo** (`evals/`):
 

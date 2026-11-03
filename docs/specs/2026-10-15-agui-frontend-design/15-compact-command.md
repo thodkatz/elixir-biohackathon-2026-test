@@ -72,14 +72,15 @@ When the run input's `forwardedProps.spe_command.name` is `"compact"`, `app.py` 
    With nothing after the latest cut: `RUN_ERROR` "Nothing to compact yet." (the backstop of `chat-ui`'s check).
 3. Otherwise one summary request, as compaction decision 5 makes it (same model, no tools, the package's
    prompt, cut tool output, the window budget, the retry with the older half left out when the summary request
-   itself overflows), with the focus appended to the transcript as the participant's request, fenced, never as
-   an instruction of the system prompt. It counts towards the run's usage limits and is checked before it is
+   itself overflows), with the focus appended to the transcript as the participant's request, fenced with a
+   fence longer than any backtick run inside, never as an instruction of the system prompt. It counts towards the run's usage limits and is checked before it is
    sent.
 4. It streams `RUN_STARTED`, the marker's three events (compaction decision 7), back to back once the summary is
    complete, then `RUN_FINISHED`. A failed summary request is `RUN_ERROR`, sanitized as every error is.
 
 Any other `spe_command` gets `RUN_ERROR` "Unknown command." The run log's record has `compactions: [{trigger:
-"manual", focus, …}]`, the fields of compaction decision 11, `next_input_tokens` null, redacted as every
+"manual", focus, …}]` (`manual` a third trigger beside `threshold` and `overflow`), the fields of compaction
+decision 11, `next_input_tokens` null, redacted as every
 record is.
 
 ### A marker cut short

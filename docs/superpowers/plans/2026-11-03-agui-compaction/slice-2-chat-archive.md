@@ -152,9 +152,9 @@ test("a compacting run stopped after the marker: cancelled, the marker kept", as
 // summary the model continues from. The agent rewrites only such plain text messages into its cut point.
 export const MARKER_PREFIX = "spe-compaction-";
 
-export function isCompactionMarker(message: {
+export function isCompactionMarker<M extends {
   id?: string; role?: string; content?: unknown; toolCalls?: unknown[];
-}): boolean {
+}>(message: M): message is M & { content: string } {
   return message.role === "assistant" && typeof message.id === "string" && message.id.startsWith(MARKER_PREFIX)
     && typeof message.content === "string" && !message.toolCalls?.length;
 }
@@ -188,7 +188,7 @@ export function CompactionDivider({ summary }: { summary: string }) {
 
 function render(props: ComponentProps<typeof CopilotChatAssistantMessage>) {
   if (isCompactionMarker(props.message)) {
-    return <CompactionDivider summary={props.message.content as string} />;
+    return <CompactionDivider summary={props.message.content} />;
   }
   return <CopilotChatAssistantMessage {...props} />;
 }

@@ -262,7 +262,7 @@ stop (`platform/coder/README.md`). Testbed presets are `platform/coder/template/
 ### AG-UI agent frontend
 
 Built from plan `docs/plans/2026-10-15-agui-frontend.md` and spec
-`docs/specs/2026-10-15-agui-frontend-design.md` (§12: what implementation verified
+`docs/specs/2026-10-15-agui-frontend-design/` (§12: what implementation verified
 and changed) on branch `agent-agui-frontend`. The record of the work, every
 deviation from the plan with its cost if wrong, and the acceptance evidence is
 [`docs/plans/2026-10-15-agui-frontend-progress.md`](docs/plans/2026-10-15-agui-frontend-progress.md).

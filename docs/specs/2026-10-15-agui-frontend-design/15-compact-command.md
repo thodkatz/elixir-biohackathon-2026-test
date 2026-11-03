@@ -85,8 +85,9 @@ When the run input's `forwardedProps.spe_command.name` is `"compact"`, `app.py` 
    transcript pins and the summary quotes. And the prompt and the summary's frame say the participant asked for
    the summary, not that the conversation no longer fit (a manual variant of each). It counts towards the run's
    usage limits and is checked before it is sent.
-4. It streams the marker's three events (compaction decision 7), back to back once the summary is complete,
-   then `RUN_FINISHED`. A failed summary request is `RUN_ERROR`, sanitized as every error is. A run cancelled
+4. It streams the marker's three events (compaction decision 7, its id `spe-compaction-manual-<uuid4>`), back to
+   back once the summary is complete, then `RUN_FINISHED`. A failed summary request is `RUN_ERROR`, sanitized as
+   every error is. A run cancelled
    during the summary request (the stop button, or `chat-ui` going away) sends no marker events, and its run log
    record has the cancelled run's status and `compactions` empty.
 

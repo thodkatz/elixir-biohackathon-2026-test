@@ -541,7 +541,7 @@ class Script:
     @staticmethod
     def is_summary(messages):
         first = messages[0].parts[0]
-        return isinstance(first, SystemPromptPart) and first.content == cmp.SUMMARY_PROMPT
+        return isinstance(first, SystemPromptPart) and first.content in (cmp.SUMMARY_PROMPT, cmp.SUMMARY_PROMPT_MANUAL)
 
     def function(self, messages, info):
         assert self.is_summary(messages), "the agent's requests are streamed"
@@ -562,8 +562,7 @@ class Script:
 
 
 def _framed(message):
-    return any(isinstance(p, UserPromptPart) and isinstance(p.content, str) and p.content.startswith(cmp.FRAME)
-               for p in message.parts)
+    return any(isinstance(p, UserPromptPart) and cmp.is_framed(p.content) for p in message.parts)
 
 
 def window(tokens, **over):

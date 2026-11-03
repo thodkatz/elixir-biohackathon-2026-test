@@ -10,8 +10,8 @@ there was one), it re-renders that directory in place:
 
     write_agui_run.py <run dir> <run dir>
 
-Writes index.md (one row per session: title, tags, created, runs, state),
-chats/NN-<title>.md and .json (NN in created_at order; the .json is the
+Writes index.md (one row per session: title, tags, created, runs, compactions,
+state), chats/NN-<title>.md and .json (NN in created_at order; the .json is the
 session file as stored), agui-sessions/ (the raw files, untouched) and
 agent-runs.jsonl. Hidden and deleted sessions are included. Stdlib only;
 slug() and fence() come from write_run.py in the same directory.

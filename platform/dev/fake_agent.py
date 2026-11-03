@@ -8,7 +8,9 @@ The model runs one `run_command` per turn and then answers; a message containing
 "slow" streams its answer in SLOW_STEPS chunks, SLOW_STEP_SECONDS apart (about 10 s),
 for stopping, closing or archiving a run in progress; a message containing "compact"
 runs a command with a long output, so the history passes the scripted window
-(COMPACT_WINDOW tokens) and the agent compacts it with a scripted summary. The run log
+(COMPACT_WINDOW tokens) and the agent compacts it with a scripted summary (once per
+session: in a session that already compacted, "compact" answers "compacted" without
+running the command, as the summary stays in the history). The run log
 goes to a temporary directory, or to --run-log PATH; --key defaults to
 $SPE_AGENT_API_KEY, so the key need not sit in argv.
 """
@@ -67,7 +69,8 @@ def fake_sandbox(request: httpx.Request) -> httpx.Response:
 def summarise(messages, info) -> ModelResponse:
     """The compaction's summary request: system prompt SUMMARY_PROMPT, the transcript as the user part."""
     parts = messages[0].parts
-    assert isinstance(parts[0], SystemPromptPart) and parts[0].content == SUMMARY_PROMPT, "not a summary request"
+    if not (isinstance(parts[0], SystemPromptPart) and parts[0].content == SUMMARY_PROMPT):
+        raise RuntimeError("not a summary request")
     text = str(parts[-1].content)
     latest = next((line for line in reversed(text.splitlines()) if "compact" in line.lower()), "")
     return ModelResponse(parts=[TextPart(

@@ -21,7 +21,7 @@ export function CompactionDivider({ summary }: { summary: string }) {
 
 function render(props: ComponentProps<typeof CopilotChatAssistantMessage>) {
   if (isCompactionMarker(props.message)) {
-    return <CompactionDivider summary={props.message.content as string} />;
+    return <CompactionDivider summary={props.message.content} />;
   }
   return <CopilotChatAssistantMessage {...props} />;
 }

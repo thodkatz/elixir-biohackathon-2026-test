@@ -55,12 +55,11 @@ export function classify(conv: Conversation | null, client: Message[]): Classifi
   // An anchor inside a run moves back to the last boundary on its path; the journal's messages after that
   // boundary are deleted, so the agent is never sent a dangling tool call.
   const cut: string[] = [];
-  if (conv && anchor !== null) {
-    const full = pathTo(conv, anchor);
-    while (full.length > 0 && !isBoundary(conv, full.at(-1)!.id)) cut.unshift(full.pop()!.id);
-    anchor = full.at(-1)?.id ?? null;
-  }
   const path = conv ? pathTo(conv, anchor) : [];
+  if (conv) {
+    while (path.length > 0 && !isBoundary(conv, path.at(-1)!.id)) cut.unshift(path.pop()!.id);
+    anchor = path.at(-1)?.id ?? null;
+  }
 
   const ignored: Ignored[] = [];
   const newMessages: Message[] = [];
@@ -85,13 +84,9 @@ export function classify(conv: Conversation | null, client: Message[]): Classifi
     if (id !== null) seen.add(id);
   }
 
-  const deleted = new Set(cut);
-  for (const message of path) if (!seen.has(message.id)) deleted.add(message.id);
-  for (const id of [...path.map((m) => m.id), ...cut]) {
-    if (deleted.has(id)) {
-      ignored.push({ kind: "deleted", message: id });
-      deleted.delete(id);
-    }
-  }
+  // Deleted, in path order: the path's messages the client left out, then every cut message (the path and the
+  // cut are disjoint).
+  for (const message of path) if (!seen.has(message.id)) ignored.push({ kind: "deleted", message: message.id });
+  for (const id of cut) ignored.push({ kind: "deleted", message: id });
   return { anchor, path, newMessages, ignored };
 }

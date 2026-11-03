@@ -76,7 +76,7 @@ Every task's requirements include these.
   work (2026-11-02): slice 1's summary sample, slice 2's early output, slice 3's decision 13 check. Nothing else
   calls a model, except slice 3, task 3: a de.NBI session on qwen that compacts (the user's request, 2026-11-03).
 - **The dev VM's instance** is redeployed in place with `create.yml` from the main checkout and
-  `-e spe_agui_source_dir=<worktree>` (`AGENTS.md`, *Worktrees and deploying*). No cloud instance is created or
+  `-e spe_agui_source_dir=<worktree>/platform/agui` (`AGENTS.md`, *Worktrees and deploying*). No cloud instance is created or
   destroyed.
 - **Upstream-clean:** code, READMEs and Ansible comments name nothing fork-only.
 - **Rulings:** a departure from this plan is recorded in the slice's handoff, as *decision, why, cost if wrong*,

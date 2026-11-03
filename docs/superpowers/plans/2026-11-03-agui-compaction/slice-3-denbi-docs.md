@@ -190,7 +190,7 @@ Paid on de.NBI's quota: a scripted session of ordinary commands, no participant 
 
 - [ ] **Step 0: the instance.** Use a running de.NBI AG-UI instance on `qwen3.8-27b` (the main checkout's
   `instances/denbi-agui-01.yml`, if it is up) and redeploy its agent and chat from this slice's worktree
-  (`-e spe_agui_source_dir=<worktree>`). If none is running, creating one is a cloud instance the user has not yet
+  (`-e spe_agui_source_dir=<worktree>/platform/agui`). If none is running, creating one is a cloud instance the user has not yet
   approved for this check: ask on the PR (one comment, `next-session.sh --end --blocked <PR>`), do not create it.
 - [ ] **Step 1: the window.** Task 1's `spe_webui_model_context_tokens` is qwen's full window, so a scripted
   session would take many turns to pass 0.8 of it. For this check only, set `spe_agent_context_window_tokens:
@@ -242,7 +242,7 @@ slice 2's early output, cited, not repeated.
 ```bash
 cd /workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test/platform/ansible
 ansible-playbook playbooks/create.yml -e @instances/dev-local.yml -e spe_agent_max_output_bytes=<C> \
-  -e spe_agui_source_dir=$PWD/../../.claude/worktrees/impl-agui-compaction-3-denbi-docs </dev/null
+  -e spe_agui_source_dir=$PWD/../../.claude/worktrees/impl-agui-compaction-3-denbi-docs/platform/agui </dev/null
 ```
 
 - [ ] **Step 2: the overflow.** In the chat UI (Playwright or by hand, screenshots into `evidence/slice-3/`), a

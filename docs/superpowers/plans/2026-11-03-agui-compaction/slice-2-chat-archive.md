@@ -670,7 +670,7 @@ tokens, under $0.10. No cloud instance is created or destroyed.
 ```bash
 cd /workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test/platform/ansible
 ansible-playbook playbooks/create.yml -e @instances/dev-local.yml \
-  -e spe_agui_source_dir=$PWD/../../.claude/worktrees/impl-agui-compaction-2-chat-archive </dev/null
+  -e spe_agui_source_dir=$PWD/../../.claude/worktrees/impl-agui-compaction-2-chat-archive/platform/agui </dev/null
 ```
 
 - [ ] **Step 2: run the session.** With the chat UI's URL and compose file as `docs/getting-started.md` gives

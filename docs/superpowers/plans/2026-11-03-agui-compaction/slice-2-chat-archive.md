@@ -556,7 +556,7 @@ def check_compaction(r: Run) -> None:
     assert texts.index(COMPACTION_XSS) < texts.index(COMPACTED) < texts.index("The conversation was compacted."), texts
     sid = r.url_session()
     rec = r.wait_runs(sid, 1)
-    markers = [m for m in rec["messages"] if m["id"].startswith("spe-compaction-")]
+    markers = [m for m in rec["messages"] if str(m.get("id") or "").startswith("spe-compaction-")]
     assert [m["role"] for m in markers] == ["assistant"] and "Scripted summary" in markers[0]["content"], rec
     assert rec["title"] == COMPACTION_XSS, rec["title"]
     page.reload()
@@ -600,6 +600,7 @@ def compaction_live(r: Run, turns: int = 8) -> None:
         expect(page.get_by_role("button", name="New chat")).to_be_enabled(timeout=120_000)
         if page.locator(".spe-compaction").count():
             break
+    assert page.locator(".spe-compaction").count(), f"no compaction after {turns} turns"
     # One turn can compact more than once: the model reads a truncated output again and the window fills again.
     expect(page.locator(".spe-compaction").first).to_be_visible()
     r.shot("live-compaction")

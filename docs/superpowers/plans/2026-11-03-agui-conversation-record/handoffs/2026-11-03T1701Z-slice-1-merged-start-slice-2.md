@@ -17,6 +17,13 @@ middleware replacing `input.messages` decides what the agent receives:
   calls and one result, then cancelled, anchor at that result and send the agent a dangling call, against §13
   step 2. *Cost if wrong:* an anchor that could have stayed moves one run back (its reply recorded `deleted`).
   Task 3's text, `interfaces.md`, ruling 6 in the README, §13 step 2 and clarification 6 say the new rule.
+- **A run without `run_end` is no boundary at its last message** (#22's review, finding 1; clarification 7).
+  *Decision:* `isBoundary` also requires the run to have ended. *Why:* a concurrent run could anchor at a
+  streaming run's partial reply, which then gains a tool call answered only on the first run's branch, so a
+  later run sent the agent a dangling call. *Cost if wrong:* a run anchored at a crashed run's reply moves back
+  to that run's user message and records the reply `deleted`. The review round's other findings and the
+  deferred minors were fixed in #22 or landed in slice 3's task 1 (step 5) and `BACKLOG.md`; the list is #22's
+  review comment.
 - **Comments under `platform/` may cite the spec's decisions and sections** ("decision 5", "§13"), not the plan's
   slices: the spec lives in `docs/specs/` and goes upstream (`AGENTS.md`, *Overrides*). Task 1's comment was
   reworded from "slice 3's recorder" to "the run route's recorder".

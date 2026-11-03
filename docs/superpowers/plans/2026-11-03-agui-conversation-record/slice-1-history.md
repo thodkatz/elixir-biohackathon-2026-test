@@ -803,8 +803,10 @@ Nothing uses it until the route moves to journals (slice 3)."
   - `isBoundary`: a user message, or the last id of some run's `added`, but only when every tool call id any
     message that run added holds is answered by a `tool` message the same run added (a call the last message
     itself holds, with nothing later in the run to answer it, is the special case this excludes: a run
-    cancelled, failed or cut mid tool call); earlier runs need no check; so the agent is never sent a dangling
-    tool call (§13); log lines name ids, never content.
+    cancelled, failed or cut mid tool call), and only once that run has a `run_end` (a run still streaming or
+    cut is none: a concurrent run must not anchor at a partial reply that later gains a tool call; #22's
+    review, clarification 7); earlier runs need no check; so the agent is never sent a dangling tool call
+    (§13); log lines name ids, never content.
 
 - [ ] **Step 1: write the failing test.** Create `CHAT/lib/rebuild.test.ts`:
 

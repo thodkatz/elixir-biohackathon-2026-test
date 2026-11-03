@@ -72,7 +72,8 @@ the task text it changes.
    the run continued; (c) messages cut when the anchor moves back to a boundary are `deleted` even if the client
    sent them; (d) a message without a string id is `fabricated`, and a repeated new id counts once; (e) `ignored`
    lists client-order entries first, then `deleted` in path order. A run's last message is no boundary while a
-   tool call the run made has no result in that run (`isBoundary`). Slice 1 folds them into §13 step 2 with a
+   tool call the run made has no result in that run, nor while the run has no `run_end` (`isBoundary`; the
+   second rule from #22's review, clarification 7). Slice 1 folds them into §13 step 2 with a
    clarification. *Cost if wrong:* an analyst
    cannot see that a client resent an unchanged message from another branch; recording it later is one more
    `ignored` kind and its rendering in `write_run.py`, absent from journals written before.

@@ -82,7 +82,8 @@ export function rebuildText(id: string, text: string): Promise<Conversation>;  /
 export function pathTo(conv: Conversation, id: string | null): Message[];   // root → id, inclusive; [] for null
 // A boundary: a user message, or a run's last added message, but only when every tool call id any message
 // that run added holds is answered by a `tool` message the same run added (a run cancelled, failed or cut
-// mid tool call leaves one unanswered), so no dangling tool call is sent.
+// mid tool call leaves one unanswered), and only once that run has a `run_end` (a run still streaming or cut
+// is none), so no dangling tool call is sent.
 export function isBoundary(conv: Conversation, id: string): boolean;
 export function branchOfTip(conv: Conversation): Message[];                 // pathTo(conv, conv.tip)
 ```

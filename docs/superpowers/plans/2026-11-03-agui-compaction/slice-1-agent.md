@@ -918,6 +918,15 @@ async def test_usage_counts_summary(tmp_path):
     assert record["usage"]["requests"] == 3  # two agent requests and the summary
 
 
+async def test_usage_counts_summary_tokens(tmp_path):
+    # Decision 5: the summary's tokens are the run's. FunctionModel counts the words of a response.
+    (tmp_path / "short").mkdir(); (tmp_path / "long").mkdir()
+    await compact_run(tmp_path / "short", Script(), **window(6000))
+    await compact_run(tmp_path / "long", Script(summary="word " * 300), **window(6000))
+    short, long = log_records(tmp_path / "short")[0]["usage"], log_records(tmp_path / "long")[0]["usage"]
+    assert long["output_tokens"] - short["output_tokens"] >= 299
+
+
 async def test_request_limit_checked_before_summary(tmp_path):
     script = Script()
     evs = await compact_run(tmp_path, script, limits={"request_limit": 2}, **window(6000))
@@ -1220,6 +1229,14 @@ async def test_overflow_without_a_window_still_compacts(tmp_path):
     assert terminal(evs) == ["RUN_FINISHED"]  # build() sets no window
 
 
+async def test_disabled_overflow_is_not_retried(tmp_path):
+    script, evs = await overflow_run(tmp_path, [ModelHTTPError(400, "m", body=ANTHROPIC_TOO_LONG)],
+                                     **window(6000, enabled=False))
+    assert terminal(evs) == ["RUN_ERROR"]
+    assert script.summaries == [] and script.retries == []
+    assert cmp.STILL_TOO_LONG not in next(e for e in evs if e["type"] == "RUN_ERROR")["message"]
+
+
 async def test_unlisted_400_is_not_retried(tmp_path):
     script, evs = await overflow_run(tmp_path, [ModelHTTPError(400, "m", body={"error": {"message": "bad tool"}})])
     assert terminal(evs) == ["RUN_ERROR"]
@@ -1471,6 +1488,17 @@ async def test_later_run_cuts_at_marker(tmp_path):
     assert BIG not in str(sent)
 
 
+async def test_later_run_estimates_after_the_marker(tmp_path):
+    # Decision 2: the estimate starts after the marker. Counted from the start, BIG alone (≈ 5,000) would be
+    # past the trigger (4,800) and the run would compact; from the marker on it is ≈ 3,000.
+    script = Script(calls=0)
+    app, _ = build(tmp_path, model=script.model(), **window(6000))
+    async with running(app) as client:
+        await until_status(client, 200)
+        evs = await post_run(client, messages=chat_history_after_compaction())
+    assert terminal(evs) == ["RUN_FINISHED"] and script.summaries == []
+
+
 async def test_only_plain_text_markers_are_rewritten(tmp_path):
     history = chat_history_after_compaction()
     history[3] = {**history[3], "toolCalls": [{"id": "x", "type": "function",
@@ -1491,7 +1519,7 @@ async def test_run_log_compactions(tmp_path):
     assert record["answer"] == "final answer"  # the marker's text is not in the answer
     (entry,) = record["compactions"]
     assert entry["trigger"] == "threshold" and entry["summary"] == "SUMMARY"
-    assert entry["estimated_tokens"] >= 800 and entry["messages_cut"] >= 3
+    assert entry["estimated_tokens"] >= 4800 and entry["messages_cut"] >= 3
     assert set(entry["usage"]) == {"input_tokens", "output_tokens"}
     assert isinstance(entry["next_input_tokens"], int)
 

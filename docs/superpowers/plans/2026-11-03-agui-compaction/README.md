@@ -8,7 +8,7 @@ history with the same model, sends the model the summary instead, and marks the 
 the chat shows it, the session record keeps it and later runs cut there.
 
 **Spec:** [`docs/superpowers/specs/2026-11-03-agui-compaction-design.md`](../../specs/2026-11-03-agui-compaction-design.md)
-(decisions 1–13; latest clarification: 6; slice 1 folds 1–4 and 6, slice 3 folds 5). Each slice file links the
+(decisions 1–13; latest clarification: 7; slice 1 folds 1–4, 6 and 7, slice 3 folds 5). Each slice file links the
 sections it implements.
 
 **Architecture.** One new module, `platform/agui/pydantic-ai-agent/src/spe_agent/compaction.py`: the token
@@ -126,6 +126,7 @@ def estimate_tokens(messages: list[ModelMessage], extra_chars: int = 0) -> int: 
 def build_sent(messages: list[ModelMessage]) -> list[ModelMessage]: ...
 def compacted(history: list[ModelMessage], summary: str) -> list[ModelMessage]: ...
 def transcript(messages: list[ModelMessage], *, max_chars: int | None = None, drop: int = 0) -> str: ...
+def transcript_budget(cfg: CompactionCfg) -> int | None: ...  # transcript chars that fit beside summary_max_tokens
 def markers_to_activities(run_input: RunAgentInput) -> RunAgentInput: ...
 def marker_events(summary: str) -> list[BaseEvent]: ...   # TEXT_MESSAGE_START/CONTENT/END, role assistant
 
@@ -171,7 +172,7 @@ marker as `## Compacted`; `index.md`'s columns become `| # | Session | Tags | Cr
 | Path | Slice | What |
 |---|---|---|
 | `copilotkit-chat/lib/test-agent.ts`, `lib/recorder.test.ts` | 1 | the round-trip test (`compact`, `activity` keywords) |
-| `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` | 1 | clarifications 1–4 and 6 (the plan's proposed ones) |
+| `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` | 1 | clarifications 1–4 and 6 (the plan's proposed ones), and 7 |
 | `pydantic-ai-agent/src/spe_agent/config.py`, `tests/test_config.py` | 1 | `CompactionCfg` |
 | `ansible/inventory/group_vars/all.yml`, `ansible/roles/agui/tasks/main.yml`, `roles/agui/tasks/checks.yml` | 1 | `spe_agent_compaction_*`, the rendered block, the check that shows it |
 | `pydantic-ai-agent/src/spe_agent/compaction.py`, `compaction_prompt.md`, `tests/test_compaction.py` | 1 | the module, the prompt, unit tests |

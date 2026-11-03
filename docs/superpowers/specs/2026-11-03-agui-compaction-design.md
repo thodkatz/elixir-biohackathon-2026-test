@@ -1,6 +1,6 @@
 # AG-UI compaction — design
 
-**Status:** approved, PR #15. **Latest clarification:** 6 (2026-11-03, slice 1).
+**Status:** approved, PR #15. **Latest clarification:** 7 (2026-11-03, slice 1).
 Read against this repo at `4a59a6c` (`main`), with `pydantic-ai-slim` 2.56.0, `ag-ui-protocol` 0.1.22,
 `@ag-ui/core`/`@ag-ui/client` 1.0.2 and CopilotKit 1.79.0 as pinned there.
 
@@ -34,7 +34,7 @@ archive renders it. The browser always keeps and sends the full history; only wh
 | 2 | Proactive trigger: before each model request, estimated tokens of what would be sent ≥ `trigger_ratio` × `context_window_tokens`; off while `context_window_tokens` is unset | [Trigger](#2-trigger) | `pytest`: estimates just under and just over the trigger compact 0 and 1 times; with `context_window_tokens: null` a large history is sent uncompacted; inside one run, tool results that push the history over the trigger compact before the next request, not only at the run's start; the usage anchor is the latest response after our latest marker |
 | 3 | Reactive trigger: a request the provider rejects as too long (a fixed list of overflow errors) is caught where the request is sent (a wrapper around the request's model, set by `wrap_model_request`), compacted and sent once more through the same streamed request, whether or not a window is configured | [Trigger](#2-trigger) | `pytest`, through `AGUIAdapter.run_stream`: a model raising each listed overflow error (Anthropic, OpenAI, vLLM wording) once, then answering, gives one compaction and a completed run whose answer reaches the AG-UI stream; an unlisted 400 is not retried and reaches `RUN_ERROR` as today; overflow again after the retry gives `RUN_ERROR` with the message of decision 6 |
 | 4 | What is sent after a compaction: the system prompt, one user message holding the framed summary, the latest user request verbatim if it lies before the cut, then the messages after our latest marker, unchanged; no `CompactionPart` (ours or anyone's) is ever sent | [What the model sees](#3-what-the-model-sees) | `pytest`: requests after a compaction, in the same run and in a later run rebuilt from AG-UI messages, have exactly that shape; the system prompt is present in both; a marker from another producer (`provider_name` not `spe-agent`, `anthropic` included) is neither a cut point nor sent; a marker merged into the following `ModelResponse` on reload cuts at part level; a marker followed directly by a user message (a run that failed after compacting) cuts the same way |
-| 5 | The summary request uses the same model, no tools, a fixed prompt kept in the package, a transcript with each tool result cut to 2000 characters and marked as tool output, at most `summary_max_tokens` of output; it counts as a request towards the run's usage and limits, checked before it is sent | [The summary request](#4-the-summary-request) | `pytest`: the summary request carries no tool definitions, the cut and marked tool results and the package prompt; `result.usage.requests` and tokens after a compacting run include it; a run at `request_limit` - 1 that needs a compaction ends with the usage-limit error before the summary request is sent; the framed summary says it is not the participant's words |
+| 5 | The summary request uses the same model, no tools, a fixed prompt kept in the package, a transcript with each tool call's arguments and each tool result cut to 2000 characters, results marked as tool output, sized so that it and `summary_max_tokens` of output fit the window (clarification 7), at most `summary_max_tokens` of output; it counts as a request towards the run's usage and limits, checked before it is sent | [The summary request](#4-the-summary-request) | `pytest`: the summary request carries no tool definitions, the cut and marked tool results and the package prompt; `result.usage.requests` and tokens after a compacting run include it; a run at `request_limit` - 1 that needs a compaction ends with the usage-limit error before the summary request is sent; the framed summary says it is not the participant's words |
 | 6 | At most one compaction per model request and three per run; past that the run fails with "The conversation is still too long after compacting it. Start a new chat." | [Trigger](#2-trigger) | `pytest`: a summary that is itself past the trigger does not compact again for the same request; a fourth compaction in one run gives `RUN_ERROR` with that message |
 | 7 | The marker is an assistant text message (`messageId` `spe-compaction-<uuid4>`, content the summary), emitted as `TEXT_MESSAGE_START`/`CONTENT`/`END` before the events of the model response it preceded, so it is stored in the chat's history; on input the agent rewrites it into pydantic-ai's `pydantic_ai_compaction` activity, read as a `CompactionPart` (clarification 1) | [The marker](#5-the-marker) | `pytest` (agent): the event stream of a compacting run has the three marker events right before that response's first event; feeding the run's messages, marker included, back in as a new run's input cuts there. `npm test` (chat): a marker recorded through CopilotKit's runtime path is stored, and sent back to the agent on the next run of the reopened session |
 | 8 | The chat renders a compaction marker (an assistant message with id prefix `spe-compaction-`) as a divider ("Earlier conversation compacted") with the summary in a collapsed `<details>`, as text; nothing else in the chat changes | [The chat](#6-the-chat) | Playwright against `fake_agent.py` scripted to emit a compaction: the divider appears in place, live and after a reload; expanding shows the summary as literal text (a summary holding `<img src=x onerror=…>` shows the markup); screenshots light and dark in the slice's handoff |
@@ -164,14 +164,18 @@ One request to the same `Model`, outside the agent's graph (`model.request`), wi
 
 - a system prompt from `src/spe_agent/compaction_prompt.md`, shipped in the package, not configurable;
 - one user message holding a plain-text transcript of what would be sent: user and assistant text in full,
-  each tool call with its arguments, each tool result marked as tool output and cut to its first and last
-  1000 characters with `[… N characters cut …]` between;
+  each tool call with its arguments and each tool result marked as tool output, both cut to their first and
+  last 1000 characters with `[… N characters cut …]` between;
 - no tool definitions; `max_tokens` = `summary_max_tokens`.
 
-If the transcript itself is past the trigger, its oldest entries after the previous summary are left out,
-oldest first, until it fits, except the participant's latest request and the last entry (clarification 4),
-and the transcript says how many were left out. With no window configured, a summary request that the
-provider rejects as too long is retried once with the older half of those entries left out the same way.
+With a window configured, the request and the summary it asks for must fit it together (vLLM refuses a
+prompt plus `max_tokens` past `max_model_len`): the transcript gets at most
+min(`trigger_ratio` × window, window − `summary_max_tokens`) tokens, less the summary prompt's estimated
+tokens, at three characters a token (`transcript_budget`; clarification 7). If the transcript is longer, its
+oldest entries after the previous summary are left out, oldest first, until it fits, except the participant's
+latest request and the last entry (clarification 4), and the transcript says how many were left out; when
+those kept entries alone are longer, it is sent longer. A summary request that the provider rejects as too
+long, window or not, is retried once with the older half of those entries left out the same way.
 
 **Usage.** The request counts like any model request: before it is sent, the capability checks the run's
 `UsageLimits` (`check_before_request`) itself, since the graph's check ran before the hook; after it, it
@@ -302,52 +306,64 @@ this work (`docs/guides/contributing-upstream.md`). No upstream PR is part of th
 
 ## Clarifications
 
-### 1. The marker is an assistant message, not an activity message — folded
-
-**2026-11-03, slice 1, task 1.** `@ag-ui/client` 1.0.2 `AbstractAgent.prepareRunAgentInput` drops every
-`role: "activity"` message from a run's input, in the browser and again in CopilotKit's runtime
-(`handle-run.mjs:40`, `runner/in-memory.mjs:387`), and the recorder overwrites the stored `messages` with what
-the run ends with, so an `ACTIVITY_SNAPSHOT` marker would neither reach the agent again nor stay in the record.
-The fallback named in *Inputs for the plan* applies: an assistant text message with id prefix `spe-compaction-`,
-which round-trips unchanged and which the agent rewrites into pydantic-ai's compaction activity on input.
-`lib/recorder.test.ts`, "a compaction marker survives the round trip", pins both. Decisions 7–10, §5, §6, §7 and
-the glossary are rewritten to match.
-
-### 2. In-run, the marker is not put into `ctx.messages` — folded
-
-**2026-11-03, slice 1, task 4.** The capability sets the run's pydantic-ai history to what is sent (system
-prompt, framed summary, latest user request), so later requests of the same run start from it and the history
-holds no `CompactionPart` that a model could be sent. The marker exists only in the AG-UI stream and, on later
-runs, in the input. `test_compacts_inside_a_run` and `test_fourth_compaction_fails` pin the in-run behaviour.
-
-### 3. On reload the marker joins the preceding response — folded
-
-**2026-11-03, slice 1, task 6.** `MessagesBuilder.add` (`pydantic_ai/ui/_messages_builder.py:31-44`) appends a
-part to the last message when that message is a `ModelResponse`, else starts a new one. A marker after a tool
-result therefore starts a response that the following answer joins; a marker right after an assistant message
-joins that message's response. The cut is at part level in both cases. `test_later_run_cuts_at_marker` and
-`test_build_sent_marker_merged_into_a_response_cuts_at_part_level` pin it.
-
-### 4. A shortened transcript keeps the latest request — folded
-
-**2026-11-03, slice 1, task 3.** Leaving out the oldest entries first would drop the participant's request
-before the tool output it started, and the summary could no longer say what was asked. `transcript` never leaves
-out the previous summary, the latest user entry or the last entry; the rest go oldest first.
-`test_transcript_keeps_the_latest_request` pins it.
-
-### 6. The reactive retry goes through the streamed request, inside a wrapper model — folded
-
-**2026-11-03, slice 1, task 5** (numbered 6 because 3–4 are proposed for task 6 and 5 is reserved for slice 3).
-In pydantic-ai 2.56.0 a streamed request is opened lazily, in the task that reads the stream
-(`_ContinuationStreamedResponse`, `models/_continuation.py`), after the graph has marked the stream ready
-(`_agent_graph.py` ≈ 1465–1475). The provider's error therefore surfaces in that task, and `wrap_model_request`
-only sees its own cancellation: a `try` around the handler never catches an overflow. *Inputs for the plan*
-allowed the retry to go through the streaming request instead, and it does: `wrap_model_request` sets the
-request's model to a `WrapperModel` whose `request_stream` (and `request`) catches a listed overflow when the
-inner request opens, compacts with the trigger `overflow`, writes `ctx.messages`, and opens the inner request
-once more with the compacted messages. One compaction per request still holds: a request the proactive trigger
-compacted, or the retry itself, overflowing again ends the run with decision 6's message; an unlisted error is
-raised untouched. The graph counts the retried response as the step's one request; the rejected one produced
-nothing and is not counted. Decision 3's row, §1 and §2 are rewritten. `test_overflow_compacts_and_retries`,
-`test_overflow_after_the_retry_fails`, `test_overflow_after_a_proactive_compaction_fails` and
-`tests/test_compaction_providers.py` pin it.
+1. **The marker is an assistant text message, not an activity message** (2026-11-03; slice 1/3). The marker is
+   an assistant text message with id prefix `spe-compaction-`, which round-trips unchanged and which the agent
+   rewrites into pydantic-ai's compaction activity on input. *Reason:* `@ag-ui/client` 1.0.2
+   `AbstractAgent.prepareRunAgentInput` drops every `role: "activity"` message from a run's input, in the
+   browser and again in CopilotKit's runtime (`handle-run.mjs:40`, `runner/in-memory.mjs:387`), and the
+   recorder overwrites the stored `messages` with what the run ends with, so an `ACTIVITY_SNAPSHOT` marker would
+   neither reach the agent again nor stay in the record; the fallback named in *Inputs for the plan* applies
+   (found by task 1). `lib/recorder.test.ts`, "a compaction marker survives the round trip", pins both.
+   *Amends:* decisions 7–10, §5, §6, §7, the glossary.
+   *Status:* folded.
+2. **In-run, the marker is not put into `ctx.messages`** (2026-11-03; slice 1/3). On a compaction the capability
+   sets the run's pydantic-ai history to what is sent (system prompt, framed summary, latest user request), so
+   later requests of the same run start from it; the marker exists only in the AG-UI stream and, on later runs,
+   in the input. *Reason:* the history then holds no `CompactionPart` that a model could be sent (found by
+   task 4). `test_compacts_inside_a_run` and `test_fourth_compaction_fails` pin it.
+   *Amends:* §3 *Making one*.
+   *Status:* folded.
+3. **On reload the marker joins the preceding response, and the cut is at part level** (2026-11-03; slice 1/3).
+   A marker after a tool result starts a response that the following answer joins; a marker right after an
+   assistant message joins that message's response; either way the parts after it are kept and the ones before
+   it cut. *Reason:* `MessagesBuilder.add` (`pydantic_ai/ui/_messages_builder.py:31-44`) appends a part to the
+   last message when that message is a `ModelResponse`, else starts a new one (found by task 6).
+   `test_later_run_cuts_at_marker` and `test_build_sent_marker_merged_into_a_response_cuts_at_part_level` pin
+   it. *Amends:* §3.
+   *Status:* folded.
+4. **A shortened transcript keeps the latest request** (2026-11-03; slice 1/3). `transcript` never leaves out
+   the previous summary, the latest user entry or the last entry; the rest go oldest first. *Reason:* leaving
+   out the oldest entries first would drop the participant's request before the tool output it started, and the
+   summary could no longer say what was asked (found by task 3). `test_transcript_keeps_the_latest_request`
+   pins it. *Amends:* §4.
+   *Status:* folded.
+<!-- 5: reserved, proposed on PR #16, slice 3/3 folds it -->
+6. **The reactive retry goes through the streamed request, inside a wrapper model** (2026-11-03; slice 1/3;
+   numbered 6 because 3–4 were then proposed for task 6 and 5 is reserved for slice 3). `wrap_model_request`
+   sets the request's model to a `WrapperModel` whose `request_stream` (and `request`) catches a listed overflow
+   when the inner request opens, compacts with the trigger `overflow`, writes `ctx.messages`, and opens the
+   inner request once more with the compacted messages. One compaction per request still holds: a request the
+   proactive trigger compacted, or the retry itself, overflowing again ends the run with decision 6's message;
+   an unlisted error is raised untouched. The graph counts the retried response as the step's one request; the
+   rejected one produced nothing and is not counted. *Reason:* in pydantic-ai 2.56.0 a streamed request is
+   opened lazily, in the task that reads the stream (`_ContinuationStreamedResponse`,
+   `models/_continuation.py`), after the graph has marked the stream ready (`_agent_graph.py` ≈ 1465–1475), so
+   the provider's error surfaces in that task and a `try` around the handler in `wrap_model_request` never
+   catches it; *Inputs for the plan* allowed the retry to go through the streaming request instead (found by
+   task 5). `test_overflow_compacts_and_retries`, `test_overflow_after_the_retry_fails`,
+   `test_overflow_after_a_proactive_compaction_fails` and `tests/test_compaction_providers.py` pin it.
+   *Amends:* decision 3, §1, §2.
+   *Status:* folded.
+7. **The summary request fits the window, and an overflowing one is retried shorter, window or not**
+   (2026-11-03; slice 1/3). With a window, the transcript gets at most
+   min(`trigger_ratio` × window, window − `summary_max_tokens`) tokens less the summary prompt's estimated
+   tokens, at three characters a token (`transcript_budget`); tool-call arguments are cut like tool results;
+   and a summary request rejected as too long is sent once more with the older half left out whether or not a
+   window is set. *Reason:* the transcript was sized to the trigger alone, leaving no room for
+   `summary_max_tokens` of output or the summary prompt, and vLLM rejects a prompt plus `max_tokens` past
+   `max_model_len`; with a window set the summary request was not retried, so the raw error ended the run and
+   every later run of the session failed the same way (found by the whole-branch review of PR #17).
+   `test_budget_leaves_room_for_the_summary_and_its_prompt`, `test_summary_request_leaves_room_for_the_summary`,
+   `test_overflowing_summary_with_a_window_is_sent_shorter` and `test_transcript_cuts_tool_call_arguments` pin
+   it. *Amends:* decision 5, §4.
+   *Status:* folded.

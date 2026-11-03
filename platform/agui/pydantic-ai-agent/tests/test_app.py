@@ -821,6 +821,42 @@ async def test_overflowing_summary_without_a_window_is_sent_shorter(tmp_path):
     assert "User: now" in second
 
 
+async def test_overflowing_summary_with_a_window_is_sent_shorter(tmp_path):
+    # A window does not stop the summary request from being rejected as too long: it is sent once more.
+    script = Script(calls=0)
+    summarise = script.function
+    failed = []
+
+    def function(messages, info):
+        if not failed:
+            failed.append(messages)
+            raise too_long()
+        return summarise(messages, info)
+
+    script.function = function
+    history = [{"id": f"{role[0]}{i}", "role": role, "content": f"{role} turn {i}"}
+               for i in range(3) for role in ("user", "assistant")] + [{"id": "u9", "role": "user", "content": "now"}]
+    _, _, evs = await overflow_run(tmp_path, [too_long()], script=script, messages=history, **window(600000))
+    assert terminal(evs) == ["RUN_FINISHED"]
+    assert len(failed) == 1 and len(script.summaries) == 1
+    assert "earlier entries left out]" in script.summaries[0][0][-1].parts[-1].content
+
+
+async def test_summary_request_leaves_room_for_the_summary(tmp_path):
+    # 0.8 × 6000 = 4800 tokens of transcript plus 4096 of summary would not fit 6000: the transcript is shorter.
+    history = [{"id": f"{role[0]}{i}", "role": role, "content": f"{role} turn {i} " + "w" * 1500}
+               for i in range(4) for role in ("user", "assistant")]
+    script = Script()
+    app, _ = build(tmp_path, model=script.model(), **window(6000, summary_max_tokens=4096))
+    async with running(app) as client:
+        await until_status(client, 200)
+        evs = await post_run(client, messages=history + [{"id": "u9", "role": "user", "content": "do the task"}])
+    assert terminal(evs) == ["RUN_FINISHED"] and len(script.summaries) == 1
+    messages, _ = script.summaries[0]
+    sent_chars = len(cmp.SUMMARY_PROMPT) + len(messages[-1].parts[-1].content)
+    assert sent_chars // cmp.CHARS_PER_TOKEN + 4096 <= 6000
+
+
 # --- the marker in the stream, the cut on later runs, the run log -----------------------------
 
 def markers(evs, kind="TEXT_MESSAGE_START"):

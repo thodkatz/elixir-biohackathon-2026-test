@@ -1,15 +1,22 @@
 """compaction.py's pure parts: estimate, overflow list, what is sent, transcript."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from dataclasses import replace
+from types import SimpleNamespace
+
 import pytest
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
     CompactionPart, ModelRequest, ModelResponse, SystemPromptPart, TextPart, ToolCallPart, ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai.usage import RequestUsage
+from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
+from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.usage import RequestUsage, RunUsage
 
 from spe_agent import compaction as c
+from spe_agent.config import CompactionCfg
 
 
 def user(text):
@@ -152,6 +159,13 @@ def test_transcript_cuts_and_marks_tool_results():
     assert "Assistant: done" in text
 
 
+def test_transcript_cuts_tool_call_arguments():
+    command = "a" * 1000 + "b" * 500 + "c" * 1000
+    text = c.transcript([user("task"), said(call(cmd=command)), result(), said(TextPart("done"))])
+    assert "characters cut" in text and "b" * 100 not in text
+    assert 'Tool call run_command: {"command":"' + "a" * 100 in text
+
+
 def test_transcript_short_result_is_whole():
     assert "x" * 2000 in c.transcript([result(out="x" * 2000)])
 
@@ -184,3 +198,127 @@ def test_transcript_drop_leaves_out_that_many():
 
 def test_summary_prompt_ships_with_the_package():
     assert "verbatim" in c.SUMMARY_PROMPT and "data" in c.SUMMARY_PROMPT
+
+
+# --- the transcript's budget ------------------------------------------------------------------
+
+PROMPT_TOKENS = -(-len(c.SUMMARY_PROMPT) // c.CHARS_PER_TOKEN)
+
+
+def test_budget_without_a_window_is_unset():
+    assert c.transcript_budget(CompactionCfg()) is None
+
+
+def test_budget_leaves_room_for_the_summary_and_its_prompt():
+    # 0.8 × 6000 = 4800, but the summary's 4096 tokens leave 1904 for the request.
+    cfg = CompactionCfg(context_window_tokens=6000, trigger_ratio=0.8, summary_max_tokens=4096)
+    assert c.transcript_budget(cfg) == (1904 - PROMPT_TOKENS) * c.CHARS_PER_TOKEN
+
+
+def test_budget_is_the_trigger_when_the_window_is_large():
+    cfg = CompactionCfg(context_window_tokens=200000, trigger_ratio=0.8, summary_max_tokens=4096)
+    assert c.transcript_budget(cfg) == (160000 - PROMPT_TOKENS) * c.CHARS_PER_TOKEN
+
+
+def test_budget_is_never_negative():
+    cfg = CompactionCfg(context_window_tokens=1000, summary_max_tokens=4096)
+    assert c.transcript_budget(cfg) == 0
+
+
+# --- the capability, directly -----------------------------------------------------------------
+
+def run_ctx(messages):
+    return SimpleNamespace(deps=SimpleNamespace(compaction=c.CompactionRun()), messages=messages,
+                           usage_limits=None, usage=RunUsage())
+
+
+def request_context(model, messages):
+    return ModelRequestContext(model=model, messages=messages, model_settings=None,
+                               model_request_parameters=ModelRequestParameters())
+
+
+def summarising(messages, info):
+    return ModelResponse(parts=[TextPart("SUMMARY")])
+
+
+async def answering(messages, info):
+    yield "answer"
+
+
+async def test_history_is_left_alone_without_a_cut_or_a_compaction():
+    # The graph's request view is not written into the run's history when nothing was cut or compacted.
+    history = [user("one"), said(TextPart("a")), user("two")]
+    ctx = run_ctx(list(history))
+    view = [replace(m) for m in history]  # what the graph prepared: equal, not the same objects
+    capability = c.Compaction(cfg=CompactionCfg(), system_prompt="SYS")
+
+    async def handler(rc):
+        return said(TextPart("done"))
+
+    await capability.wrap_model_request(ctx, request_context=request_context(FunctionModel(summarising), view),
+                                        handler=handler)
+    assert all(a is b for a, b in zip(ctx.messages, history, strict=True))
+
+
+async def test_history_is_cut_at_a_marker():
+    history = [user("one"), said(TextPart("a"), ours("S")), user("two")]
+    ctx = run_ctx(list(history))
+    capability = c.Compaction(cfg=CompactionCfg(), system_prompt="SYS")
+
+    async def handler(rc):
+        return said(TextPart("done"))
+
+    await capability.wrap_model_request(ctx, request_context=request_context(FunctionModel(summarising),
+                                                                             list(history)), handler=handler)
+    assert shape(ctx.messages) == [[("UserPromptPart", c.frame("S")), ("UserPromptPart", "two")]]
+
+
+class Rejecting(FunctionModel):
+    """Rejects the first stream opened as too long; records what every opened stream was sent."""
+
+    def __init__(self):
+        super().__init__(summarising, stream_function=answering)
+        self.rejected, self.opened = False, []
+
+    @asynccontextmanager
+    async def request_stream(self, messages, model_settings, model_request_parameters, run_context=None):
+        if not self.rejected:
+            self.rejected = True
+            raise too_long()
+        self.opened.append(messages)
+        async with super().request_stream(messages, model_settings, model_request_parameters, run_context) as s:
+            yield s
+
+
+def too_long():
+    return ModelHTTPError(400, "m", body={"error": {"message": "prompt is too long"}})
+
+
+def reactive(model, history):
+    ctx = run_ctx(list(history))
+    capability = c.Compaction(cfg=CompactionCfg(), system_prompt="SYS")
+    return ctx, c._Reactive(model, capability, ctx, request_context(model, list(history)), False)
+
+
+async def test_a_continuation_after_recovery_is_sent_compacted():
+    # A continuation resends the messages as given plus the suspended response (_continuation.py:463).
+    history = [user("first-turn"), said(TextPart("a")), user("two")]
+    model = Rejecting()
+    ctx, wrapper = reactive(model, history)
+    async with wrapper.request_stream(list(history), None, ModelRequestParameters()):
+        pass
+    suspended = said(TextPart("partial"))
+    async with wrapper.request_stream([*history, suspended], None, ModelRequestParameters()):
+        pass
+    first, second = model.opened
+    assert first[0].parts[0].content.startswith(c.FRAME) and "first-turn" not in str(first)
+    assert second[:-1] == first and second[-1] is suspended
+
+
+async def test_an_overflow_on_a_continuation_is_not_compacted():
+    history = [user("one"), said(TextPart("a")), user("two"), said(TextPart("partial"))]
+    ctx, wrapper = reactive(Rejecting(), history)
+    with pytest.raises(ModelHTTPError):
+        async with wrapper.request_stream(list(history), None, ModelRequestParameters()):
+            pass
+    assert ctx.deps.compaction.records == [] and ctx.messages == history

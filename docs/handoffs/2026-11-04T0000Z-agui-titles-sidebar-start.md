@@ -53,7 +53,7 @@ after #29.
 
 - `denbi-agui-01` redeploy from `main` `cab5a1d` (conversation record) was started detached
   (`setsid nohup … create.yml -e @instances/denbi-agui-01.yml -e spe_min_free_gb=5`, log in the previous session's
-  scratchpad `…/scratchpad/redeploy.log`, ending in a line `EXIT <code>`); it was at "Agent and chat UI images
+  scratchpad `/var/tmp/claude-1000/-workspace-biohackathon-biohackathon-elixir-biohackathon-2026-test/164063b2-4063-40b9-8f78-4e2e8404b0ae/scratchpad/redeploy.log`, ending in a line `EXIT <code>`); it was at "Agent and chat UI images
   built". Check `ssh -F ~/.ssh/config ubuntu@agent-service-1 'docker compose -p spe-frontend ps'` (new image tags
   mean it landed). The VM's `/` had ~7 GB free; the preflight's 15 needs `-e spe_min_free_gb=5`. The LLM key comes
   from the portal (`docs/knowledge/denbi-llm-key.md`). The user views it through a tunnel to the VM's port 3000.

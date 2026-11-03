@@ -150,6 +150,10 @@ because Z." This file wins over the guides in `.methodology/shared/guides/`.
 - In this repo, **a PR that merges `upstream/main` is merged with a merge commit** instead of the squash in
   `development-workflow.md`, *Review and merge*, step 6, and `forge-github.md`, *Merge*, because a squash drops `upstream/main` as a parent and
   the next upstream merge conflicts on every commit again (`docs/guides/contributing-upstream.md`).
+- In this repo, **a spec meant to go upstream lives in `docs/specs/`** (upstream's layout), written without links
+  to fork-only files, instead of `docs/superpowers/specs/` in `development-workflow.md`, *Full mode*, because it
+  then ports unchanged; its plan stays in `docs/superpowers/plans/`. First used by the AG-UI conversation record
+  spec.
 
 ## Contributing upstream
 
@@ -187,6 +191,9 @@ is open (`docs/guides/contributing-upstream.md`, step 6).
   `impl/canary-eval-ladder-1-scoring`. Handoff: `ls docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs | tail -1`.
 - **AG-UI compaction** (Full mode): spec (#15), plan (#16) and slice 1/3 (#17, the agent) merged. **Next: slice 2/3**
   `impl/agui-compaction-2-chat-archive`. Handoff: `ls docs/superpowers/plans/2026-11-03-agui-compaction/handoffs | tail -1`.
+- **AG-UI conversation record** (Full mode): `chat-ui` owns the history as an append-only journal, the agent
+  stays stateless. **Now: spec** (#19, `spec/agui-conversation-record`), `docs/specs/2026-11-03-agui-conversation-record-design.md`;
+  waits on the user's `approved`. Handoff: `docs/handoffs/2026-11-03T1500Z-agui-conversation-record-spec.md`.
 - **Upstream PR kraatz #9** (`contrib/agui-token-cap-optional`): the AG-UI agent's token cap optional, off by
   default (fork #4); waits on upstream's review (`docs/guides/contributing-upstream.md`, step 6).
 - **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice; its *Next*, the ones due soon or

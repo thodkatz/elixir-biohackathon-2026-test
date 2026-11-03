@@ -150,3 +150,11 @@ in the parts it amends.
     wrong:* a future regression specific to the route's own concurrent-run handling would not be caught by a
     Playwright check, only by `npm test`'s recorder-level coverage, until the route is fixed. *Amends:* §13
     *Concurrency and branches*; decision 9 (true of `lib/recorder.ts`, not yet of the route). *Status:* folded.
+
+13. **The conversation record is built** (2026-11-03; the conversation record's slice 4/4).
+    Decisions 1–18 and the journal parts of 19–30 are implemented, and the archive copies live, with the barrier
+    only in the final archive `destroy.yml` runs (decision 30). The README's status and the decisions table's
+    introduction no longer say the record waits to be built, and §14 drops the sentence that kept the barrier
+    for every archive until then; no design changed. *Reason:* the plan's four slices merged and their acceptance
+    checks ran (the last on the development VM). *Amends:* README (status, *Decisions taken*), §14 *Export*.
+    *Status:* folded.

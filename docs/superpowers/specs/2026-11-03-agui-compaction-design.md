@@ -268,7 +268,8 @@ this work (`docs/guides/contributing-upstream.md`). No upstream PR is part of th
 ## Out of scope
 
 - A **manual "compact" action** in the chat (as `/compact` in Claude Code). It needs a run with no new user
-  message, which the recorder's title rule and the agent's run input do not have today. To `BACKLOG.md`.
+  message, which the recorder's title rule and the agent's run input do not have today. Designed since as
+  `/compact`, §15 of the living AG-UI spec (`docs/specs/2026-10-15-agui-frontend-design/`).
 - **Dropping or shortening old tool results** before summarising (Anthropic's context editing), as a cheaper
   first stage. To `BACKLOG.md`, to revisit if summary requests prove costly.
 - **Reading the window from the provider** (vLLM's `/v1/models` reports `max_model_len`): declined. One

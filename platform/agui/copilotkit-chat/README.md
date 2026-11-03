@@ -68,7 +68,8 @@ The sidebar's search filters by title (case-insensitive) and, as in Open WebUI, 
 session must have every one; typing `tag:` suggests the tags in use), lists pinned sessions first and then
 *Today*, *Yesterday*, *Previous 7 days* and *Older* by last change, and shows hidden sessions only with *Show
 hidden*. The chat header shows the open session's title, renamable in place, and the same `⋯` menu as its
-row. While a run is in progress, switching session and *New chat* are disabled; after a run the list is
+row; a New chat not yet recorded shows no title. A New chat's first finished run, once listed, makes one title
+call: the row shows the first message until the model's title arrives. While a run is in progress, switching session and *New chat* are disabled; after a run the list is
 fetched until it shows that run (up to 5 retries, 500 ms apart), else the error bar says the session could not
 be saved. If the runtime is not ready within 15 s, the error bar says it is unreachable.
 `platform/dev/e2e/sessions.py` drives all of it in a browser against the scripted agent.

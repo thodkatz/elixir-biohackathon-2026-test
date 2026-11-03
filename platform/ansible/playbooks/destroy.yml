@@ -6,10 +6,14 @@
 #              -e spe_confirm_reset=<instance>; see roles/existing_host/files/spe_preflight.py
 #              (reset mode) for what is checked before anything is removed.
 #   ansible-playbook playbooks/destroy.yml -e @instances/<name>.yml
-# The run (chats, report, parameters) is archived first; if that fails nothing
-# is deleted or reset. -e spe_archive_skip=true destroys without archiving.
-- name: Archive the run
+# The run (chats, report, parameters) is archived first, as the final archive
+# (spe_archive_final: an agui instance's chat-ui and agent are stopped first and
+# not started again); if that fails nothing is deleted or reset.
+# -e spe_archive_skip=true destroys without archiving.
+- name: Archive the run (final)
   ansible.builtin.import_playbook: archive.yml
+  vars:
+    spe_archive_final: true
 
 - name: Destroy SPE instance
   hosts: localhost

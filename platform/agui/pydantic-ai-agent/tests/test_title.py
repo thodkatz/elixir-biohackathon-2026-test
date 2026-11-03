@@ -8,7 +8,7 @@ from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
 
 from spe_agent.title import parse_title
-from test_app import AGENT_KEY, AUTH, build, log_records, running, until_status
+from test_app import AGENT_KEY, AUTH, LLM_KEY, build, log_records, running, until_status
 
 
 def title_body(thread="t1", messages=None):
@@ -126,6 +126,21 @@ async def test_run_log_line_on_success(tmp_path):
     assert rec["error"] is None
     assert set(rec["usage"]) == {"input_tokens", "output_tokens"}
     assert rec["started_at"] <= rec["ended_at"]
+
+
+async def test_model_error_detail_is_sanitized(tmp_path):
+    def failing(messages, info):
+        raise RuntimeError(f"401 from provider: invalid x-api-key {LLM_KEY}")
+
+    app, _ = build(tmp_path, model=FunctionModel(function=failing))
+    async with running(app) as c:
+        await until_status(c, 200)
+        r = await post_title(c)
+    assert r.status_code == 422
+    assert LLM_KEY not in r.text and "[redacted]" in r.json()["detail"]
+    # the run log keeps the redacted error too (the raw secret must never be written to disk)
+    (rec,) = log_records(tmp_path)
+    assert LLM_KEY not in json.dumps(rec)
 
 
 async def test_run_log_line_on_failure(tmp_path):

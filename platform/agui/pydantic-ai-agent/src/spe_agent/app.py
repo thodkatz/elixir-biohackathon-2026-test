@@ -280,7 +280,8 @@ def create_app(config: Config, secrets: Secrets, model_override: Model | None = 
         except OSError:
             log.exception("could not write the run log")
         if title is None:
-            return JSONResponse({"detail": record["error"] or "could not produce a title"}, status_code=422)
+            detail = service.sanitize(record["error"]) if record["error"] else "could not produce a title"
+            return JSONResponse({"detail": detail}, status_code=422)
         return {"title": title}
 
     return app

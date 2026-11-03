@@ -183,6 +183,7 @@ marker as `## Compacted`; `index.md`'s columns become `| # | Session | Tags | Cr
 | `docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md` | 2 | clarification for §4 |
 | `docs/superpowers/plans/2026-11-03-agui-compaction/evidence/slice-2/` | 2 | screenshots |
 | `ansible/inventory/group_vars/all.yml` (de.NBI window), `ansible/README.md`, `docs/getting-started.md` | 3 | the window value, docs |
+| `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` (clarification 4), `…/evidence/slice-3/` | 3 | decision 13's check and its evidence |
 
 ## PR slices
 
@@ -237,6 +238,11 @@ Each is added by the slice that verifies it, with status `folded`, and the spec 
    `MessagesBuilder.add` (`ui/_messages_builder.py:31-44`) appends a `CompactionPart` to the last message when
    that is a `ModelResponse`, else starts a new one, which the following assistant parts then join. The cut is
    at part level either way. §3's paragraph on the cut is rewritten. Slice 1, task 3.
+4. **Decision 13 is checked against the model's own window**: at `context_window_tokens: 20000` the proactive
+   trigger compacts long before Haiku's window, so compaction disabled does not fail there. The check overflows
+   Haiku's own window with one large tool result (compaction off: Anthropic's `prompt is too long`), then
+   recovers the same session through the reactive trigger (compaction on, no window); the proactive half is
+   slice 2's early output. Decision 13's acceptance check is rewritten. Slice 3, task 3.
 
 ## Handoffs
 

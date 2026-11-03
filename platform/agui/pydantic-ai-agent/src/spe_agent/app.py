@@ -29,6 +29,7 @@ from .compaction import marker_events, markers_to_activities
 from .config import Config, ConfigError, Secrets
 from .runlog import RunLog, RunRecorder, redact
 from .sandbox import SandboxClient, SandboxUnavailable, build_tools, operations_from_openapi, select_operations
+from .title import TitleRequest, generate_title
 
 log = logging.getLogger("spe_agent")
 
@@ -266,5 +267,20 @@ def create_app(config: Config, secrets: Secrets, model_override: Model | None = 
             errors = e.errors(include_url=False, include_input=False, include_context=False)
             return JSONResponse({"detail": errors}, status_code=422)
         return adapter.streaming_response(service._events(adapter))
+
+    @app.post("/title")
+    async def title_endpoint(request: Request, body: TitleRequest):
+        if not service.authorized(request):
+            return JSONResponse({"detail": "unauthorized"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+        if not config.title.enabled:
+            return JSONResponse({"detail": "title generation is disabled"}, status_code=404)
+        title, record = await generate_title(service._model, config.title, body)
+        try:
+            service.runlog.write(record)
+        except OSError:
+            log.exception("could not write the run log")
+        if title is None:
+            return JSONResponse({"detail": record["error"] or "could not produce a title"}, status_code=422)
+        return {"title": title}
 
     return app

@@ -52,7 +52,7 @@ what slice 3 changed):
   one `run_command`; a message with `slow` streams `Slow step k of 10.` 1.0 s apart (`SLOW_STEPS`,
   `SLOW_STEP_SECONDS`, l. 33–34). `platform/dev/fake-agent.compose.yml` runs it as an instance's `agent` service
   (with the agent's key, port and run-log volume); `up -d agent` without the file puts the real agent back.
-- `threats/`: TM-001 to TM-007; `validate.py` requires `id`, `name`, `description`, `assets`, `stride`,
+- `threats/`: TM-001 to TM-006; `validate.py` requires `id`, `name`, `description`, `assets`, `stride`,
   `agent-capabilities`, `related`, `references`, `last_reviewed`, values from `vocabulary.yaml`, and **symmetric**
   `related` lists (l. 139–147). `conversation-history`, `agent-integrity`, `tampering`, `spoofing`,
   `repudiation`, `chat-output`, `context-ingestion`, `tool-use` are in the vocabulary.

@@ -116,8 +116,8 @@ test("titles, tags and content are exported unchanged", () => {
 
 test("an empty journal is a chat with no messages", async () => {
   const c = toOpenWebUIChat(await rebuild(J(7), []));
-  assert.deepEqual([c.title, c.chat.history.currentId, c.chat.messages, c.chat.history.messages, c.archived],
-    ["Untitled", null, [], {}, false]);
+  assert.deepEqual([c.title, c.chat.history.currentId, c.chat.messages, c.archived], ["Untitled", null, [], false]);
+  assert.deepEqual(c.chat.history.messages, Object.create(null)); // null-prototype: see toOpenWebUIChat
   const empty = await exportJournals(await fs.mkdtemp(path.join(os.tmpdir(), "export-")), "final", { now: NOW });
   assert.deepEqual([empty.chats, empty.tags], [[], []]);
 });
@@ -182,6 +182,22 @@ test("a forged id never collides with its own run's exported message, and the br
   assertWalkTerminates(c2, ids2);
   const originals = ids2.map((id) => c2.chat.history.messages[id].spe_original_id).filter((o) => o !== undefined);
   assert.deepEqual(originals.sort(), ["spe-msg-0", "spe-run-x"]);
+});
+
+test("a user message id of \"__proto__\" is kept as a key, not sent to the prototype", async () => {
+  const conv = await rebuild("00000000-0000-4000-8000-000000000008", [
+    { type: "created", at: "2026-11-03T12:00:00.000Z", version: 1, id: "00000000-0000-4000-8000-000000000008" },
+    {
+      type: "run_start", at: "2026-11-03T12:00:00.010Z", run_id: "r1", anchor: null,
+      messages: [{ id: "__proto__", role: "user", content: "hi" }], ignored: [],
+      request: { tools: [], context: [], state: {}, forwardedProps: {} }, source: "chat",
+    },
+    { type: "run_end", at: "2026-11-03T12:00:00.020Z", run_id: "r1", status: "completed", error: null },
+  ]);
+  const c = toOpenWebUIChat(conv);
+  assert.ok(Object.hasOwn(c.chat.history.messages, "__proto__"));
+  assert.equal(c.chat.history.messages["__proto__"].content, "hi");
+  assert.equal(c.chat.history.messages["spe-run-r1"].parentId, "__proto__");
 });
 
 // Messages the fixtures above don't cover:

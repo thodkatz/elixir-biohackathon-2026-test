@@ -102,7 +102,10 @@ function replyText(items: OutputItem[]): string {
 }
 
 export function toOpenWebUIChat(conv: Conversation): OpenWebUIChat {
-  const messages: Record<string, ExportedMessage> = {};
+  // Null-prototype: a journal/client message id of "__proto__" (or another `Object.prototype` key) must still
+  // land as an own key, not reach the prototype's own setter and silently vanish from history.messages (spec
+  // §14, *The Open WebUI chat*).
+  const messages: Record<string, ExportedMessage> = Object.create(null) as Record<string, ExportedMessage>;
   const order: string[] = [];
   const owner = new Map<string, string>(); // AG-UI message id → the exported message that holds it
   let remapped = 0;

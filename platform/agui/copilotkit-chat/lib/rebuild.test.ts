@@ -167,11 +167,13 @@ test("a session with only refused runs has no tip", async () => {
   assert.deepEqual(branchOfTip(conv), []);
 });
 
-test("a journal cut after a run's third event: the run is incomplete with the text so far", async () => {
+test("a journal cut after a run's third event: the run is incomplete with the text so far", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
   const lines = [created(), start("r1", null, [user("u1", "q1")]), ...reply("r1", "a1", "half an answer")];
   const text = lines.slice(0, 5).map((l) => JSON.stringify(l)).join("\n") + "\n" + JSON.stringify(lines[5]).slice(0, 25);
   const conv = await rebuildText(ID, text);
   assert.equal(conv.skipped, 1);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), ["journal: line 6 skipped (not a journal line)"]);
   const [run] = conv.runs;
   assert.deepEqual([run.status, run.ended_at, run.events], ["incomplete", null, 3]);
   assert.equal(run.last_at, (lines[4] as { at: string }).at);
@@ -186,12 +188,14 @@ test("a run without run_end is no boundary at its last message: it may still be 
   assert.equal(isBoundary(conv, "u1"), true);
 });
 
-test("journal without a created line", async () => {
+test("journal without a created line", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
   // Review Focus 3: a crash tore the first line; the runs still rebuild and created_at falls back.
   const lines = [created(), start("r1", null, [user("u1", "q1")]), ...reply("r1", "a1", "x"), end("r1")];
   const text = JSON.stringify(lines[0]).slice(0, 20) + "\n" + lines.slice(1).map((l) => JSON.stringify(l)).join("\n") + "\n";
   const conv = await rebuildText(ID, text);
   assert.equal(conv.skipped, 1);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), ["journal: line 1 skipped (not a journal line)"]);
   assert.equal(conv.created_at, (lines[1] as { at: string }).at);
   assert.equal(conv.tip, "a1");
   assert.equal(conv.first_user_text, "q1");
@@ -233,8 +237,10 @@ test("meta lines fold in order; the last line's time is kept", async () => {
   assert.equal(conv.last_line_at, "2026-11-03T13:00:00.000Z");
 });
 
-test("an anchor the journal does not hold rebuilds the run from the root", async () => {
+test("an anchor the journal does not hold rebuilds the run from the root", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
   const conv = await rebuild(ID, [created(), start("r1", "gone", [user("u1", "q1")]), ...reply("r1", "a1", "x"), end("r1")]);
   assert.equal(conv.nodes.get("u1")!.parentId, null);
   assert.equal(conv.tip, "a1");
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), [`journal ${ID}: run r1: anchor gone not found, rebuilt from the root`]);
 });

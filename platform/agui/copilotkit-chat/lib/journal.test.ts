@@ -156,7 +156,8 @@ test("a run_start whose messages are not objects with a string id is skipped", (
   assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), [2, 3, 4, 5, 6].map((n) => `journal: line ${n} skipped (not a journal line)`));
 });
 
-test("a torn last line gets a newline before the next append, and parsing skips only it", async () => {
+test("a torn last line gets a newline before the next append, and parsing skips only it", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
   const file = path.join(await tmp(), `${randomUUID()}.jsonl`);
   const head = '{"type":"created","at":"t","version":1,"id":"s1"}\n{"type":"event","at":"t","run_id":"r1","ev';
   await fs.writeFile(file, head);
@@ -169,6 +170,7 @@ test("a torn last line gets a newline before the next append, and parsing skips 
   const { lines, skipped } = parseJournal(text);
   assert.deepEqual(lines.map((l) => l.type), ["created", "meta", "meta"]);
   assert.equal(skipped, 1);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), ["journal: line 2 skipped (not a journal line)"]);
 });
 
 test("a journal that ends in a newline gets nothing added", async () => {

@@ -20,10 +20,10 @@ clock), **8** (task 2: a failed append is sticky; task 3: a journal cut after a 
 skipped`; items 1 and 2 are task 4's `reordered history keeps the anchor and flags nothing` and `a known id after
 the anchor is not new`. Item 5 is slice 2's.
 
-**Branch:** `impl/agui-conversation-record-1-history`, from `main` (it does not wait for #18: it adds new files
-and changes only `lib/test-agent.ts`, which #18 does not touch). Global constraints, shared interfaces and the
-rulings: [plan README](README.md); this slice uses their names exactly. Paths are relative to the repository root
-unless a step `cd`s; `CHAT` means `platform/agui/copilotkit-chat`.
+**Branch:** `impl/agui-conversation-record-1-history`, from `main`. Global constraints and the rulings:
+[plan README](README.md); shared interfaces: [`interfaces.md`](interfaces.md); this slice uses their names
+exactly. Paths are relative to the repository root unless a step `cd`s; `CHAT` means
+`platform/agui/copilotkit-chat`.
 
 **Verified facts this slice builds on** (read in `CHAT/node_modules` and the repo, 2026-11-03; every code block
 below was run against them: 130 tests green, `tsc --noEmit` clean):
@@ -85,7 +85,7 @@ gh pr create --repo thodkatz/elixir-biohackathon-2026-test --base main --draft -
 **Interfaces:**
 - Consumes: `startTestAgent` (`lib/test-agent.ts`); `createCopilotRuntimeHandler`, `CopilotRuntime`
   (`@copilotkit/runtime/v2`); `HttpAgent`, `Middleware` (`@ag-ui/client`).
-- Produces: the `echo-input` keyword (README, *Shared interfaces*, `lib/test-agent.ts`): a user message
+- Produces: the `echo-input` keyword ([`interfaces.md`](interfaces.md), `lib/test-agent.ts`): a user message
   containing it makes the reply's text the JSON of `[{role, id}]` for every message the agent received. Slice 3's
   recorder tests use it to read what the agent was sent.
 
@@ -253,14 +253,16 @@ with the roles and ids it received."
 
 **Interfaces:**
 - Consumes: `ValidationError`, `isSessionId` (`lib/sessions.ts`).
-- Produces: everything under **`lib/journal.ts`** in the README's *Shared interfaces*, with those names and
+- Produces: everything under **`lib/journal.ts`** in [`interfaces.md`](interfaces.md), with those names and
   signatures. Behaviour the callers rely on: `append` stamps `at` (ISO 8601 UTC from `now`) right after `type`
   and writes one `JSON.stringify` line plus `\n`; appends on one writer are chained, so lines land whole in call
   order; `"now"` resolves after `sync()`, `"soon"` arms one `FSYNC_INTERVAL_MS` timer if none is armed, and a
   `"now"` cancels a pending timer (its fsync covers it); a failed write or fsync rejects that append and **every
   later one** (decision 8: the route turns it into `aborted`); `close()` fsyncs if a timer was pending, then
-  closes, and later appends reject. Before its first append the writer opens the file with `"a"`, and if it is
-  not empty, reads its last byte through a second `"r"` handle and appends `\n` unless that byte is one.
+  closes, and later appends reject. Before its first append the writer opens the file with `"a"`; if it is
+  empty (the writer just created it) it fsyncs the directory once (`JournalFs.syncDir`, the real one when a test's
+  fs leaves it out), else it reads its last byte through a second `"r"` handle and appends `\n` unless that byte
+  is one.
   `parseJournal` skips (and counts, and logs by line number only) a non-JSON, non-object, unknown-`type` or
   field-missing line; a blank line is not counted.
 
@@ -311,7 +313,7 @@ function fakeClock() {
 
 // The real filesystem, with sync() counted and appends made to fail on demand.
 function countingFs() {
-  const counts = { sync: 0, opens: [] as string[] };
+  const counts = { sync: 0, opens: [] as string[], dirSyncs: [] as string[] };
   let failAppend = false;
   const fsys: JournalFs = {
     open: async (file, flags) => {
@@ -330,6 +332,15 @@ function countingFs() {
         stat: () => handle.stat(),
         read: (buf: Buffer, off: number, len: number, pos: number) => handle.read(buf, off, len, pos),
       };
+    },
+    syncDir: async (dir) => {
+      counts.dirSyncs.push(dir);
+      const handle = await fs.open(dir, "r");
+      try {
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
     },
   };
   return { fsys, counts, failNext: () => (failAppend = true) };
@@ -425,6 +436,21 @@ test("the writer opens files only to append or to read", async () => {
   await writer.append({ type: "meta", pinned: false }, "soon");
   await writer.close();
   assert.deepEqual(counts.opens, ["a", "r"]);
+});
+
+test("a new journal's directory is fsynced once, when the writer creates the file", async () => {
+  const dir = await tmp();
+  const file = path.join(dir, `${randomUUID()}.jsonl`);
+  const { fsys, counts } = countingFs();
+  const writer = new JournalWriter(file, { fs: fsys, now: fixed });
+  await writer.append(created("s1"), "now");
+  await writer.append({ type: "meta", pinned: true }, "now");
+  await writer.close();
+  assert.deepEqual(counts.dirSyncs, [dir], "the new file's directory entry is made durable");
+  const again = new JournalWriter(file, { fs: fsys, now: fixed });
+  await again.append({ type: "meta", hidden: true }, "now");
+  await again.close();
+  assert.deepEqual(counts.dirSyncs, [dir], "an existing journal's directory is not fsynced again");
 });
 
 test("1000 events within a second fsync at most three times: run_start, one interval, run_end", async () => {
@@ -589,7 +615,8 @@ type Handle = {
   stat(): Promise<{ size: number }>;
   read(buf: Buffer, off: number, len: number, pos: number): Promise<{ bytesRead: number }>;
 };
-export type JournalFs = { open: (path: string, flags: "a" | "r") => Promise<Handle> };
+// syncDir: fsync a directory, so a file just created in it survives a crash; absent, the real one is used.
+export type JournalFs = { open: (path: string, flags: "a" | "r") => Promise<Handle>; syncDir?: (dir: string) => Promise<void> };
 
 const realClock: Clock = {
   now: () => Date.now(),
@@ -600,7 +627,15 @@ const realClock: Clock = {
   },
   clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
 };
-const realFs: JournalFs = { open: (file, flags) => fsp.open(file, flags) };
+async function syncDirectory(dir: string): Promise<void> {
+  const handle = await fsp.open(dir, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+const realFs: JournalFs = { open: (file, flags) => fsp.open(file, flags), syncDir: syncDirectory };
 
 // The only writer of a journal. Appends are chained, so lines are written whole and in call order; a caller
 // still serialises appends per session (spec §13, *Concurrency and branches*). "now" resolves after an fsync;
@@ -682,12 +717,14 @@ export class JournalWriter {
   }
 
   // Opens for appending; before the first append, a file that does not end in "\n" (a torn last line from a
-  // hard kill) gets one, so the next line starts clean.
+  // hard kill) gets one, so the next line starts clean. A file that is empty here was just created: its
+  // directory is fsynced once, so the journal's name survives a crash as its lines do.
   private async open(): Promise<Handle> {
     if (this.handle) return this.handle;
     const handle = await this.fs.open(this.path, "a");
     try {
       const { size } = await handle.stat();
+      if (size === 0) await (this.fs.syncDir ?? syncDirectory)(path.dirname(this.path));
       if (size > 0) {
         const reader = await this.fs.open(this.path, "r");
         const last = Buffer.alloc(1);
@@ -708,7 +745,7 @@ export class JournalWriter {
 }
 ```
 
-- [ ] **Step 4: run it green.** The command of step 2: 10 tests pass (the torn-line test prints one
+- [ ] **Step 4: run it green.** The command of step 2: 11 tests pass (the torn-line test prints one
   `journal: line 2 skipped` warning, as intended). Then `(cd CHAT && npm test && npm run build)`: all pass.
 
 - [ ] **Step 5: check append-only by grep** (Global Constraints): the only `open(` calls in the module take
@@ -718,7 +755,8 @@ export class JournalWriter {
 grep -nE 'open\(|rename|truncate|writeFile|unlink|"w' platform/agui/copilotkit-chat/lib/journal.ts
 ```
 
-  Expected: only `fsp.open(file, flags)`, `this.fs.open(this.path, "a")` and `this.fs.open(this.path, "r")`.
+  Expected: only `fsp.open(file, flags)`, `fsp.open(dir, "r")` (the directory's fsync),
+  `this.fs.open(this.path, "a")` and `this.fs.open(this.path, "r")`.
 
 - [ ] **Step 6: commit.**
 
@@ -742,7 +780,7 @@ Nothing uses it until the route moves to journals (slice 3)."
 **Interfaces:**
 - Consumes: `Line`, `RunStartLine`, `Ignored`, `MetaFields`, `RequestFields`, `RunStatus`, `parseJournal`
   (task 2); `defaultApplyEvents` (`@ag-ui/client`); `from` (`rxjs`).
-- Produces: everything under **`lib/rebuild.ts`** in the README's *Shared interfaces*, plus
+- Produces: everything under **`lib/rebuild.ts`** in [`interfaces.md`](interfaces.md), plus
   `rebuildText(id, text): Promise<Conversation>` (`parseJournal` then `rebuild`, with `skipped` filled in; Notes
   for the plan author, 1). Rules a reader relies on:
   - runs are rebuilt in the order of their `run_start` lines; a run's start messages are the path to its anchor
@@ -762,7 +800,9 @@ Nothing uses it until the route moves to journals (slice 3)."
   - `created_at` is the `created` line's `at`, else the first parsed line's (Review Focus 3); `meta` folds the
     `meta` lines in order (a key present on a line sets it); `first_user_text` is the first added user message
     with string content; `last_line_at` the last line's `at`;
-  - `isBoundary`: a user message, or the last id of some run's `added`; log lines name ids, never content.
+  - `isBoundary`: a user message, or the last id of some run's `added` unless that message holds a tool call
+    (nothing after it in its run answers the call: a run cancelled, failed or cut mid tool call), so the agent is
+    never sent a dangling tool call (§13); log lines name ids, never content.
 
 - [ ] **Step 1: write the failing test.** Create `CHAT/lib/rebuild.test.ts`:
 
@@ -1045,11 +1085,17 @@ export function pathTo(conv: Conversation, id: string | null): Message[] {
   return path.reverse();
 }
 
+// A point the agent may continue from: a user message, or the last message a run added, unless that message
+// holds a tool call with no tool result later in its run (a run cancelled, failed or cut mid tool call), which
+// would send the agent a dangling tool call (§13).
 export function isBoundary(conv: Conversation, id: string): boolean {
   const node = conv.nodes.get(id);
   if (!node) return false;
   if (node.message.role === "user") return true;
-  return conv.runs.some((run) => run.added.at(-1) === id);
+  if (!conv.runs.some((run) => run.added.at(-1) === id)) return false;
+  // The run's last message: nothing follows it in its run, so a tool call it holds has no result.
+  const calls = (node.message as { toolCalls?: unknown[] }).toolCalls ?? [];
+  return calls.length === 0;
 }
 
 export function branchOfTip(conv: Conversation): Message[] {
@@ -1199,10 +1245,12 @@ event without its run_start is skipped, never attached elsewhere."
 
 **Files:**
 - Create: `CHAT/lib/anchor.ts`, `CHAT/lib/anchor.test.ts`
+- Modify: `docs/specs/2026-10-15-agui-frontend-design/13-conversation-record.md` (*The run route*, step 2),
+  `docs/specs/2026-10-15-agui-frontend-design/clarifications.md` (step 6)
 
 **Interfaces:**
 - Consumes: `Conversation`, `Node`, `pathTo`, `isBoundary`, `rebuild` (task 3); `Ignored`, `Line` (task 2).
-- Produces: everything under **`lib/anchor.ts`** in the README's *Shared interfaces*. Rules (decision 2, §13
+- Produces: everything under **`lib/anchor.ts`** in [`interfaces.md`](interfaces.md). Rules (decision 2, §13
   step 2, as this slice reads them; Notes for the plan author, 3):
   - **anchor**: of the client's non-system messages whose id the journal holds, the one the journal added last
     (the order of `conv.nodes`, which is the rebuild's insertion order), not the last in the client's order
@@ -1230,7 +1278,7 @@ import { EventType } from "@ag-ui/client";
 import type { BaseEvent, Message } from "@ag-ui/client";
 import { canonical, classify } from "./anchor.ts";
 import type { Line } from "./journal.ts";
-import { rebuild } from "./rebuild.ts";
+import { isBoundary, rebuild } from "./rebuild.ts";
 import type { Conversation } from "./rebuild.ts";
 
 const ID = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b";
@@ -1367,6 +1415,32 @@ test("an anchor inside a run moves back to the run's boundary; the cut messages 
   assert.deepEqual(ids(c.path), ["u1", "a1", "u2"]);
   assert.deepEqual(ids(c.newMessages), ["u4"]);
   assert.deepEqual(kinds(c), [["deleted", "c2"]]);
+});
+
+test("a run cancelled or cut mid tool call: its dangling call is no anchor, the run's user message is", async () => {
+  // r3 stops after its tool call c3, before any result: cancelled (a run_end), or incomplete (none).
+  const stopped = (status: "cancelled" | null): Line[] => [
+    { type: "run_start", at: AT, run_id: "r3", anchor: "a2", messages: [user("u3", "thanks")], ignored: [], request, source: "chat" },
+    ev("r3", { type: EventType.RUN_STARTED, threadId: ID, runId: "r3" }),
+    ev("r3", { type: EventType.TOOL_CALL_START, toolCallId: "call-3", toolCallName: "execute", parentMessageId: "c3" }),
+    ev("r3", { type: EventType.TOOL_CALL_ARGS, toolCallId: "call-3", delta: '{"cmd":"ls"}' }),
+    ev("r3", { type: EventType.TOOL_CALL_END, toolCallId: "call-3" }),
+    ...(status ? [{ type: "run_end", at: AT, run_id: "r3", status, error: null } as Line] : []),
+  ];
+  for (const status of ["cancelled", null] as const) {
+    const name = status ?? "incomplete";
+    const conv = await journal(r1(), r2(), stopped(status));
+    assert.deepEqual(conv.runs.at(-1)!.added, ["u3", "c3"], name);
+    assert.equal(conv.runs.at(-1)!.status, status ?? "incomplete", name);
+    assert.equal(isBoundary(conv, "c3"), false, `${name}: a dangling tool call is no boundary`);
+    // As the browser holds it: the history up to the stopped call, then the next question.
+    const held = ["u1", "a1", "u2", "c2", "t2", "a2", "u3", "c3"].map((id) => conv.nodes.get(id)!.message);
+    const c = classify(conv, [...held, user("u4", "next")]);
+    assert.equal(c.anchor, "u3", name);
+    assert.deepEqual(ids(c.path), ["u1", "a1", "u2", "c2", "t2", "a2", "u3"], name);
+    assert.deepEqual(ids(c.newMessages), ["u4"], name);
+    assert.deepEqual(kinds(c), [["deleted", "c3"]], name);
+  }
 });
 
 test("reordered history keeps the anchor and flags nothing", async () => {
@@ -1541,7 +1615,7 @@ export function classify(conv: Conversation | null, client: Message[]): Classifi
   The two loops over the client's history are `for … of client.entries()`, not `forEach`: TypeScript does not
   follow assignments made inside a callback, and would narrow `anchor` to `null` after it.
 
-- [ ] **Step 4: run it green.** The command of step 2: 11 tests pass. Then
+- [ ] **Step 4: run it green.** The command of step 2: 12 tests pass. Then
   `(cd CHAT && npm ci && npm test && npm run build)`: every suite passes and the build's type check is clean.
 
 - [ ] **Step 5: commit.**
@@ -1556,6 +1630,54 @@ fabricated, edited, deleted or system, recorded with the client's message.
 Reordered histories and known ids resent from another branch flag nothing."
 ```
 
+- [ ] **Step 6: fold the readings into the spec** (plan README, ruling 6). In
+  `docs/specs/2026-10-15-agui-frontend-design/13-conversation-record.md`, *The run route*, replace step 2's first
+  paragraph (from "2. Load the session" to "a dangling tool call:") with:
+
+```markdown
+2. Load the session from the index or journal. Compute the **anchor** and the **new messages** (decision 2),
+   and compare the client's history with the journal's path to the anchor. The anchor is, of the client's
+   messages whose id the journal holds, the one the journal added last, whatever the client's order. An anchor
+   inside a run (a message that is neither a user message nor a run's last message, such as an assistant tool
+   call whose result follows, or a run's last message that holds a tool call, as a run cancelled, failed or cut
+   mid tool call leaves it) moves back to the last run boundary before it, and the journal's messages after that
+   boundary are `deleted`, even those the client sent, so the agent is never sent a dangling tool call. The
+   new messages are the user messages after the anchor whose ids the journal does not hold, each id counted
+   once. A client message the journal holds with the same role, content, tool calls and tool call id is not
+   recorded, wherever it stands: the journal already holds it, and `run_start.anchor` shows which branch the
+   run continued. `ignored` lists the client's messages in the client's order, then `deleted` in path order:
+```
+
+  and in step 2's first bullet, replace ", and every forged marker" with ", every forged marker and every message
+  without a string id". Then
+  append to `clarifications.md`, with the next free number N (the last entry's number plus one when this commits)
+  and today's date:
+
+```markdown
+N. **Classification reads decision 2 literally where §13 left it open: a known, unchanged message off the
+   anchor's path is not recorded** (YYYY-MM-DD; conversation record, slice 1/4). §13 *The run route*, step 2 now
+   states: the anchor is the client message the journal added last, not the last in the client's order; a run's
+   last message that holds a tool call is not a run boundary; the messages cut when the anchor moves back are
+   `deleted` even if the client sent them; a message without a string id is `fabricated`, and a repeated new id
+   counts once; `ignored` lists the client's messages first, then `deleted` in path order; a known message whose
+   compared fields equal the journal's is not recorded, even off the anchor's path (a message resent from another
+   branch). *Reason:* the record keeps what reached the agent and what the client sent that differs; an
+   unchanged known message differs in nothing, the journal already holds it verbatim, and `run_start.anchor`
+   shows which branch the run continued; a reordered history must not raise false alarms. *Cost if wrong:* an
+   analyst cannot see in the journal that a client resent an unchanged message from another branch; recording it
+   later is one more `ignored` kind and its rendering in `write_run.py`, absent from journals written before.
+   *Amends:* §13 *The run route*, step 2; decision 2. *Status:* folded.
+```
+
+```bash
+git add docs/specs/2026-10-15-agui-frontend-design/13-conversation-record.md docs/specs/2026-10-15-agui-frontend-design/clarifications.md
+git commit -s -m "Spec: state how classification reads decision 2 (clarification N)
+
+The anchor is the message the journal added last; a run's dangling tool
+call is no boundary; a known, unchanged message off the anchor's path is
+not recorded. Plan ruling 6, as slice 1's anchor.ts implements it."
+```
+
 ---
 
 ### After task 4: handoff, the PR, review, merge
@@ -1563,11 +1685,10 @@ Reordered histories and known ids resent from another branch flag nothing."
 - [ ] **Step 1: the handoff and the track.** Write
   `docs/superpowers/plans/2026-11-03-agui-conversation-record/handoffs/<UTC stamp>-slice-1-merged-start-slice-2.md`:
   what merged, the feasibility verdict (the printed line of task 1, step 4), any ruling this slice took (*decision,
-  why, cost if wrong*; also rewrite the task text it changes in this file), and slice 2's start: its step 0 checks
-  that #18 is `MERGED` (`gh pr view 18 --repo thodkatz/elixir-biohackathon-2026-test --json state`), else it ends
-  blocked on 18. In the plan README's *PR slices* table set row 1/4's status to `merged`; in `AGENTS.md`, *Current
-  work*, the *AG-UI conversation record* line's **Next** becomes slice 2/4 `impl/agui-conversation-record-2-export`
-  (waits for #18). Commit them by name with `git commit -s`.
+  why, cost if wrong*; also rewrite the task text it changes in this file), and slice 2's start. In the plan
+  README's *PR slices* table set row 1/4's status to `merged #<this PR>`; in `AGENTS.md`, *Current work*, the
+  *AG-UI conversation record* line's **Next** becomes slice 2/4 `impl/agui-conversation-record-2-export`. Commit
+  them by name with `git commit -s`.
 
 - [ ] **Step 2: open the PR for review.** Push, retitle if needed, and write the body (`gh pr edit <n> --repo
   thodkatz/elixir-biohackathon-2026-test --body-file <file>`), then mark it ready (`gh pr ready <n> --repo
@@ -1591,11 +1712,11 @@ Reordered histories and known ids resent from another branch flag nothing."
   merge with sign-off, remove the worktree and the branch, move the pin in `biohackathon` (*Worktrees and
   deploying*), then start slice 2 with
   `.methodology/shared/claude/next-session.sh --next impl/agui-conversation-record-2-export <handoff>` from the main
-  checkout (slice 2 itself ends blocked on #18 if it has not merged).
+  checkout.
 
 ## Notes for the plan author
 
-*Folded into the README's Shared interfaces, File structure and clarifications on 2026-11-03; the notes stay as
+*Folded into the README's Shared interfaces (now [`interfaces.md`](interfaces.md)), File structure and clarifications on 2026-11-03; the notes stay as
 the record of why.*
 
 Deviations from, and readings of, the README's contract; each is small and none changes another slice's names.

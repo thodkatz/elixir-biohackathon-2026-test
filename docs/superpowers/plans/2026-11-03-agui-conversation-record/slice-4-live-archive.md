@@ -17,9 +17,9 @@ the record is built* (task 5).
 
 **Review Focus** (plan README): items 1–5 are slices 1 and 2's; nothing here needs a case of its own.
 
-**Branch:** `impl/agui-conversation-record-4-live-archive`, from `main` after slice 3 merged. Global Constraints,
-Shared interfaces and the rulings: [plan README](README.md). Paths are relative to the repository root unless a
-step `cd`s; `CHAT` means `platform/agui/copilotkit-chat`, `ARCHIVE` `platform/ansible/roles/run_archive`.
+**Branch:** `impl/agui-conversation-record-4-live-archive`, from `main` after slice 3 merged. Global Constraints
+and the rulings: [plan README](README.md); shared interfaces: [`interfaces.md`](interfaces.md). Paths are relative
+to the repository root unless a step `cd`s; `CHAT` means `platform/agui/copilotkit-chat`, `ARCHIVE` `platform/ansible/roles/run_archive`.
 
 **Verified facts this slice builds on** (read in the repository, 2026-11-03, before slice 3; step 0.3 re-reads
 what slice 3 changed):
@@ -29,7 +29,7 @@ what slice 3 changed):
   agent`, `ps -a --format '{{.Service}} {{.ExitCode}}'`, the assert over the services that were running), the
   copies, and `always:` *Start the agent and the chat UI again* (l. 112–116), which this slice removes. Slice 3
   changes the copy to `<tmp>/agui-journals` and adds the exporter run (`docker run --rm --entrypoint node … 
-  scripts/export-journals.ts /in /out/bundle.json <mode>`, plan README, *Shared interfaces*), keeping the barrier.
+  scripts/export-journals.ts /in /out/bundle.json <mode>`, [`interfaces.md`](interfaces.md)), keeping the barrier.
 - `platform/ansible/playbooks/archive.yml`: play 1 finds the instance on `localhost` (`archive_present`); play 2
   (`spe_api`, `any_errors_fatal`) includes `run_archive` `export`; play 3 writes (l. 85–95). `destroy.yml` l. 11–12
   is `import_playbook: archive.yml` with no vars; its teardown runs only after it. `spe_archive_skip: false` is
@@ -68,14 +68,13 @@ what slice 3 changed):
 
 ### Task 0: before starting
 
-- [ ] **Step 1: slice 3 merged, #18 merged.**
+- [ ] **Step 1: slice 3 merged.**
 
 ```bash
 gh pr list --repo thodkatz/elixir-biohackathon-2026-test --state merged --head impl/agui-conversation-record-3-route --json number,mergedAt
-gh pr view 18 --repo thodkatz/elixir-biohackathon-2026-test --json state
 ```
 
-  Expected: one merged PR; `"state":"MERGED"`. If slice 3 is not merged, this slice does not start (README,
+  Expected: one merged PR. If slice 3 is not merged, this slice does not start (README,
   *PR slices*: sequential).
 
 - [ ] **Step 2: the user's answer to slice 3's early output.** Slice 3's PR asked whether the ignored content and
@@ -117,7 +116,7 @@ grep -rn "Until the record is built\|not built yet\|until slice 4\|wait for the 
 **Files:**
 - Create: `platform/dev/tests/test_archive_export.py`
 - Modify: `ARCHIVE/tasks/export.yml` (the `agui` block and the header comment), `platform/ansible/playbooks/archive.yml`
-  (header comment, the *Archive mode* task), `platform/ansible/playbooks/destroy.yml` (l. 9–12),
+  (header comment, the *Archive mode* task), `platform/ansible/playbooks/destroy.yml` (the *Archive the run* import and its comment),
   `platform/ansible/inventory/group_vars/all.yml` (the archive's comment and `spe_archive_final`)
 - Docs: `platform/ansible/README.md` (*Run archive*), `CHAT/README.md` (the shutdown paragraph), and whatever step 6's
   grep finds
@@ -171,6 +170,8 @@ if args[:1] == ["compose"]:
         print("" if os.environ.get("STUB_NO_CHAT_UI") else "c0ffee")
     elif sub == "ps" and "--services" in rest:
         print("chat-ui\nagent")
+    elif sub == "ps" and "{{.Image}}" in rest:
+        print("spe-frontend-chat-ui:0123abcd")
     elif sub == "ps" and "--format" in rest:
         print(f"chat-ui {os.environ.get('STUB_CHAT_UI_EXIT', '0')}\nagent 0")
     elif sub == "cp":
@@ -181,12 +182,11 @@ if args[:1] == ["compose"]:
                 sys.exit(1)
             dest.write_text('{"run_id": "r1", "status": "completed"}\n')
         else:
+            if os.environ.get("STUB_CP_FAILS"):
+                sys.stderr.write("Error response from daemon: no space left on device\n")
+                sys.exit(1)
             dest.mkdir(parents=True)
             (dest / "00000000-0000-4000-8000-000000000000.jsonl").write_text('{"type": "created"}\n')
-    elif sub == "images":
-        print("spe-frontend-chat-ui")
-elif args[:1] == ["inspect"]:
-    print("spe-frontend-chat-ui")
 elif args[:1] == ["run"]:
     for i, a in enumerate(args[:-1]):
         if a == "-v" and args[i + 1].split(":")[1] == "/out":
@@ -276,6 +276,14 @@ def test_final_archive_fails_when_a_service_did_not_exit_0(tmp_path):
     assert modes == [] and not (out / "archive-bundle-agui.tar.gz").exists()
 
 
+def test_a_failure_after_the_final_barrier_says_the_services_stay_stopped(tmp_path):
+    proc, v, modes, out = export(tmp_path, final=True, STUB_CP_FAILS="1")
+    assert proc.returncode != 0
+    assert "the services stay stopped" in proc.stdout, proc.stdout
+    assert not [x for x in v if x.startswith(("compose start", "compose restart", "compose up"))], v
+    assert modes == [] and not (out / "archive-bundle-agui.tar.gz").exists()
+
+
 @pytest.mark.parametrize("final", [False, True])
 def test_a_missing_chat_ui_container_fails_the_export(tmp_path, final):
     proc, v, modes, out = export(tmp_path, final=final, STUB_NO_CHAT_UI="1")
@@ -315,8 +323,8 @@ def test_destroy_runs_the_final_archive(tmp_path):
 - [ ] **Step 2: run them to see them fail.**
   `uv run --with pytest pytest platform/dev/tests/test_archive_export.py -q`. Expected: the live test fails
   (`compose stop -t 30 chat-ui` and `compose start agent chat-ui` in the calls), the final test fails (`compose
-  start agent chat-ui`), the unclean-exit test fails (the `always` start), both playbook tests fail (no *Archive
-  mode* line); the missing-container and absent-run-log tests pass already. If a test fails for another reason
+  start agent chat-ui`), the unclean-exit test fails (the `always` start), the failure-after-the-barrier test fails
+  (the `always` start, and no message about stopped services), both playbook tests fail (no *Archive mode* line); the missing-container and absent-run-log tests pass already. If a test fails for another reason
   (the stub does not answer a call slice 3's tasks make: read `docker.log` in the test's `tmp_path`), extend the
   stub's answers, not the assertions.
 
@@ -339,7 +347,8 @@ spe_archive_skip: false
 spe_archive_final: false
 ```
 
-- [ ] **Step 4: the playbooks.** In `destroy.yml`, replace l. 9–12 with:
+- [ ] **Step 4: the playbooks.** In `destroy.yml`, replace the comment "The run (chats, report, parameters) is
+  archived first; …" and the play *Archive the run* (its `import_playbook: archive.yml`) with:
 
 ```yaml
 # The run (chats, report, parameters) is archived first, as the final archive
@@ -390,11 +399,12 @@ spe_archive_final: false
 ```
 
   and replace the whole `agui` block (from `- name: Export the AG-UI …` to the end of the file) with the block
-  below. The three tasks marked *slice 3's* are the copy and exporter tasks slice 3 wrote (step 0.3): keep slice
-  3's names and argv where they differ from these, and change only what the comment on each says. What this step
-  changes: the barrier moves into a block that runs only for the final archive, its *running services* query moves
-  into it, the inner `always:` that started the services again is gone, the assert's message says what to do when
-  nothing will start them again, and the exporter's mode comes from `spe_archive_final`.
+  below. The tasks marked *slice 3's* are copied exactly from slice 3's block (its task 4, step 3; step 0.3 shows
+  what merged: where it differs from this text, what merged wins and only the change named in the comment is
+  made). What this step changes: the barrier moves into a block that runs only for the final archive, its
+  *running services* query moves into it, the inner `always:` that started the services again is gone, a failure
+  after the barrier says that the services stay stopped, and the exporter's last argument, the mode, comes from
+  `spe_archive_final`.
 
 ```yaml
 - name: Export the AG-UI journals and the agent's run log
@@ -402,13 +412,41 @@ spe_archive_final: false
   vars:
     agui_compose: [docker, compose, -p, spe-frontend, -f, "{{ spe_frontend_dir }}/docker-compose.yml"]
     agui_final: "{{ spe_archive_final | bool }}"
+    # The final archive's barrier leaves the services stopped: its failure and every failure after it say so.
+    agui_stopped_msg: >-
+      Nothing is deleted and the services stay stopped: see their logs
+      (docker compose -p spe-frontend logs chat-ui agent), then run destroy.yml again; a service
+      already stopped is not checked again.
   block:
-    - name: The chat-ui container exists (stopping or copying from a missing one says less)
+    # slice 3's: unchanged.
+    - name: The chat-ui container exists (stopping a missing one would succeed silently)
       ansible.builtin.command:
         argv: "{{ agui_compose + ['ps', '-a', '-q', 'chat-ui'] }}"
       register: agui_chat_ui
       changed_when: false
       failed_when: agui_chat_ui.rc != 0 or agui_chat_ui.stdout | trim | length == 0
+
+    # slice 3's: unchanged.
+    - name: The chat UI's image, which holds the journal exporter
+      ansible.builtin.command:
+        argv: "{{ agui_compose + ['ps', '-a', '--format', '{{.Image}}', 'chat-ui'] }}"
+      register: agui_ui_image
+      changed_when: false
+      failed_when: agui_ui_image.rc != 0 or agui_ui_image.stdout | trim | length == 0
+
+    # slice 3's: unchanged.
+    - name: The exporter runs as this user, so it reads the copies and writes the bundle beside them
+      ansible.builtin.command:
+        argv: [id, -u]
+      register: agui_uid
+      changed_when: false
+
+    # slice 3's: unchanged.
+    - name: The user's group
+      ansible.builtin.command:
+        argv: [id, -g]
+      register: agui_gid
+      changed_when: false
 
     - name: Export, then remove the copies from the VM whatever happens
       block:
@@ -453,67 +491,87 @@ spe_archive_final: false
                 fail_msg: >-
                   Stopping did not end cleanly ({{ agui_unclean | join(', ') }}: service and exit code;
                   1 from chat-ui is a drain timeout, 137 a kill after 30 s), so the journals may lack the
-                  last run. Nothing is deleted and the services stay stopped: see their logs
-                  (docker compose -p spe-frontend logs chat-ui agent), then run destroy.yml again; a service
-                  already stopped is not checked again.
+                  last run. {{ agui_stopped_msg }}
                 quiet: true
               vars:
                 agui_unclean: >-
                   {{ agui_exits.stdout_lines | map('split') | selectattr(0, 'in', agui_running.stdout_lines)
                      | rejectattr(1, 'eq', '0') | map('join', ' ') | list }}
 
-        # slice 3's: unchanged (live: from the running container; final: from the stopped one).
-        - name: Copy the journals (hidden and deleted sessions included)
-          ansible.builtin.command:
-            argv: "{{ agui_compose + ['cp', 'chat-ui:/data/sessions', agui_export_dir.path ~ '/agui-journals'] }}"
-          changed_when: false
+        - name: Copy, export and fetch (in the final archive, with the services stopped)
+          block:
+            # slice 3's: unchanged (live: from the running container; final: from the stopped one).
+            - name: Copy the journals (hidden and deleted sessions included)
+              ansible.builtin.command:
+                argv: "{{ agui_compose + ['cp', 'chat-ui:/data/sessions', agui_export_dir.path ~ '/agui-journals'] }}"
+              changed_when: false
 
-        # slice 3's: unchanged.
-        - name: Copy the agent's run log (absent until a run has reached the agent)
-          ansible.builtin.command:
-            argv: "{{ agui_compose + ['cp', 'agent:/var/lib/spe-agent/runs.jsonl', agui_export_dir.path ~ '/agent-runs.jsonl'] }}"
-          register: agui_run_log
-          changed_when: false
-          failed_when: agui_run_log.rc != 0 and 'Could not find the file' not in agui_run_log.stderr
+            # slice 3's: unchanged.
+            - name: Copy the agent's run log (absent until a run has reached the agent)
+              ansible.builtin.command:
+                argv: "{{ agui_compose + ['cp', 'agent:/var/lib/spe-agent/runs.jsonl', agui_export_dir.path ~ '/agent-runs.jsonl'] }}"
+              register: agui_run_log
+              changed_when: false
+              failed_when: agui_run_log.rc != 0 and 'Could not find the file' not in agui_run_log.stderr
 
-        # slice 3's: only the last argument changes, from a fixed mode to live or final.
-        - name: Export the journals as Open WebUI chats, with the chat-ui image's exporter
-          ansible.builtin.command:
-            argv:
-              - docker
-              - run
-              - --rm
-              - --network
-              - none
-              - --entrypoint
-              - node
-              - -v
-              - "{{ agui_export_dir.path }}/agui-journals:/in:ro"
-              - -v
-              - "{{ agui_export_dir.path }}:/out"
-              - "{{ agui_chat_ui_image.stdout | trim }}"
-              - scripts/export-journals.ts
-              - /in
-              - /out/bundle.json
-              - "{{ 'final' if agui_final else 'live' }}"
-          changed_when: true
+            # The exporter is the chat UI's own rebuild (lib/rebuild.ts), so the archive and the chat cannot
+            # disagree; run in a one-off container with no network, only the copies mounted.
+            # slice 3's: only the last argument changes, from `final` to live or final.
+            - name: Export the journals as an Open WebUI bundle
+              ansible.builtin.command:
+                argv:
+                  - docker
+                  - run
+                  - --rm
+                  - --network
+                  - none
+                  - --read-only
+                  - --tmpfs
+                  - /tmp
+                  - --cap-drop
+                  - ALL
+                  - --security-opt
+                  - no-new-privileges:true
+                  - --user
+                  - "{{ agui_uid.stdout | trim }}:{{ agui_gid.stdout | trim }}"
+                  - --entrypoint
+                  - node
+                  - -v
+                  - "{{ agui_export_dir.path }}/agui-journals:/in:ro"
+                  - -v
+                  - "{{ agui_export_dir.path }}:/out"
+                  - "{{ agui_ui_image.stdout | trim }}"
+                  - scripts/export-journals.ts
+                  - /in
+                  - /out/bundle.json
+                  - "{{ 'final' if agui_final else 'live' }}"
+              changed_when: true
 
-        - name: Archive directory on the VM
-          ansible.builtin.tempfile:
-            state: directory
-            prefix: spe-agui-archive-
-          register: agui_archive_dir
+            - name: Archive directory on the VM
+              ansible.builtin.tempfile:
+                state: directory
+                prefix: spe-agui-archive-
+              register: agui_archive_dir
 
-        - name: Pack the bundle
-          ansible.builtin.command:
-            argv: [tar, -czf, "{{ agui_archive_dir.path }}/spe-agui-export.tar.gz", -C, "{{ agui_export_dir.path }}", .]
-          changed_when: true
+            - name: Pack the bundle
+              ansible.builtin.command:
+                argv: [tar, -czf, "{{ agui_archive_dir.path }}/spe-agui-export.tar.gz", -C, "{{ agui_export_dir.path }}", .]
+              changed_when: true
 
-        - name: Fetch the bundle
-          ansible.builtin.fetch:
-            src: "{{ agui_archive_dir.path }}/spe-agui-export.tar.gz"
-            dest: "{{ spe_output_dir }}/archive-bundle-agui.tar.gz"
-            flat: true
+            - name: Fetch the bundle
+              ansible.builtin.fetch:
+                src: "{{ agui_archive_dir.path }}/spe-agui-export.tar.gz"
+                dest: "{{ spe_output_dir }}/archive-bundle-agui.tar.gz"
+                flat: true
+          rescue:
+            # After a final archive's barrier nothing starts the services again: a failure here says so,
+            # as the barrier's own failure does.
+            - name: The archive failed after the copy began
+              ansible.builtin.fail:
+                msg: >-
+                  The archive failed at "{{ ansible_failed_task.name }}" ({{ ansible_failed_result.msg
+                  | default(ansible_failed_result.stderr | default('no message')) }}).
+                  {{ agui_stopped_msg if agui_final else 'Nothing was stopped; run archive.yml again.' }}
       always:
         - name: Remove the export from the VM
           ansible.builtin.file:
@@ -522,9 +580,7 @@ spe_archive_final: false
           loop: "{{ [agui_export_dir.path | default(''), agui_archive_dir.path | default('')] | select | list }}"
 ```
 
-  `agui_chat_ui_image` is the task slice 3 registers for the image (`docker inspect --format
-  '{{.Config.Image}}'` of `agui_chat_ui.stdout`, or what slice 3 chose): keep it where slice 3 put it. The
-  exporter reads the copy, not the volume, so the mode is the only difference between live and final after the
+  The exporter reads the copy, not the volume, so the mode is the only difference between live and final after the
   barrier.
 
 - [ ] **Step 6: run them to see them pass, then the suites.**
@@ -536,7 +592,7 @@ uv run --with pytest pytest platform/dev/tests -q
 grep -n "start', 'agent'\|Start the agent and the chat UI again" platform/ansible/roles/run_archive/tasks/export.yml
 ```
 
-  Expected: 7 passed; the whole directory passes; the syntax check prints the four playbook names; the grep
+  Expected: 9 passed; the whole directory passes; the syntax check prints the four playbook names; the grep
   prints nothing. If `ansible-playbook` stops with "Non-blocking file handles detected", run it under
   `script -qefc '<command>' /dev/null` (`docs/knowledge/ansible-nonblocking-stdout.md`).
 
@@ -596,7 +652,7 @@ the services again. The bundle says live or final (decision 30)."
   `check_close_tab` and `check_stop`'s end rewritten; `LOCAL`, `INSTANCE`, `main`, the docstring)
 
 **Interfaces:**
-- Consumes: the journal's line types and fields (README, *Shared interfaces*, `lib/journal.ts`); the session API
+- Consumes: the journal's line types and fields ([`interfaces.md`](interfaces.md), `lib/journal.ts`); the session API
   (`GET /api/sessions`, hidden included); `fake_agent.py`'s `Turn N` and `slow`.
 - Produces: `journal_lines(r, sid)`, `runs_of(lines)`, `run_text(lines, run_id)`, `wait_ended(r, sid, n, seconds)`,
   `session_meta(sid)`, `session_by_title(title)`; scenarios `devtools-edit` and `restore-tip` (local) and
@@ -1330,9 +1386,9 @@ history before this directory is that of the single file it replaced:
      built by the *AG-UI conversation record* plan (`docs/superpowers/plans/2026-11-03-agui-conversation-record/`,
      done)."
   6. `docs/README.md`, the plan's row: "plan: the AG-UI conversation record in four slices, done (all four merged);
-     shared interfaces in its `README.md`, handoffs in `handoffs/`" and *Read when* "you change how `chat-ui` keeps
+     shared interfaces in its `interfaces.md`, handoffs in `handoffs/`" and *Read when* "you change how `chat-ui` keeps
      a conversation or how the agui archive exports it, or look for why they work as they do".
-  7. The plan README's slices table: slices 1–3 `merged (#…)` as they stand, 4/4 `merged (#<this PR>)`.
+  7. The plan README's slices table: slices 1–3 `merged #…` as they stand, 4/4 `merged #<this PR>`.
 
 ```bash
 git add docs/specs/2026-10-15-agui-frontend-design/README.md docs/specs/2026-10-15-agui-frontend-design/14-archive.md \
@@ -1429,7 +1485,7 @@ ls -A $R4/agui-journals | wc -l; test -e $R4/agent-runs.jsonl || echo no-run-log
 
 ## Notes for the plan author
 
-*Folded into the README's Shared interfaces, File structure and clarifications on 2026-11-03; the notes stay as
+*Folded into the README's Shared interfaces (now [`interfaces.md`](interfaces.md)), File structure and clarifications on 2026-11-03; the notes stay as
 the record of why.*
 
 - **Files beyond the README's *File structure* row for slice 4:** `platform/dev/tests/test_archive_export.py`

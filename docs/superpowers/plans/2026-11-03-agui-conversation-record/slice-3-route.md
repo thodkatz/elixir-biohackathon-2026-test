@@ -7,7 +7,7 @@ work on journals, and `archive.yml` copies the journals and exports them with sl
 WebUI bundle that `write_run.py` renders (the stop/copy/start barrier still runs in every archive until slice 4).
 `write_agui_run.py`, `<uuid>.json` and the `spe.session_save_failed` event go. It ends with the spec's **early
 output**: sample 1 (the built server, a `curl` with a fabricated assistant turn and a forged `spe-compaction-`
-marker, `fake_agent.py`'s echo, the journal lines) and sample 2 (the rendered `chats/01-*.md` of that session and
+marker, `fake_agent.py`'s echo, the journal lines) and sample 2 (the rendered `chats/NN-*.md` of that session and
 of a normal session with tool calls), in `evidence/slice-3/` and in the PR body with the question to the user.
 
 **Implements:** the living AG-UI spec
@@ -24,8 +24,8 @@ browser (task 5). Clarification: the as-built archive paragraph (README, *Propos
 **Review Focus** (plan README): items 1–4 are slice 1's and item 5 slice 2's; this slice adds no input of its own
 beyond them. A reviewer looks first at `SessionRecorder.run` (task 2) and how it calls `classify`.
 
-**Branch:** `impl/agui-conversation-record-3-route`, from `main` after slice 2 merged (and #18, plan README,
-*Order against the compaction track*). Global constraints, shared interfaces and rulings: [plan README](README.md).
+**Branch:** `impl/agui-conversation-record-3-route`, from `main` after slice 2 merged. Global constraints and
+rulings: [plan README](README.md); shared interfaces: [`interfaces.md`](interfaces.md).
 Paths are relative to the repository root unless a step `cd`s; `CHAT` means `platform/agui/copilotkit-chat`,
 `ARCHIVE` `platform/ansible/roles/run_archive/files`, `E` `docs/superpowers/plans/2026-11-03-agui-conversation-record/evidence/slice-3`.
 
@@ -70,8 +70,8 @@ commit it on the branch, push, and end with `.methodology/shared/claude/next-ses
 - References to retire, found by `grep -rn "write_agui_run\|agui-sessions\|session file\|<id>.json"`:
   `platform/ansible/README.md:155-157`, `platform/coder/README.md:112,303`, `docs/getting-started.md:56`,
   `CHAT/README.md:23-38,68-73`, `docs/knowledge/agui-chat-sessions.md:49`, `ARCHIVE/write_run.py:12`,
-  `roles/agui/templates/docker-compose.yml.j2:14`, `BACKLOG.md:42` (the list reading every file, which the index
-  answers).
+  `roles/agui/templates/docker-compose.yml.j2:14`, `BACKLOG.md`'s item on `list()` reading every session file (which
+  the index answers) and its *`## Compacted` line* item (which names `write_agui_run.py`).
 
 ---
 
@@ -86,7 +86,7 @@ commit it on the branch, push, and end with `.methodology/shared/claude/next-ses
 - Consumes: `JournalWriter`, `journalPath`, `idOfJournal`, `parseJournal`, `NewLine`, `Line`, `Durability`,
   `Clock`, `JournalFs` (slice 1, `lib/journal.ts`); `rebuildText`, `branchOfTip`, `Conversation` (slice 1,
   `lib/rebuild.ts`).
-- Produces: README *Shared interfaces*, `lib/sessions.ts`, exactly; `seedRun(journals, text, opts)` in
+- Produces: [`interfaces.md`](interfaces.md), `lib/sessions.ts`, exactly; `seedRun(journals, text, opts)` in
   `lib/test-journals.ts` for tasks 2–3's tests.
 
 Decisions 10 (append-only, ids), 12 (the index), 13 (API shapes, one `meta` line per `PATCH`), 14 (no
@@ -1063,7 +1063,8 @@ red until then)."
 
 **Files:**
 - Modify (rewrite): `CHAT/lib/recorder.ts`, `CHAT/lib/recorder.test.ts`
-- Modify: `CHAT/app/api/copilotkit/[[...slug]]/route.ts` (l. 7, 23–27), `CHAT/lib/reconcile.ts` (l. 10–21, 55–59),
+- Modify: `CHAT/app/api/copilotkit/[[...slug]]/route.ts` (l. 7, 23–27), `CHAT/lib/reconcile.ts` (`SAVE_FAILED_EVENT`,
+  `REFUSED_RUN_MESSAGES`, `isSaveFailed`),
   `CHAT/lib/reconcile.test.ts` (imports, two tests), `CHAT/app/use-run-reconcile.ts` (the save-failed event gone)
 - Unchanged, run: `CHAT/lib/clone.test.ts` (decision 24's unit half: the hook survives the clone with per-run
   state)
@@ -1073,7 +1074,7 @@ red until then)."
   `lib/anchor.ts`); `branchOfTip`, `Conversation` (slice 1); `parseJournal`, `Line`, `RunStartLine`,
   `RunEndLine`, `JournalFs`, `Clock` (slice 1); `startTestAgent` with its keywords (`hang`, `boom`, `error`,
   `eof`, `crash`, `compact`, `activity`; slice 1 adds `echo-input`); `seedRun` (task 1).
-- Produces: README's `lib/recorder.ts` line: `SessionRecorder(journals: () => Journals, now?)`, `fetch`, `run`;
+- Produces: [`interfaces.md`](interfaces.md)'s `lib/recorder.ts` line: `SessionRecorder(journals: () => Journals, now?)`, `fetch`, `run`;
   `REFUSAL_MESSAGES`. The refusal messages: `invalid session`, `this session was deleted`, `the chat UI is
   shutting down`, `this session could not be saved`, and two this slice names (*Notes for the plan author*):
   `this run carries no new message` (decision 3, journaled) and `this run was already recorded` (a reused
@@ -1530,7 +1531,7 @@ test("decision 7: a terminal event followed by unsubscription: completed, exactl
   }
 });
 
-test("decision 7: 1000 events within a second fsync at most three times", async () => {
+test("decision 7: 1000 events within a second fsync three times: run_start, one interval, run_end", async () => {
   let syncs = 0;
   const counting: JournalFs = {
     open: async (p, flags) => {
@@ -1547,26 +1548,52 @@ test("decision 7: 1000 events within a second fsync at most three times", async 
       };
     },
   };
-  let t = Date.parse("2026-11-03T10:00:00.000Z");
-  const clock: Clock = { now: () => t, setTimeout: () => 0, clearTimeout: () => {} };
+  // A clock whose timers fire only when the test fires them: the interval passes once, mid-run.
+  const timers = new Map<number, () => void>();
+  let nextTimer = 1;
+  const clock: Clock = {
+    now: () => 0,
+    setTimeout: (fn) => {
+      const handle = nextTimer++;
+      timers.set(handle, fn);
+      return handle;
+    },
+    clearTimeout: (handle) => void timers.delete(handle as number),
+  };
+  const fire = () => {
+    const due = [...timers.values()];
+    timers.clear();
+    for (const fn of due) fn();
+  };
+  const pause = () => new Promise((r) => setTimeout(r, 5));
   const journals = await tmpJournals({ fs: counting, clock });
   const recorder = new Scripted(() => journals);
-  recorder.script = (sub, i) => {
+  const id = randomUUID();
+  const eventLines = async () => ofType(await lines(journals, id), "event").length;
+  let atInterval = { syncs: -1, armed: -1 };
+  recorder.script = async (sub, i) => {
     const ids = { threadId: i.threadId, runId: i.runId };
     const m = `m-${i.runId}`;
     const events: object[] = [{ type: EventType.RUN_STARTED, ...ids }, { type: EventType.TEXT_MESSAGE_START, messageId: m, role: "assistant" }];
     for (let n = 0; n < 996; n++) events.push({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: m, delta: "x" });
     events.push({ type: EventType.TEXT_MESSAGE_END, messageId: m }, { type: EventType.RUN_FINISHED, ...ids });
-    for (const event of events) {
-      t += 0.5; // 1000 events within 500 ms
+    for (const [n, event] of events.entries()) {
       sub.next(event as BaseEvent);
+      if (n === 499) {
+        // Once the first 500 events are written, the interval passes: its timer fires and fsyncs once.
+        for (let k = 0; k < 1000 && (await eventLines()) < 500; k++) await pause();
+        atInterval = { syncs, armed: timers.size };
+        fire();
+        for (let k = 0; k < 1000 && syncs === atInterval.syncs; k++) await pause();
+      }
     }
     sub.complete();
   };
-  const id = randomUUID();
   await drive(recorder, input(id, "a long answer"), new HttpAgent({ url: UNUSED }));
-  assert.equal(ofType(await lines(journals, id), "event").length, 1000);
-  assert.ok(syncs >= 2 && syncs <= 3, `fsyncs: ${syncs}`);
+  assert.equal(await eventLines(), 1000);
+  assert.deepEqual(atInterval, { syncs: 1, armed: 1 }, "run_start's fsync, then one interval timer armed by the events");
+  assert.equal(syncs, 3, "run_start, the one interval, run_end (whose fsync covers the later events)");
+  assert.equal(timers.size, 0, "run_end cancelled the pending interval");
 });
 
 test("decision 8: an append failing after five events aborts the agent request: RUN_ERROR, run_end aborted", async () => {
@@ -1829,6 +1856,34 @@ test("closing set while admission's journal read is pending: the run is refused,
     await settled(id);
     assert.equal(isRunning(id), false);
     assert.deepEqual(await lines(journals, id), []);
+  } finally {
+    shared().closing = false;
+    await server.close();
+  }
+});
+
+test("closing set while run_start is being written: run_end refused, the agent never called", async () => {
+  // SIGTERM lands during run_start's fsync, after the last check before it: the run has a line, so it ends
+  // with run_end refused instead of running unseen by shutdown's snapshot of `running`.
+  const server = await startTestAgent();
+  class ClosesDuringRunStart extends Journals {
+    async append(id: string, line: NewLine, durability: "now" | "soon"): Promise<void> {
+      await super.append(id, line, durability);
+      if (line.type === "run_start") shared().closing = true;
+    }
+  }
+  const journals = new ClosesDuringRunStart(await fs.mkdtemp(path.join(os.tmpdir(), "recorder-")));
+  const recorder = new SessionRecorder(() => journals);
+  try {
+    const id = randomUUID();
+    const out = await drive(recorder, input(id, "late"), new HttpAgent({ url: server.url, fetch: recorder.fetch }));
+    assert.deepEqual(types(out), [EventType.RUN_STARTED, EventType.RUN_ERROR]);
+    assert.equal(message(out, 1), "the chat UI is shutting down");
+    assert.equal(server.requests.length, 0);
+    await settled(id);
+    assert.equal(isRunning(id), false);
+    const end = await onlyEnd(journals, id);
+    assert.deepEqual([end.status, end.error], ["refused", "the chat UI is shutting down"]);
   } finally {
     shared().closing = false;
     await server.close();
@@ -2311,6 +2366,17 @@ export class SessionRecorder extends Middleware {
         console.error(`journal: run_start of run ${input.runId} of ${id} failed: ${codeOf(error)}`);
         return { refused: NOT_SAVED };
       }
+      // Re-checked once run_start is on disk: SIGTERM may have landed during its fsync, after shutdown() took
+      // its snapshot of `running`, so a run admitted now would never be cancelled and drain would time out.
+      // The run is journaled, so it is ended here: run_end refused, then the closing refusal.
+      if (shared().closing) {
+        try {
+          await journals.append(id, { type: "run_end", run_id: input.runId, status: "refused", error: CLOSING }, "now");
+        } catch (error) {
+          console.error(`journal: run_end of refused run ${input.runId} of ${id} failed: ${codeOf(error)}`);
+        }
+        return { refused: CLOSING };
+      }
       if (classification.newMessages.length === 0) {
         try {
           await journals.append(id, { type: "run_end", run_id: input.runId, status: "refused", error: NO_NEW_MESSAGE }, "now");
@@ -2337,8 +2403,8 @@ export class SessionRecorder extends Middleware {
     const recorder = new SessionRecorder(defaultJournals);
 ```
 
-  In `CHAT/lib/reconcile.ts`, delete `SAVE_FAILED_EVENT` (l. 11–13) and `isSaveFailed` (l. 55–59), and replace
-  `REFUSED_RUN_MESSAGES` (l. 14–21) with:
+  In `CHAT/lib/reconcile.ts`, delete the constant `SAVE_FAILED_EVENT` with its doc comment and the function
+  `isSaveFailed` with its doc comment, and replace the constant `REFUSED_RUN_MESSAGES` with its doc comment by:
 
 ```ts
 /** RUN_ERROR messages the recorder ends a run with by itself: a refusal (nothing more is journaled for it)
@@ -2353,8 +2419,9 @@ export const REFUSED_RUN_MESSAGES: readonly string[] = [
 ];
 ```
 
-  and its header's last two sentences with: "Browser code: it must not import recorder.ts (Node-only);
-  reconcile.test.ts checks the copy below against it." In `CHAT/lib/reconcile.test.ts`: the recorder import becomes
+  and, in the file's header comment, the sentence "Browser code: it must not import recorder.ts (Node-only);
+  reconcile.test.ts checks the copies below against it." with "Browser code: it must not import recorder.ts
+  (Node-only); reconcile.test.ts checks the copy below against it." In `CHAT/lib/reconcile.test.ts`: the recorder import becomes
   `import { REFUSAL_MESSAGES } from "./recorder.ts";`, drop `SAVE_FAILED_EVENT` and `isSaveFailed` from the
   `./reconcile.ts` import, and delete the test `isSaveFailed: the recorder's save-failed event for this run's
   session only`. The test `REFUSED_RUN_MESSAGES are the recorder's refusal messages, all of them` stays as it is.
@@ -2554,6 +2621,30 @@ grep -rn "session_save_failed\|SAVE_FAILED_EVENT\|isSaveFailed\|already running\
   detached`, then `check-shutdown: all passed`. Then the image half: `(cd CHAT && docker build -t
   spe-chat-ui:check . && node scripts/check-shutdown.mjs --image spe-chat-ui:check)`, the same lines.
 
+  Then slice 2's in-image exporter check again (slice 2, task 2, step 5), on this image: the exporter imports
+  `autoTitle` from `lib/sessions.ts`, which task 1 rewrote, so the image must still carry everything it imports
+  and export the committed bundle:
+
+```bash
+cd platform/agui/copilotkit-chat
+out=$(mktemp -d)
+docker run --rm --user "$(id -u):$(id -g)" --entrypoint node \
+  -v "$PWD/../../dev/tests/fixtures/agui-record:/in:ro" -v "$out:/out" \
+  spe-chat-ui:check scripts/export-journals.ts /in /out/bundle.json final
+python3 - "$out/bundle.json" ../../dev/tests/fixtures/agui-record/final.bundle.json <<'EOF'
+import json, sys
+built, fixture = (json.load(open(p)) for p in sys.argv[1:3])
+built["exported_at"] = fixture["exported_at"] = 0
+assert built == fixture, "the image's export differs from the committed bundle"
+print("the image exports the committed bundle")
+EOF
+docker run --rm --entrypoint node spe-chat-ui:check scripts/export-journals.ts /in /out/x.json weekly; echo "exit $?"
+cd -
+```
+
+  Expected: `5 sessions (1 hidden, 1 deleted), final archive`, `the image exports the committed bundle`, then the
+  usage line and `exit 2`.
+
 - [ ] **Step 6: commit.**
 
 ```bash
@@ -2577,12 +2668,13 @@ check-shutdown reads the run_end line; the drain's log line names journals."
 - Delete: `ARCHIVE/write_agui_run.py`; `platform/dev/tests/test_write_agui_run.py` (or reduced, step 1)
 - Modify (docs this change makes stale, same commit): `platform/ansible/README.md` (*Run archive*, l. 152–159),
   `platform/coder/README.md` (l. 111–113, l. 303), `docs/getting-started.md` (l. 56),
-  `docs/knowledge/agui-chat-sessions.md` (§4, last sentence of its first fix)
+  `docs/knowledge/agui-chat-sessions.md` (§4, last sentence of its first fix), `BACKLOG.md` (the `## Compacted`
+  line item)
 
 **Interfaces:**
 - Consumes: slice 2's exporter in the image, run as
   `docker run --rm --entrypoint node -v <dir>:/in:ro -v <out>:/out <chat-ui image> scripts/export-journals.ts /in /out/bundle.json <live|final>`
-  (README *Shared interfaces*), and `write_run.py <bundle> <run dir> <report title>`, which renders a bundle
+  ([`interfaces.md`](interfaces.md)), and `write_run.py <bundle> <run dir> <report title>`, which renders a bundle
   with `spe_archive_mode` as the AG-UI index (slice 2, task 3).
 - Produces: the fetched `archive-bundle-agui.tar.gz` holding `bundle.json`, `agui-journals/<uuid>.jsonl` and
   (when a run reached the agent) `agent-runs.jsonl`; in the run directory `agui-journals/`, `agent-runs.jsonl`,
@@ -2881,6 +2973,8 @@ def test_write_run_still_renders_an_openwebui_bundle(tmp_path):
     `agent-runs.jsonl`".
   - `docs/knowledge/agui-chat-sessions.md` §4: "`run_archive`'s `write_agui_run.py` export task does this for
     `chat-ui`." becomes "`run_archive`'s export task (`tasks/export.yml`) does this for `chat-ui`."
+  - `BACKLOG.md`, the item *AG-UI archive: the `## Compacted` line …*: "reword it in `write_agui_run.py` and its
+    test" becomes "reword it in `write_run.py` and `test_write_run_agui.py`" (slice 2 moved the rendering there).
 
 - [ ] **Step 6: run the checks.**
 
@@ -2892,27 +2986,30 @@ grep -rn "write_agui_run\|agui-sessions" platform docs/getting-started.md docs/k
 
   Expected: pytest passes, the syntax check prints the four playbooks with no error, and the grep finds nothing.
 
-- [ ] **Step 7: the archive on the dev VM, without a model call.** From the main checkout (the instance file lives
-  there), redeploy the dev VM's instance in place with this worktree's chat (`AGENTS.md`, *Worktrees and
-  deploying*), put one of slice 2's fixture journals into the volume, archive, and read the run directory:
+- [ ] **Step 7: the archive on the dev VM, without a model call.** Redeploy the dev VM's instance in place with
+  this worktree's chat (`create.yml` from the main checkout, where the instance file lives, with
+  `spe_agui_source_dir=$W/platform/agui`: `AGENTS.md`, *Worktrees and deploying*), put one of slice 2's fixture
+  journals into the volume, and run this branch's `archive.yml` **from the worktree** (the main checkout's is the
+  old code) with the main checkout's instance file and output root, as slice 4's `play` helper does:
 
 ```bash
-W=$PWD   # this worktree
-cd /workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test/platform/ansible
-ansible-playbook playbooks/create.yml -e @instances/dev-local.yml -e spe_agui_source_dir=$W </dev/null
+M=/workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test; W=$(git rev-parse --show-toplevel)
+create() { script -qefc "set -a; . ~/.config/spe-dev/llm.env; set +a; cd $M/platform/ansible && ansible-playbook playbooks/create.yml -e @instances/dev-local.yml -e spe_agui_source_dir=$W/platform/agui -e spe_min_free_gb=5 </dev/null" /dev/null; }
+play() { local pb=$1; shift; script -qefc "cd $W/platform/ansible && ansible-playbook playbooks/$pb.yml -e @$M/platform/ansible/instances/dev-local.yml -e spe_output_root=$M/platform/ansible/output $* </dev/null" /dev/null; }
+create
 # The dev VM is this machine (ssh_target: localhost in output/dev-local/hosts.yml); its frontend directory is
 # spe_frontend_dir, /home/<spe_ssh_user>/spe-frontend.
 DC="docker compose -p spe-frontend -f $HOME/spe-frontend/docker-compose.yml"
-F=$(ls $W/platform/dev/tests/fixtures/agui-record/*.jsonl | head -1)
-$DC cp $F chat-ui:/data/sessions/$(basename $F)
-ansible-playbook playbooks/archive.yml -e @instances/dev-local.yml </dev/null
+J=$(ls $W/platform/dev/tests/fixtures/agui-record/*.jsonl | head -1)
+$DC cp $J chat-ui:/data/sessions/$(basename $J)
+play archive
 ```
 
   In the run directory `archive.yml` prints: `index.md` names the AG-UI frontend and its table has a row for the
   fixture's session (the volume's older `<uuid>.json` files are copied raw beside the journals and rendered as
-  nothing, decision 14); `cmp agui-journals/$(basename $F) $F` is silent; `chats/01-*.md` renders it;
+  nothing, decision 14); `cmp agui-journals/$(basename $J) $J` is silent; `chats/01-*.md` renders it;
   `agent-runs.jsonl` is there if the VM's agent ever ran. `$DC ps` shows `chat-ui` and `agent` running again.
-  Then `$DC exec chat-ui rm /data/sessions/$(basename $F)`. No model is called: no run is made. If the fixture's
+  Then `$DC exec chat-ui rm /data/sessions/$(basename $J)`. No model is called: no run is made. If the fixture's
   name is not a `<uuid>.jsonl`, copy it in under `$(python3 -c 'import uuid; print(uuid.uuid4())').jsonl` and
   compare against that name.
 
@@ -2922,7 +3019,7 @@ ansible-playbook playbooks/archive.yml -e @instances/dev-local.yml </dev/null
 git rm platform/ansible/roles/run_archive/files/write_agui_run.py
 git add platform/ansible/roles/run_archive/tasks/export.yml platform/ansible/roles/run_archive/tasks/write.yml \
   platform/ansible/roles/run_archive/files/write_run.py platform/ansible/README.md platform/coder/README.md \
-  docs/getting-started.md docs/knowledge/agui-chat-sessions.md
+  docs/getting-started.md docs/knowledge/agui-chat-sessions.md BACKLOG.md
 git add platform/dev/tests/test_write_agui_run.py 2>/dev/null || true   # when step 1 reduced it rather than removed it
 git commit -s -m "Archive: export the AG-UI journals with the chat UI's exporter
 
@@ -2944,16 +3041,17 @@ write_agui_run.py and its session format go."
   (rewrite), `platform/dev/e2e/sessions.py` (`Run`, `seed`, `check_view`, `check_close_tab`, `check_stop`,
   `check_compaction`, `check_save_failed`, `slow_loop`'s docstring, `InstanceRun.files`, `main`; one check added)
 - Modify (docs): `CHAT/README.md` (*Sessions*, *Shutdown*), `platform/ansible/roles/agui/templates/docker-compose.yml.j2`
-  (l. 14 comment), `docs/knowledge/agui-chat-sessions.md` (§5's fix), `BACKLOG.md` (l. 42)
+  (l. 14 comment), `docs/knowledge/agui-chat-sessions.md` (§5's fix), `BACKLOG.md` (one item)
 - Modify (spec): `docs/specs/2026-10-15-agui-frontend-design/clarifications.md`, `14-archive.md` (l. 8–10,
-  l. 52–55), `README.md` (status, latest clarification)
+  l. 52–55), `06-chat-ui.md` (*Session API*, the `GET /api/sessions/{id}` row), `README.md` (status, latest
+  clarification)
 - Create: `E/sample-1-request.json`, `E/sample-1-response.sse`, `E/sample-1-journal.jsonl`,
   `E/sample-2-forged-session.md`, `E/sample-2-normal-session.md`, `E/sample-2-index.md`
 - Modify (PR): the plan README's slices table, `AGENTS.md` *Current work*; create the handoff in `handoffs/`
 
 **Interfaces:**
 - Consumes: everything above; slice 2's exporter image and `write_run.py`.
-- Produces: `fake_agent.py`'s `echo-input` (README *Shared interfaces*); the e2e helpers `read_journal`,
+- Produces: `fake_agent.py`'s `echo-input` ([`interfaces.md`](interfaces.md)); the e2e helpers `read_journal`,
   `summary` (what a check reads of a journal) and `Run.restart_ui`.
 
 Decisions 2 (*no false alarm*, built server and the real browser), 5 (built-server half: the feasibility check),
@@ -3499,11 +3597,11 @@ uv run --with pytest pytest platform/dev/tests -q
   - `roles/agui/templates/docker-compose.yml.j2` l. 14: `# Chat sessions, one append-only journal each (/data/sessions/<id>.jsonl); private like agent-runs.`
   - `docs/knowledge/agui-chat-sessions.md` §5's fix: "(saved `cancelled`)" becomes "(each ends `cancelled` in its
     journal)".
-  - `BACKLOG.md`: delete l. 42 (`list()` reads every session file before the cap): the index answers it
-    (decision 12).
+  - `BACKLOG.md`: delete the item *AG-UI chat sessions: `lib/sessions.ts` `list()` reads and parses every
+    session file …*: the index answers it (decision 12).
 
 - [ ] **Step 6: the clarification.** In `docs/specs/2026-10-15-agui-frontend-design/clarifications.md`, add the
-  next free number N (after #18's, if it merged first):
+  next free number N:
 
 ```markdown
 N. **The conversation record is built; the archive exports the journals, and every archive still runs the
@@ -3512,9 +3610,18 @@ N. **The conversation record is built; the archive exports the journals, and eve
    journals with the chat UI's exporter and renders them with `write_run.py` (§14); `<uuid>.json` and
    `write_agui_run.py` are gone. Until the live copy is built, every archive stops `chat-ui` and then the agent
    before the copy and starts them again after it, as the archive of the chat sessions did, and the bundle says
-   `final`. *Reason:* the record and its archive ship together, so `main` never holds journals the archive
-   cannot render; the live copy (decision 30) follows separately. *Amends:* the README's status line, §14 (the
-   paragraph on the archive as built, the last paragraph of *Why a live copy is consistent*). *Status:* folded.
+   `final`. `GET /api/sessions/{id}` answers the metadata without `last_run_at`, which the browser reads from the
+   list only. *Reason:* the record and its archive ship together, so `main` never holds journals the archive
+   cannot render; the live copy (decision 30) follows separately; one session's view has no use for the last
+   run's time, and decision 13 keeps the view's answer as it was. *Amends:* the README's status line, §6
+   *Session API* (the `GET /api/sessions/{id}` row), §14 (the paragraph on the archive as built, the last
+   paragraph of *Why a live copy is consistent*). *Status:* folded.
+```
+
+  In `06-chat-ui.md`, *Session API*, the `GET /api/sessions/{id}` row becomes:
+
+```markdown
+| `GET /api/sessions/{id}` | `200` with `id`, `title`, `tags`, `pinned`, `hidden`, `created_at`, `updated_at` and `messages`: the tip's branch (§13); no `last_run_at` (the list answers it); `404` if missing or deleted. `version` and `title_source` are no longer answered: the journal keeps neither |
 ```
 
   Then in `14-archive.md`, l. 8–10 (*Until the record is built, …*) become:
@@ -3540,7 +3647,7 @@ git add platform/dev/fake_agent.py platform/agui/copilotkit-chat/scripts/check-b
   platform/dev/e2e/sessions.py platform/agui/copilotkit-chat/README.md \
   platform/ansible/roles/agui/templates/docker-compose.yml.j2 docs/knowledge/agui-chat-sessions.md BACKLOG.md \
   docs/specs/2026-10-15-agui-frontend-design/clarifications.md docs/specs/2026-10-15-agui-frontend-design/14-archive.md \
-  docs/specs/2026-10-15-agui-frontend-design/README.md
+  docs/specs/2026-10-15-agui-frontend-design/06-chat-ui.md docs/specs/2026-10-15-agui-frontend-design/README.md
 git commit -s -m "Chat sessions: the checks read journals; echo-input; the record described as built
 
 check-built-server runs the feasibility check (a fabricated turn and a forged
@@ -3601,8 +3708,10 @@ O=$(mktemp -d) && mkdir -p $O/run/agui-journals && cp $J/*.jsonl $O/run/agui-jou
 docker run --rm --network none --read-only --tmpfs /tmp --user "$(id -u):$(id -g)" --entrypoint node \
   -v "$J:/in:ro" -v "$O:/out" spe-chat-ui:slice3 scripts/export-journals.ts /in /out/bundle.json final
 python3 platform/ansible/roles/run_archive/files/write_run.py $O/bundle.json $O/run "Run report"
-cp $O/run/chats/01-*.md $E/sample-2-forged-session.md
-cp $O/run/chats/02-*.md $E/sample-2-normal-session.md
+# By title (the slug of each session's first user text), not by number: two sessions created in the same
+# second could be numbered either way.
+cp $O/run/chats/[0-9][0-9]-list-the-files.md $E/sample-2-forged-session.md
+cp $O/run/chats/[0-9][0-9]-list-the-home-directory.md $E/sample-2-normal-session.md
 cp $O/run/index.md $E/sample-2-index.md
 ```
 
@@ -3618,14 +3727,15 @@ git add $E
 git commit -s -m "Evidence: the conversation record's early output, samples 1 and 2"
 ```
 
-- [ ] **Step 9: handoff, PR, review, merge.** Update the plan README's slices table (row 3/4: `done`, the PR's
-  number) and the track's line in `AGENTS.md`, *Current work* (next: slice 4/4
+- [ ] **Step 9: handoff, PR, review, merge.** Update the plan README's slices table (row 3/4:
+  `merged #<this PR>`) and the track's line in `AGENTS.md`, *Current work* (next: slice 4/4
   `impl/agui-conversation-record-4-live-archive`). Write the handoff
   (`handoffs/<UTC stamp>-slice-3-merged-start-slice-4.md`): what landed, every ruling of this slice with *decision,
   why, cost if wrong*, the user's answer to the question below if it came, and slice 4's start. Open the PR
   `The record on journals: store, run route, API and archive (3/4)` with `gh pr create --repo
   thodkatz/elixir-biohackathon-2026-test --base main`. The body says what ran (`npm test`, `npm run build`,
-  `check-built-server.mjs`, `check-shutdown.mjs` standalone and in the image, pytest, `--syntax-check`, the e2e
+  `check-built-server.mjs`, `check-shutdown.mjs` standalone and in the image, the in-image exporter check (task
+  3, step 5), pytest, `--syntax-check`, the e2e
   `all` and `stop` scenarios, the dev VM archive of task 4 step 7), embeds sample 1 (the request's last three
   messages, the echo, the journal's `run_start` line, shortened where a line is long) and sample 2 (the two
   rendered chats, or their relevant blocks, and the index), and **asks the user**:
@@ -3646,7 +3756,7 @@ git commit -s -m "Evidence: the conversation record's early output, samples 1 an
 
 ## Notes for the plan author
 
-*Folded into the README's Shared interfaces, File structure and clarifications on 2026-11-03; the notes stay as
+*Folded into the README's Shared interfaces (now [`interfaces.md`](interfaces.md)), File structure and clarifications on 2026-11-03; the notes stay as
 the record of why.*
 
 Departures from the README, or places the README leaves to a slice, each with *why* and *cost if wrong*:

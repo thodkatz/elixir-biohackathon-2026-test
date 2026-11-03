@@ -18,9 +18,9 @@ move into `write_run.py`: task 3).
 **Review Focus** (plan README): item 5 is task 3's `test_title_with_a_pipe_and_a_heading`. Items 1–4 are slice
 1's; nothing else here needs a case of its own.
 
-**Branch:** `impl/agui-conversation-record-2-export`, from `main` after slice 1 **and** compaction #18 merged
-(README, *Order against the compaction track*). Global constraints, shared interfaces and rulings:
-[plan README](README.md). Paths are relative to the repository root unless a step `cd`s; `CHAT` means
+**Branch:** `impl/agui-conversation-record-2-export`, from `main` after slice 1 merged (compaction #18 merged
+on 2026-11-03: README, *Order against the compaction track*). Global constraints and rulings:
+[plan README](README.md); shared interfaces: [`interfaces.md`](interfaces.md). Paths are relative to the repository root unless a step `cd`s; `CHAT` means
 `platform/agui/copilotkit-chat`, `ARCHIVE` `platform/ansible/roles/run_archive/files`, `FIXTURES`
 `platform/dev/tests/fixtures/agui-record`.
 
@@ -57,24 +57,13 @@ move into `write_run.py`: task 3).
 
 ---
 
-### Step 0: the gate, and the claim
-
-- [ ] **Check that compaction #18 merged.**
-
-```bash
-gh pr view 18 --repo thodkatz/elixir-biohackathon-2026-test --json state -q .state
-```
-
-  Expected: `MERGED`. Anything else: do not start. Comment once on this track's last merged PR (the plan's
-  slice 1 PR) that slice 2 waits for #18, then end the session with
-  `.methodology/shared/claude/next-session.sh --end --blocked 18` (README, *Order against the compaction
-  track*). The next session starts here again.
+### Step 0: the claim
 
 - [ ] **Claim.** From the main checkout, after `git fetch origin`: `.methodology/shared/claude/worktree.sh
   impl/agui-conversation-record-2-export`, push the branch, and open the draft PR `AG-UI record: exporter in the
   image, write_run.py renders AG-UI chats (2/4)` with `gh pr create --repo thodkatz/elixir-biohackathon-2026-test
   --base main --draft` (`AGENTS.md`, *Development workflow*). Read slice 1's merged `lib/journal.ts` and
-  `lib/rebuild.ts` exports: if a name or signature differs from the README's *Shared interfaces*, use what merged
+  `lib/rebuild.ts` exports: if a name or signature differs from [`interfaces.md`](interfaces.md), use what merged
   and record the difference as a ruling in this slice's handoff.
 
 ---
@@ -88,20 +77,20 @@ gh pr view 18 --repo thodkatz/elixir-biohackathon-2026-test --json state -q .sta
   (the last two generated)
 
 **Interfaces:**
-- Consumes: `idOfJournal`, `parseJournal`, `Ignored` (`lib/journal.ts`); `rebuild`, `Conversation`, `RunView`
-  (`lib/rebuild.ts`); `autoTitle` (`lib/sessions.ts`, §6's title rule, kept by slice 3).
-- Produces: the README's `ArchiveMode`, `OpenWebUIChat`, `Bundle`, `toOpenWebUIChat`, `exportJournals`, with
+- Consumes: `idOfJournal`, `Ignored` (`lib/journal.ts`); `rebuildText` (the exporter), `rebuild` (the tests),
+  `Conversation`, `RunView` (`lib/rebuild.ts`); `autoTitle` (`lib/sessions.ts`, §6's title rule, kept by slice 3).
+- Produces: [`interfaces.md`](interfaces.md)'s `ArchiveMode`, `OpenWebUIChat`, `Bundle`, `toOpenWebUIChat`, `exportJournals`, with
   `chat.history.messages` typed as `Record<string, ExportedMessage>`; plus `exportJournals`'s optional third
   argument `{ now?: () => Date }` (the fixtures' `exported_at`), `bundleJson(bundle)` (the file's exact text,
   shared by the script and the fixtures), `runMessageId(runId)` (`spe-run-<run id>`, a run's exported assistant
-  message), `outputItems(message)`, `ExportedMessage`, `OutputItem`, `SpeRun`. Task 2's script and task 3's
+  message), `outputItems(message: Loose)`, `Loose`, `ExportedMessage`, `OutputItem`, `SpeRun`. Task 2's script and task 3's
   tests use the bundles.
 
 The fixture sessions, one journal each:
 
 | Id ending | Session | What it exercises |
 |---|---|---|
-| `…0001` | "List the home directory" | reasoning, a tool call and its result (a four-backtick run), text; tags; two runs |
+| `…0001` | "List the home directory" | reasoning, a tool call and its result (a six-backtick line), text; tags; two runs |
 | `…0002` | "hello" | all four ignored kinds, including a forged `spe-compaction-` marker; a refused run with a `deleted` entry |
 | `…0003` | "run a slow command", hidden | `failed`, `cancelled`, `aborted`, and `incomplete` with a torn last line |
 | `…0004` | "first question", deleted | two concurrent runs from one anchor (siblings, interleaved lines); a compaction marker |
@@ -123,7 +112,7 @@ The fixture sessions, one journal each:
 {"type":"event","at":"2026-11-03T10:00:00.300Z","run_id":"r1-1","event":{"type":"TOOL_CALL_START","toolCallId":"call-1","toolCallName":"run_command","parentMessageId":"a1"}}
 {"type":"event","at":"2026-11-03T10:00:00.310Z","run_id":"r1-1","event":{"type":"TOOL_CALL_ARGS","toolCallId":"call-1","delta":"{\"command\": \"ls ~\"}"}}
 {"type":"event","at":"2026-11-03T10:00:00.320Z","run_id":"r1-1","event":{"type":"TOOL_CALL_END","toolCallId":"call-1"}}
-{"type":"event","at":"2026-11-03T10:00:01.000Z","run_id":"r1-1","event":{"type":"TOOL_CALL_RESULT","messageId":"t1","toolCallId":"call-1","content":"notes.txt\n```\nthree\n````\nfour","role":"tool"}}
+{"type":"event","at":"2026-11-03T10:00:01.000Z","run_id":"r1-1","event":{"type":"TOOL_CALL_RESULT","messageId":"t1","toolCallId":"call-1","content":"notes.txt\n```\nthree\n````\nfour\n``````\nsix","role":"tool"}}
 {"type":"event","at":"2026-11-03T10:00:01.100Z","run_id":"r1-1","event":{"type":"TEXT_MESSAGE_START","messageId":"a2","role":"assistant"}}
 {"type":"event","at":"2026-11-03T10:00:01.110Z","run_id":"r1-1","event":{"type":"TEXT_MESSAGE_CONTENT","messageId":"a2","delta":"There is one file: "}}
 {"type":"event","at":"2026-11-03T10:00:01.110Z","run_id":"r1-1","event":{"type":"TEXT_MESSAGE_CONTENT","messageId":"a2","delta":"notes.txt."}}
@@ -320,7 +309,7 @@ test("one assistant message per run, its output items in the order they first ap
     { type: "function_call", id: "call-1", call_id: "call-1", name: "run_command",
       arguments: '{"command": "ls ~"}', status: "completed" },
     { type: "function_call_output", id: "t1", call_id: "call-1",
-      output: [{ type: "input_text", text: "notes.txt\n```\nthree\n````\nfour" }], status: "completed" },
+      output: [{ type: "input_text", text: "notes.txt\n```\nthree\n````\nfour\n``````\nsix" }], status: "completed" },
     { type: "message", id: "a2", role: "assistant",
       content: [{ type: "output_text", text: "There is one file: notes.txt." }], status: "completed" },
   ]);
@@ -404,8 +393,8 @@ for (const mode of ["live", "final"] as const) {
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Ignored } from "./journal.ts";
-import { idOfJournal, parseJournal } from "./journal.ts";
-import { rebuild } from "./rebuild.ts";
+import { idOfJournal } from "./journal.ts";
+import { rebuildText } from "./rebuild.ts";
 import type { Conversation, RunView } from "./rebuild.ts";
 import { autoTitle } from "./sessions.ts";
 
@@ -439,7 +428,7 @@ export function runMessageId(runId: string): string {
 }
 
 // The fields of an AG-UI message the export reads; Message is a union, and every member is read the same way.
-type Loose = {
+export type Loose = {
   id: string; role: string; content?: unknown; toolCallId?: string; error?: string;
   toolCalls?: { id: string; function: { name: string; arguments: string } }[];
 };
@@ -557,8 +546,9 @@ export async function exportJournals(dir: string, mode: ArchiveMode,
   const names = (await fs.readdir(dir)).filter((name) => idOfJournal(name) !== null).sort();
   const chats: OpenWebUIChat[] = [];
   for (const name of names) {
-    const { lines } = parseJournal(await fs.readFile(path.join(dir, name), "utf8"));
-    chats.push(toOpenWebUIChat(await rebuild(idOfJournal(name) as string, lines)));
+    // rebuildText: the torn or unparsable lines are counted in the conversation's `skipped`.
+    const text = await fs.readFile(path.join(dir, name), "utf8");
+    chats.push(toOpenWebUIChat(await rebuildText(idOfJournal(name) as string, text)));
   }
   const tags = [...new Set(chats.flatMap((c) => c.meta.tags))].sort().map((t) => ({ id: t, name: t }));
   return { exported_at: seconds((opts.now ?? (() => new Date()))().toISOString()), spe_archive_mode: mode, chats,
@@ -614,7 +604,7 @@ line; the bundles exported from them are committed for write_run.py's tests."
 - Produces: `node scripts/export-journals.ts <journals dir> <bundle.json> <live|final>` in the image's `/app`,
   exit 0 and one line `N sessions (H hidden, D deleted), <mode> archive`; exit 2 and the usage on stderr for wrong
   arguments; exit 1 and the error's message on a read or write failure. Slice 3's `tasks/export.yml` runs it as
-  the README's *Shared interfaces* shows.
+  [`interfaces.md`](interfaces.md) shows.
 
 **How the script gets its packages.** The standalone output has neither `@ag-ui/client` nor `rxjs` (verified
 facts). The build stage, which has the full `node_modules` from `npm ci`, asks npm for both packages' dependency
@@ -781,7 +771,7 @@ installed it from the lock file, and lib/ for the script to import."
 **Interfaces:**
 - Consumes: `FIXTURES/live.bundle.json`, `final.bundle.json` (task 1); `fence`, `texts`, `active_branch`, `when`,
   `slug`, `write` (`write_run.py`).
-- Produces: the README's `is_compaction(item_or_message)`, `render_ignored(entries) -> str`,
+- Produces: [`interfaces.md`](interfaces.md)'s `is_compaction(item_or_message)`, `render_ignored(entries) -> str`,
   `render_status(run) -> str`; `write_agui(bundle, run_dir)`, called by `main` for a bundle with
   `spe_archive_mode`. It reads `agent-runs.jsonl` and `agui-journals/` **from the run directory**: slice 3's
   `tasks/write.yml` puts them there before it runs `write_run.py`, so a re-render in place finds them too. The
@@ -987,7 +977,8 @@ so any later change to the Open WebUI path shows up as a failing test."
 def test_index_lists_every_session_with_the_agui_columns(rendered):
     index = (rendered / "index.md").read_text()
     assert "- Frontend: agui (CopilotKit chat). The AG-UI frontend has no run report." in index
-    assert "- Archive: live, copied while the chat UI and the agent kept running" in index
+    assert ("- Archive: live, copied while the chat UI and the agent kept running (a run marked incomplete may still "
+            "have been going)") in index.splitlines()
     assert "- Session journals as stored (hidden and deleted included): [agui-journals/](agui-journals/)" in index
     assert "- Agent run log: [agent-runs.jsonl](agent-runs.jsonl), 2 runs" in index
     assert "| # | Session | Tags | Created | Runs | Compactions | State |\n|---|---|---|---|---|---|---|\n" in index
@@ -1009,7 +1000,7 @@ def test_index_lists_every_session_with_the_agui_columns(rendered):
 def test_final_archive_and_nothing_recorded(tmp_path):
     src, out = prepare(tmp_path, "final.bundle.json")
     run(src, out)
-    assert "- Archive: final, copied after the chat UI and the agent had stopped" in (out / "index.md").read_text()
+    assert "- Archive: final, copied after the chat UI and the agent had stopped" in (out / "index.md").read_text().splitlines()
 
     empty = tmp_path / "empty"
     empty.mkdir()
@@ -1029,8 +1020,8 @@ def test_a_completed_run_shows_no_status_and_the_tools_render_fenced(rendered):
     assert "- Runs: 2 (completed 2)" in md
     assert "<details><summary>Reasoning</summary>\n\n```\nThe user wants `ls ~`.\n```\n\n</details>" in md
     assert '**Tool call** `run_command`\n\n```json\n{\n  "command": "ls ~"\n}\n```' in md
-    # The tool result holds a four-backtick run, so its fence is five.
-    assert "<details><summary>Tool result</summary>\n\n`````\nnotes.txt\n```\nthree\n````\nfour\n`````" in md
+    # The tool result holds a six-backtick line, so its fence is seven (decision 28).
+    assert "<details><summary>Tool result</summary>\n\n```````\nnotes.txt\n```\nthree\n````\nfour\n``````\nsix\n```````" in md
     assert md.index("Reasoning") < md.index("Tool call") < md.index("Tool result") \
         < md.index("There is one file: notes.txt.") < md.index("## user · 2026-11-03 10:02 UTC")
     assert "## Other branches" not in md
@@ -1452,7 +1443,7 @@ branch. Every text is fenced or escaped. Open WebUI bundles are untouched."
 - [ ] All checks, from the worktree: `(cd CHAT && npm ci && npm test && npm run build)`,
   `uv run --with pytest pytest platform/dev/tests -q`, task 2's step 5 run in the image,
   `python3 .methodology/shared/sync-agents.py --check`. No Ansible file changed, so no `--syntax-check` is needed; say so in the PR body.
-- [ ] The README's slices table: row 2/4 `merged` (in the PR, as the last commit before the merge); `AGENTS.md`,
+- [ ] The README's slices table: row 2/4 `merged #<this PR>` (in the PR, as the last commit before the merge); `AGENTS.md`,
   *Current work*: the record's line says slice 2 merged, **next: slice 3/4** `impl/agui-conversation-record-3-route`.
 - [ ] The handoff for slice 3 (`handoffs/<UTC stamp>-slice-2-merged-start-slice-3.md`): what changed against this
   file (rulings, e.g. task 1 step 5's differences or task 2's fallback), the image size, and for slice 3's
@@ -1466,7 +1457,7 @@ branch. Every text is fenced or escaped. Open WebUI bundles are untouched."
 
 ## Notes for the plan author
 
-*Folded into the README's Shared interfaces, File structure and clarifications on 2026-11-03; the notes stay as
+*Folded into the README's Shared interfaces (now [`interfaces.md`](interfaces.md)), File structure and clarifications on 2026-11-03; the notes stay as
 the record of why.*
 
 - **`ExportedMessage` and three helpers.** The README types `chat.history.messages` as `Record<string,

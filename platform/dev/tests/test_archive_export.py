@@ -145,6 +145,7 @@ def test_a_failure_after_the_final_barrier_says_the_services_stay_stopped(tmp_pa
     proc, v, modes, out = export(tmp_path, final=True, STUB_CP_FAILS="1")
     assert proc.returncode != 0
     assert "the services stay stopped" in proc.stdout, proc.stdout
+    assert "no space left on device" in proc.stdout, proc.stdout
     assert not [x for x in v if x.startswith(("compose start", "compose restart", "compose up"))], v
     assert modes == [] and not (out / "archive-bundle-agui.tar.gz").exists()
 
@@ -152,7 +153,7 @@ def test_a_failure_after_the_final_barrier_says_the_services_stay_stopped(tmp_pa
 @pytest.mark.parametrize("final", [False, True])
 def test_a_missing_chat_ui_container_fails_the_export(tmp_path, final):
     proc, v, modes, out = export(tmp_path, final=final, STUB_NO_CHAT_UI="1")
-    assert proc.returncode != 0
+    assert proc.returncode != 0 and "The chat-ui container exists" in proc.stdout, proc.stdout
     assert not [x for x in v if x.startswith(("compose stop", "compose cp"))], v
     assert not (out / "archive-bundle-agui.tar.gz").exists()
 
@@ -163,11 +164,11 @@ def test_an_absent_run_log_is_allowed(tmp_path):
     assert not any(n.endswith("agent-runs.jsonl") for n in bundle_names(out))
 
 
-def playbook(tmp_path: Path, name: str) -> subprocess.CompletedProcess:
-    """A playbook for an instance that does not exist: no hand-off file, so nothing is archived or reset."""
+def playbook(tmp_path: Path, name: str, *extra: str) -> subprocess.CompletedProcess:
+    """A playbook for an instance that does not exist: nothing is archived or reset."""
     return subprocess.run(
         ["ansible-playbook", f"playbooks/{name}.yml", "-e", "spe_instance=spe-test-no-such-instance",
-         "-e", "spe_provision=existing", "-e", f"spe_output_dir={tmp_path}"],
+         "-e", "spe_provision=existing", "-e", f"spe_output_dir={tmp_path}", *extra],
         cwd=ANSIBLE, env={**os.environ, "ANSIBLE_NOCOLOR": "1"}, stdin=subprocess.DEVNULL,
         capture_output=True, text=True, timeout=300)
 
@@ -178,8 +179,18 @@ def test_archive_alone_is_live(tmp_path):
     assert "live: copied from the running services, nothing is stopped" in proc.stdout, proc.stdout
 
 
-def test_destroy_runs_the_final_archive(tmp_path):
+def test_destroy_refused_before_the_final_archive(tmp_path):
     proc = playbook(tmp_path, "destroy")
-    # The reset stops at its confirmation (no spe_confirm_reset): nothing is touched.
+    # No spe_confirm_reset: refused before the archive, which would leave the services stopped.
     assert proc.returncode != 0 and "Confirmation given" in proc.stdout, proc.stdout
+    assert "Archive mode" not in proc.stdout, proc.stdout
+
+
+def test_destroy_runs_the_final_archive(tmp_path):
+    (tmp_path / "hosts.yml").write_text(
+        # .invalid never resolves: the reset play after the archive fails unreachable, touching nothing.
+        "instance: spe-test-no-such-instance\nprovision: existing\nssh_target: spe-test.invalid\n")
+    proc = playbook(tmp_path, "destroy", "-e", "spe_confirm_reset=spe-test-no-such-instance",
+                    "-e", "spe_archive_skip=true")
     assert "final: chat-ui and the agent are stopped first and not started again" in proc.stdout, proc.stdout
+    assert "UNREACHABLE" in proc.stdout, proc.stdout

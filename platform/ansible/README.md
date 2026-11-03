@@ -79,7 +79,8 @@ Tested on the agentvm development VM (dummy dataset, spe_manage_docker: false), 
 down with their volumes, the stack, frontend and data directories, the CA
 anchor, the manifest and `/etc/spe-instance` removed — and only with
 `-e spe_confirm_reset=<instance>` on a host whose marker and manifest name
-that instance. Before anything is removed it checks that `output/<instance>/hosts.yml`
+that instance; the confirmation and the hand-off are checked before the final
+archive, which leaves an AG-UI instance's chat stopped. Before anything is removed it checks that `output/<instance>/hosts.yml`
 records the same instance and `spe_provision` (so an edited instance file
 cannot turn a reset into an OpenStack deletion, or the reverse), and that
 every path is the one recorded at creation, is not a symlink, a mount point

@@ -17,7 +17,9 @@ re-rendered.
 files while `chat-ui` and the agent keep running, and interrupts nothing. Only the **final archive**, the one
 `destroy.yml` runs before it removes the volumes, stops the services first, since a run finishing after that
 copy would be lost with the volume. `destroy.yml` imports `archive.yml` with `spe_archive_final: true`; run on
-its own, `archive.yml` is live.
+its own, `archive.yml` is live. `destroy.yml` checks its own preconditions (the instance file against the
+hand-off, and on an existing VM `spe_confirm_reset`) before that archive, so a destroy it would refuse never
+leaves the services stopped.
 
 `tasks/export.yml`, the block for `spe_frontend == 'agui'`:
 

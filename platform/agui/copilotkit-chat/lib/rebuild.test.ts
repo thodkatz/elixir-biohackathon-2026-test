@@ -244,3 +244,66 @@ test("an anchor the journal does not hold rebuilds the run from the root", async
   assert.equal(conv.tip, "a1");
   assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), [`journal ${ID}: run r1: anchor gone not found, rebuilt from the root`]);
 });
+
+test("an event that throws during application ends it there; the messages up to it are kept", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const conv = await rebuild(ID, [
+    created(), start("r1", null, [user("u1", "q1")]),
+    ev("r1", { type: EventType.TEXT_MESSAGE_START, messageId: "a1", role: "assistant" }),
+    ev("r1", { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "a1", delta: "kept" }),
+    ev("r1", { type: EventType.MESSAGES_SNAPSHOT, messages: "not a list" }), // throws inside defaultApplyEvents
+    ev("r1", { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "a1", delta: " lost" }),
+    end("r1"),
+  ]);
+  assert.deepEqual(shape(branchOfTip(conv)), [["user", "u1", "q1"], ["assistant", "a1", "kept"]]);
+  assert.equal(conv.runs[0].events, 4);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), [`journal ${ID}: run r1: event application stopped: TypeError`]);
+});
+
+test("a second run_start for a run is skipped; its events still go to the first", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const conv = await rebuild(ID, [
+    created(), start("r1", null, [user("u1", "q1")]), start("r1", null, [user("u9", "again")]),
+    ...reply("r1", "a1", "x"), end("r1"),
+  ]);
+  assert.deepEqual(conv.runs.map((r) => [r.run_id, r.added, r.events]), [["r1", ["u1", "a1"], 5]]);
+  assert.equal(conv.nodes.has("u9"), false);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), [`journal ${ID}: second run_start for run r1 skipped`]);
+});
+
+test("a message id another run already added is skipped; the first run keeps it", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  // r2 starts from the root (not on a1's path) and its events reuse r1's message id a1.
+  const conv = await rebuild(ID, [
+    created(), start("r1", null, [user("u1", "q1")]), ...reply("r1", "a1", "first"), end("r1"),
+    start("r2", null, [user("u2", "q2")]), ...reply("r2", "a1", "second"), end("r2"),
+  ]);
+  assert.deepEqual(conv.runs.map((r) => r.added), [["u1", "a1"], ["u2"]]);
+  assert.deepEqual([conv.nodes.get("a1")!.runId, conv.nodes.get("a1")!.message.content], ["r1", "first"]);
+  assert.deepEqual([conv.tip, conv.tip_run], ["u2", "r2"]);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), [`journal ${ID}: run r2: message a1 already held, skipped`]);
+});
+
+test("the first run_end counts: a second one changes neither status nor end time", async () => {
+  const first = end("r1", "cancelled");
+  const conv = await rebuild(ID, [
+    created(), start("r1", null, [user("u1", "q1")]), ...reply("r1", "a1", "x"), first, end("r1", "failed", "late"),
+  ]);
+  const [run] = conv.runs;
+  assert.deepEqual([run.status, run.error, run.ended_at, run.last_at], ["cancelled", null, first.at, first.at]);
+});
+
+test("events after a run's run_end are still applied but do not move its last time", async () => {
+  // JournalWriter's caller writes none; a journal that has them rebuilds them, and the run's place in the
+  // tip order stays its run_end's.
+  const ended = end("r1");
+  const conv = await rebuild(ID, [
+    created(), start("r1", null, [user("u1", "q1")]), ...reply("r1", "a1", "x"), ended,
+    start("r2", "a1", [user("u2", "q2")]), ...reply("r2", "a2", "y"), end("r2"),
+    ev("r1", { type: EventType.TEXT_MESSAGE_START, messageId: "late", role: "assistant" }),
+    ev("r1", { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "late", delta: "after the end" }),
+  ]);
+  const [r1] = conv.runs;
+  assert.deepEqual([r1.added, r1.events, r1.last_at], [["u1", "a1", "late"], 7, ended.at]);
+  assert.deepEqual([conv.tip, conv.tip_run], ["a2", "r2"]);
+});

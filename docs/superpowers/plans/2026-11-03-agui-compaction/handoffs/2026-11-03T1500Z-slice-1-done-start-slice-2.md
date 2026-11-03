@@ -1,9 +1,10 @@
 # 2026-11-03: slice 1/3 done (PR #17); start slice 2/3
 
 Slice 1 built the agent half: both triggers, the limits, the summary request's usage, the marker events, the
-cut at the marker on later runs, the run log's `compactions`, configuration and Ansible. Agent suite 174
-passed, chat `npm test` 98 passed (task 1), `--syntax-check` clean. The ledger's deferred minors went to the final
-whole-branch review; what it fixed and what stays deferred is in PR #17's review comment and reply.
+cut at the marker on later runs, the run log's `compactions`, configuration and Ansible. After the final fix wave:
+agent suite 185 passed, chat `npm test` 98 passed, `platform/dev/tests` 74 passed, `--syntax-check` clean. The
+ledger's deferred minors went to the final whole-branch review; what it fixed and what stays deferred is in PR
+#17's review comment and reply.
 
 ## Next: slice 2/3, `impl/agui-compaction-2-chat-archive`
 
@@ -75,6 +76,22 @@ Slice 1's rulings, carried forward from the task-6 handoff, plus task 7's:
   tool-output cut nor a long transcript; slice 2's dev VM session at window 20000 does.
 - **Task 7, two calls**: the brief's script printed `parts[0]`, which on Haiku is an empty `ThinkingPart`. It was
   re-run once, joining the text parts as the agent does. — One extra call of about 1.8k tokens.
+
+- **Final review, the summary request's own budget (spec clarification 7)**: fixed in this slice rather than
+  carried to slice 3. With a window set, the transcript budget is now `(min(trigger_ratio × W, W −
+  summary_max_tokens) − the prompt's tokens) × 3`, and the drop-half retry runs with a window set too. — Slice 3
+  sets the first participant-facing window, and a session whose summary request overflows fails on every later
+  message (the spec's *Problem*). — A little more code in slice 1.
+- **Final review, no budget floor**: the old 1000-character floor is gone, because a floor could itself overflow a
+  tiny window. — A very small window gets a thinner summary, written from the pinned entries only.
+- **Final review, tool-call arguments cut like tool results**: folded into clarification 7, as it amends the same
+  §4 text and decision 5. — None.
+- **Final review, the continuation guard**: `_Reactive._recover` re-raises when the history ends in a
+  `ModelResponse` (a suspended turn), and the `_sent()` swap stays, now tested. — None: neither case is reachable
+  with the agent's current tools.
+
+- **Final re-review, clarification 6's parenthetical**: kept. It carries a numbering note besides the date and
+  slice, which explains the gap at 5. — One cosmetic departure from the entry shape.
 
 ## Notes written
 

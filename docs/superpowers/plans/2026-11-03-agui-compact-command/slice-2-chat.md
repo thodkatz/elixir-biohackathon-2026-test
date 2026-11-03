@@ -754,8 +754,7 @@ def test_a_failed_or_refused_command_shows_the_command_beside_its_status(rendere
     # one line per command run: r6-2 (failed), r6-3 (its "Compacted" section), r6-4 (refused)
     assert md.count("*Requested by the participant (`/compact`)*") == 3
     failed = md.index("Compaction is turned off on this instance.")
-    assert md.index("*Requested by the participant (`/compact`)*") < md.index("## Compacted")  # r6-2's comes first
-    assert "Compaction is turned off" in md[:md.index("## Compacted")] and failed < md.index("## Compacted")
+    assert "*Requested by the participant (`/compact`)*" in md[failed:md.index("## Compacted")]  # r6-2's own
 
 
 def test_the_index_counts_manual_compactions(rendered):

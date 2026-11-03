@@ -8,7 +8,8 @@ history with the same model, sends the model the summary instead, and marks the 
 the chat shows it, the session record keeps it and later runs cut there.
 
 **Spec:** [`docs/superpowers/specs/2026-11-03-agui-compaction-design.md`](../../specs/2026-11-03-agui-compaction-design.md)
-(decisions 1–13; latest clarification: none, slice 1 adds 1). Each slice file links the sections it implements.
+(decisions 1–13; latest clarification: none; slice 1 folds 1–4, slice 3 folds 5). Each slice file links the
+sections it implements.
 
 **Architecture.** One new module, `platform/agui/pydantic-ai-agent/src/spe_agent/compaction.py`: the token
 estimate, the overflow list, the transcript, building what is sent, the summary request and the `Compaction`
@@ -78,7 +79,9 @@ Every task's requirements include these.
   `-e spe_agui_source_dir=<worktree>` (`AGENTS.md`, *Worktrees and deploying*). No cloud instance is created or
   destroyed.
 - **Upstream-clean:** code, READMEs and Ansible comments name nothing fork-only.
-- **Rulings:** a departure from this plan is recorded in the slice's handoff, as *decision, why, cost if wrong*.
+- **Rulings:** a departure from this plan is recorded in the slice's handoff, as *decision, why, cost if wrong*,
+  and the same commit rewrites the plan task text (and, through a clarification, the spec text) it changes, so
+  no stale text stays live.
 
 ## Shared interfaces
 
@@ -168,7 +171,7 @@ marker as `## Compacted`; `index.md`'s columns become `| # | Session | Tags | Cr
 | Path | Slice | What |
 |---|---|---|
 | `copilotkit-chat/lib/test-agent.ts`, `lib/recorder.test.ts` | 1 | the round-trip test (`compact`, `activity` keywords) |
-| `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` | 1, 2 | clarification 1 (the marker), then 2–3 (plan's proposed ones) |
+| `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` | 1 | clarifications 1–4 (the plan's proposed ones) |
 | `pydantic-ai-agent/src/spe_agent/config.py`, `tests/test_config.py` | 1 | `CompactionCfg` |
 | `ansible/inventory/group_vars/all.yml`, `ansible/roles/agui/tasks/main.yml`, `roles/agui/tasks/checks.yml` | 1 | `spe_agent_compaction_*`, the rendered block, the check that shows it |
 | `pydantic-ai-agent/src/spe_agent/compaction.py`, `compaction_prompt.md`, `tests/test_compaction.py` | 1 | the module, the prompt, unit tests |
@@ -183,7 +186,7 @@ marker as `## Compacted`; `index.md`'s columns become `| # | Session | Tags | Cr
 | `docs/superpowers/specs/2026-10-29-agui-chat-sessions-design.md` | 2 | clarification for §4 |
 | `docs/superpowers/plans/2026-11-03-agui-compaction/evidence/slice-2/` | 2 | screenshots |
 | `ansible/inventory/group_vars/all.yml` (de.NBI window), `ansible/README.md`, `docs/getting-started.md` | 3 | the window value, docs |
-| `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` (clarification 4), `…/evidence/slice-3/` | 3 | decision 13's check and its evidence |
+| `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` (clarification 5), `…/evidence/slice-3/` | 3 | decision 13's check and its evidence |
 
 ## PR slices
 
@@ -192,18 +195,22 @@ the checks in `AGENTS.md`, *Overrides*, pass.
 
 | n/N | Branch | Tasks | Delivers | Est. LOC | Reviewer checks | File | Status |
 |---|---|---|---|---|---|---|---|
-| 1/3 | `impl/agui-compaction-1-agent` | 7 | the agent compacts (both triggers, limits, usage), marker events, input cut, run log, configuration and Ansible; the Haiku summary sample in the handoff | ~1,000 | agent pytest; `npm test` (round trip); `--syntax-check` | [slice-1-agent.md](slice-1-agent.md) | |
-| 2/3 | `impl/agui-compaction-2-chat-archive` | 5 | **early output**: divider in the chat, fake agent `compact`, archive `## Compacted` + column, Playwright with screenshots, dev VM session on Haiku at window 20000 | ~600 | `npm test`; `npm run build`; pytest `-k agui_run`; Playwright run with screenshots | [slice-2-chat-archive.md](slice-2-chat-archive.md) | |
-| 3/3 | `impl/agui-compaction-3-denbi-docs` | 3 | de.NBI window, docs, decision 13's check | ~150 | `--syntax-check`; `verify.yml` on the dev VM; decision 13's run log lines | [slice-3-denbi-docs.md](slice-3-denbi-docs.md) | |
+| 1/3 | `impl/agui-compaction-1-agent` | 7 | the agent compacts (both triggers, limits, usage), marker events, input cut, run log, configuration and Ansible; the Haiku summary sample in the handoff | ~1,000 | agent pytest; `npm test` (round trip); `--syntax-check` | [slice-1-agent.md](slice-1-agent.md) | planned |
+| 2/3 | `impl/agui-compaction-2-chat-archive` | 5 | **early output**: divider in the chat, fake agent `compact`, archive `## Compacted` + column, Playwright with screenshots, dev VM session on Haiku at window 20000 | ~600 | `npm test`; `npm run build`; pytest `-k agui_run`; Playwright run with screenshots | [slice-2-chat-archive.md](slice-2-chat-archive.md) | planned |
+| 3/3 | `impl/agui-compaction-3-denbi-docs` | 3 | de.NBI window, docs, decision 13's check | ~150 | `--syntax-check`; `verify.yml` on the dev VM; decision 13's run log lines | [slice-3-denbi-docs.md](slice-3-denbi-docs.md) | planned |
 
-Slice 1 is about 1,000 lines with tests and stays one unit: the agent half is one module and its wiring, and
-split, the first half (no events) could not be deployed with any visible effect. A reviewer looks first at
-`Compaction.wrap_model_request` and `build_sent`.
+Slice 1 is about 1,000 lines with tests and 7 tasks, past the guide's ~5, and stays one unit: the agent half is
+one module and its wiring, and split, the first half (no events) could not be deployed with any visible effect.
+So it names two mid-slice handoff points, each after a commit with the whole suite green: **after task 4** (the
+capability compacts proactively; tasks 5–7 next) and **after task 6** (marker, cut and run log done; the Haiku
+sample and the PR next). A session past its budget hands off at the latest of these it has reached. A reviewer
+looks first at `Compaction.wrap_model_request` and `build_sent`.
 
 The first thing the user sees is slice 1's summary sample (spec, *Early output*), in its handoff and PR body.
 The second is slice 2's dev VM session; its PR body carries the screenshots, the archived `chats/NN-*.md` and
 the run log's `compactions`, and asks the user to look. Slice 3 does not wait for that look, but a change it
-asks for (prompt, ratio, rendering) goes into slice 3 or a new slice before slice 3's docs.
+asks for (prompt, ratio, rendering) is rewritten into slice 3's task text (or a new slice's) by slice 2's PR, or
+by a follow-up commit on `main` if it comes after that merge, before slice 3 starts; never left in a handoff.
 
 ## Review Focus
 
@@ -237,12 +244,19 @@ Each is added by the slice that verifies it, with status `folded`, and the spec 
 3. **On reload the marker joins the preceding `ModelResponse`**, not the following one: pydantic-ai's
    `MessagesBuilder.add` (`ui/_messages_builder.py:31-44`) appends a `CompactionPart` to the last message when
    that is a `ModelResponse`, else starts a new one, which the following assistant parts then join. The cut is
-   at part level either way. §3's paragraph on the cut is rewritten. Slice 1, task 3.
-4. **Decision 13 is checked against the model's own window**: at `context_window_tokens: 20000` the proactive
+   at part level either way. §3's paragraph on the cut is rewritten. Slice 1, task 6 (task 3's tests pin the
+   shape; task 6's cross-run test shows pydantic-ai builds it).
+4. **A shortened transcript keeps the latest request**: §4 leaves out the oldest entries first, which would drop
+   the participant's request before the tool output it started. `transcript` never leaves out the previous
+   summary, the latest user entry or the last entry. §4's paragraph is rewritten. Slice 1, task 6 (task 3's
+   `test_transcript_keeps_the_latest_request` pins it).
+5. **Decision 13 is checked against the model's own window**: at `context_window_tokens: 20000` the proactive
    trigger compacts long before Haiku's window, so compaction disabled does not fail there. The check overflows
    Haiku's own window with one large tool result (compaction off: Anthropic's `prompt is too long`), then
    recovers the same session through the reactive trigger (compaction on, no window); the proactive half is
-   slice 2's early output. Decision 13's acceptance check is rewritten. Slice 3, task 3.
+   slice 2's early output. Decision 13's acceptance check is rewritten: **an approved acceptance check changes, so
+   the user is pointed at this clarification** in this plan's PR and in slice 3's PR, and slice 3 asks before its
+   paid run. Slice 3, task 3.
 
 ## Handoffs
 

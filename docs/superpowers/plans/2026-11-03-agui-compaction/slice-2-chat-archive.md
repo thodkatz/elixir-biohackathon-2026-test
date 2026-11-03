@@ -689,6 +689,7 @@ python3 platform/dev/e2e/sessions.py --url http://127.0.0.1:3000 --compose-file 
   thodkatz/elixir-biohackathon-2026-test --base main`; the body says what ran (`npm test`, `npm run build`, the
   pytest suites, the three Playwright runs, the dev VM session, `verify.yml`), embeds or links the light, dark and
   live screenshots and the archived chat, and **asks the user to look at the early output**: a change they ask
-  for (prompt, ratio, rendering) goes into slice 3 or a new slice before slice 3's docs (README, *PR slices*).
-  Then the local review round, the merge and the cleanup (`AGENTS.md`, *Development workflow*); the merge does
-  not wait for the user's look.
+  for (prompt, ratio, rendering) is rewritten into `slice-3-denbi-docs.md` as a task before its docs, in this PR
+  or, if it comes after the merge, a follow-up commit on `main` (README, *PR slices*). Then the local review
+  round, the merge and the cleanup (`AGENTS.md`, *Development workflow*); the merge does not wait for the user's
+  look.

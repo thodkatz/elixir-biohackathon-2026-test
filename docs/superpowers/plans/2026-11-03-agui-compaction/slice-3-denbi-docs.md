@@ -8,7 +8,7 @@ then recovers. It ends the track.
 
 **Implements:** spec [`2026-11-03-agui-compaction-design.md`](../../specs/2026-11-03-agui-compaction-design.md)
 §9 (the de.NBI value, the docs), decision **12**'s remaining part (the window beside `spe_webui_model_id`, the
-dev VM's in its instance file) and decision **13** (task 3), with proposed clarification 4 (plan README).
+dev VM's in its instance file) and decision **13** (task 3), with proposed clarification 5 (plan README).
 
 **Review Focus** (plan README): none of its items is this slice's; task 3, step 3 is the one live check of
 the overflow list against a provider's real wording.
@@ -18,9 +18,10 @@ interfaces, the ruling and Review Focus: [plan README](README.md). `ANSIBLE` mea
 `platform/agui/pydantic-ai-agent`, `MAIN` the main checkout
 (`/workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test`).
 
-**Before starting, read slice 2's handoff** (`ls handoffs | tail -1`): a change the user asked for after the
-early output (prompt, ratio, rendering) is done first, as its own task in this slice, before task 2's docs
-describe the behaviour (README, *PR slices*).
+**Before starting, check this file's tasks against the user's comments on slice 2's PR**: a change the user asked
+for after the early output (prompt, ratio, rendering) was rewritten into this slice's tasks, as a task before
+task 2's docs, by slice 2's PR or a follow-up commit on `main` (README, *PR slices*). If a comment asks for one
+that is not here, add the task first, in its own commit.
 
 **Verified facts this slice builds on** (read in the repo, 2026-11-03):
 
@@ -177,7 +178,7 @@ git commit -s -m "Document the agent's compaction configuration"
 
 ---
 
-### Task 3: decision 13 on the dev VM, clarification 4, the VM put back, the end of the track
+### Task 3: decision 13 on the dev VM, clarification 5, the VM put back, the end of the track
 
 Paid: Haiku on the dev VM, approved for this work (README, *Global Constraints*). About five model requests:
 two that Anthropic rejects as too long, one small summary request, two ordinary answers. No cloud instance is
@@ -185,11 +186,11 @@ created or destroyed.
 
 **Files:**
 - Modify (not committed): `MAIN/platform/ansible/instances/dev-local.yml`
-- Modify: `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` (clarification 4, decision 13's row)
+- Modify: `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` (clarification 5, decision 13's row)
 - Create: `docs/superpowers/plans/2026-11-03-agui-compaction/evidence/slice-3/` (screenshots, run-log lines)
 - Create: the handoff in `handoffs/`; Modify: the README's slices table, `AGENTS.md` *Current work*
 
-The ruling behind this task is proposed clarification 4 (plan README): at window 20000 the proactive trigger
+The ruling behind this task is proposed clarification 5 (plan README): at window 20000 the proactive trigger
 compacts long before Haiku's own window, so "the same session with compaction disabled fails with the
 provider's error" cannot happen there. The check is therefore run against Haiku's own window: one tool result
 large enough to overflow it, which shows the provider's real error with compaction off, then the reactive
@@ -238,11 +239,11 @@ ansible-playbook playbooks/create.yml -e @instances/dev-local.yml -e spe_agent_m
   @instances/dev-local.yml </dev/null`: the compaction task shows `enabled: true` and that window, and
   `max_output_bytes` is back to 16384 in `agent.yaml`.
 
-- [ ] **Step 6: fold clarification 4.** In the spec, add to *Clarifications* (after 3; template:
+- [ ] **Step 6: fold clarification 5.** In the spec, add to *Clarifications* (after 4; template:
   `spec-and-plan-layout.md`):
 
 ```markdown
-### 4. Decision 13 is checked against the model's own window — folded
+### 5. Decision 13 is checked against the model's own window — folded
 
 **Status:** folded (2026-11-03, plan; slice 3/3).
 **Question:** decision 13's check pushes a session past `context_window_tokens: 20000` and expects the same
@@ -260,14 +261,14 @@ compaction below the window) is the early output's session (slice 2).
   is past Haiku's own window fails with Anthropic's `prompt is too long` while compaction is disabled; with
   compaction enabled and no window set, its next message compacts (trigger `overflow`), the divider shows, the
   run completes and the run log's input tokens of the first request after the compaction are below the window
-  (clarification 4). The proactive path on a small window (`context_window_tokens: 20000`) is the early
+  (clarification 5). The proactive path on a small window (`context_window_tokens: 20000`) is the early
   output's session." Also update the plan README's *Proposed spec clarifications* item 4 only if the wording
   changed in the run.
 
 ```bash
 git add docs/superpowers/specs/2026-11-03-agui-compaction-design.md \
   docs/superpowers/plans/2026-11-03-agui-compaction/evidence/slice-3
-git commit -s -m "Check decision 13 on the dev VM; fold spec clarification 4" \
+git commit -s -m "Check decision 13 on the dev VM; fold spec clarification 5" \
   -m "Anthropic's real overflow error with compaction off, the reactive recovery with it on."
 ```
 

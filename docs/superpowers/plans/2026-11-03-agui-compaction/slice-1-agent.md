@@ -528,6 +528,14 @@ def test_transcript_leaves_out_oldest_entries_after_the_previous_summary():
     assert "[1 earlier entries left out]" in text
 
 
+def test_transcript_keeps_the_latest_request():
+    history = [user("old " + "o" * 400), user("the request"), said(TextPart("a" * 400)), said(TextPart("b" * 400))]
+    text = c.transcript(history, max_chars=300)
+    assert "User: the request" in text and "b" * 400 in text  # the latest request and the last entry stay
+    assert "old " not in text and "a" * 400 not in text
+    assert "[2 earlier entries left out]" in text
+
+
 def test_transcript_drop_leaves_out_that_many():
     text = c.transcript([user("one"), user("two"), user("three"), user("four")], drop=2)
     assert "one" not in text and "two" not in text and "three" in text
@@ -737,18 +745,25 @@ def _entries(messages: list[ModelMessage]) -> list[str]:
 
 
 def transcript(messages: list[ModelMessage], *, max_chars: int | None = None, drop: int = 0) -> str:
-    """Plain-text transcript for the summary request. Leaves out the oldest entries after the previous
-    summary: `drop` of them, then more while the text is longer than `max_chars`."""
+    """Plain-text transcript for the summary request. Leaves out the oldest entries, `drop` of them, then more
+    while the text is longer than `max_chars`; never the previous summary, the latest request or the last entry."""
     entries = _entries(messages)
-    keep = 1 if entries and entries[0].startswith("User: " + FRAME) else 0
-    dropped = 0
-    while keep + 1 < len(entries) and (dropped < drop or
-                                       (max_chars is not None and len("\n\n".join(entries)) > max_chars)):
-        del entries[keep]
-        dropped += 1
-    if dropped:
-        entries.insert(keep, f"[{dropped} earlier entries left out]")
-    return "\n\n".join(entries)
+    head = 1 if entries and entries[0].startswith("User: " + FRAME) else 0
+    requests = [i for i, e in enumerate(entries) if e.startswith("User: ") and not e.startswith("User: " + FRAME)]
+    pinned = {*range(head), *requests[-1:], len(entries) - 1}
+    gone: set[int] = set()
+
+    def text() -> str:
+        kept = [e for i, e in enumerate(entries) if i not in gone]
+        if gone:
+            kept.insert(head, f"[{len(gone)} earlier entries left out]")
+        return "\n\n".join(kept)
+
+    for i in (i for i in range(len(entries)) if i not in pinned):
+        if not (len(gone) < drop or (max_chars is not None and len(text()) > max_chars)):
+            break
+        gone.add(i)
+    return text()
 ```
 
   Note on `_latest_user`: a framed summary is a `UserPromptPart` too; it is skipped so the "latest request" is
@@ -774,7 +789,8 @@ git commit -s -m "Add compaction's estimate, overflow list, cut and transcript, 
 
   Spec clarification 3 (plan README) is verified by `test_build_sent_cuts_after_a_mid_run_marker…` only for the
   shape `build_sent` gets; task 6's cross-run test shows pydantic-ai builds that shape. Fold clarification 3
-  there.
+  there, and with it clarification 4 (`test_transcript_keeps_the_latest_request`), so the spec's clarifications
+  stay in number order.
 
 ### Task 4: the capability — proactive trigger, summary request, usage and limits
 
@@ -1429,7 +1445,7 @@ git commit -s -m "Test the reactive trigger and the Anthropic and OpenAI wire re
 - Modify: `AGENT/src/spe_agent/app.py` (`_Adapter.__post_init__`, `Service._events`)
 - Modify: `AGENT/src/spe_agent/runlog.py` (`RunRecorder.observe`, `RunRecorder.compactions`, `compactions: []`)
 - Test: `AGENT/tests/test_app.py`
-- Modify: `AGENT/README.md` (*Runs*), `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` (clarification 3)
+- Modify: `AGENT/README.md` (*Runs*), `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` (clarifications 3, 4)
 
 **Interfaces:**
 - Consumes: `CompactionRun.take_pending()`, `.records` (task 4).
@@ -1674,7 +1690,7 @@ _MARKER_BEFORE = {EventType.TEXT_MESSAGE_START, EventType.TOOL_CALL_START, Event
   runs cut the history there. The run log's `compactions` lists each one." (The configuration block is
   documented by slice 3.)
 
-- [ ] **Step 9: fold spec clarification 3.** In the spec's §3, replace "On reload, pydantic-ai's AG-UI adapter
+- [ ] **Step 9: fold spec clarifications 3 and 4.** In the spec's §3, replace "On reload, pydantic-ai's AG-UI adapter
   merges the marker into the `ModelResponse` that follows it, so the parts after the `CompactionPart` in that
   response are kept and the ones before it cut." with "On reload, pydantic-ai's AG-UI adapter appends the marker
   to the preceding `ModelResponse` when the message before it is one, else starts a new response that the
@@ -1691,6 +1707,20 @@ joins that message's response. The cut is at part level in both cases. `test_lat
 `test_build_sent_marker_merged_into_a_response_cuts_at_part_level` pin it.
 ```
 
+  Then fold clarification 4 (task 3's transcript): in §4, replace "its oldest entries after the previous summary
+  are left out, oldest first, until it fits" with "its oldest entries after the previous summary are left out,
+  oldest first, until it fits, except the participant's latest request and the last entry (clarification 4)",
+  and add:
+
+```markdown
+### 4. A shortened transcript keeps the latest request — folded
+
+**2026-11-0X, slice 1, task 3.** Leaving out the oldest entries first would drop the participant's request
+before the tool output it started, and the summary could no longer say what was asked. `transcript` never leaves
+out the previous summary, the latest user entry or the last entry; the rest go oldest first.
+`test_transcript_keeps_the_latest_request` pins it.
+```
+
 - [ ] **Step 10: BACKLOG check.** `BACKLOG.md`'s canary-ladder compaction item says scoring reads the run log's
   `compactions`: confirm the field name and shape match this task's record; fix the item's text if not.
 
@@ -1700,7 +1730,7 @@ joins that message's response. The cut is at part level in both cases. `test_lat
 git add platform/agui/pydantic-ai-agent/src/spe_agent/compaction.py platform/agui/pydantic-ai-agent/src/spe_agent/app.py \
   platform/agui/pydantic-ai-agent/src/spe_agent/runlog.py platform/agui/pydantic-ai-agent/tests/test_app.py \
   platform/agui/pydantic-ai-agent/README.md docs/superpowers/specs/2026-11-03-agui-compaction-design.md
-git commit -s -m "Stream the compaction marker, cut at it on later runs, log compactions; spec clarification 3"
+git commit -s -m "Stream the compaction marker, cut at it on later runs, log compactions; spec clarifications 3, 4"
 ```
 
   (Add `BACKLOG.md` if step 10 changed it.)

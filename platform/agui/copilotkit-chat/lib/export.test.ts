@@ -195,3 +195,24 @@ test("outputItems: a tool error, an unlisted role, and array content", () => {
   assert.deepEqual(outputItems({ id: "a1", role: "assistant", content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] }),
     [{ type: "message", id: "a1", role: "assistant", content: [{ type: "output_text", text: "ab" }], status: "completed" }]);
 });
+
+test("the command writes the bundle; a wrong mode is refused", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "export-cli-"));
+  const out = path.join(dir, "bundle.json");
+  const node = [process.execPath, "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", "scripts/export-journals.ts"];
+  const { stdout } = await execFileP(node[0], [...node.slice(1), FIXTURES, out, "final"], { cwd: CHAT });
+  assert.equal(stdout, "5 sessions (1 hidden, 1 deleted), final archive\n");
+  const written = JSON.parse(await fs.readFile(out, "utf8")) as Bundle;
+  const fixture = JSON.parse(await fs.readFile(path.join(FIXTURES, "final.bundle.json"), "utf8")) as Bundle;
+  assert.deepEqual({ ...written, exported_at: 0 }, { ...fixture, exported_at: 0 });
+  await assert.rejects(execFileP(node[0], [...node.slice(1), FIXTURES, out, "weekly"], { cwd: CHAT }),
+    (err: { code?: number; stderr?: string }) => err.code === 2 && /^usage: /.test(err.stderr ?? ""));
+});
+
+test("a missing journals directory exits 1", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "export-cli-"));
+  const missing = path.join(dir, "no-such-dir");
+  const node = [process.execPath, "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", "scripts/export-journals.ts"];
+  await assert.rejects(execFileP(node[0], [...node.slice(1), missing, path.join(dir, "bundle.json"), "final"], { cwd: CHAT }),
+    (err: { code?: number }) => err.code === 1);
+});

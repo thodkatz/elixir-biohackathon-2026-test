@@ -203,6 +203,44 @@ test("a run classified while another still streams does not anchor at the stream
   assert.deepEqual(kinds(c), [["deleted", "a3"]]);
 });
 
+test("a client holding no id the journal knows: no anchor, the run starts from the root", async () => {
+  const conv = await journal();
+  const c = classify(conv, [user("x1", "a fresh start")]);
+  assert.deepEqual(c, { anchor: null, path: [], newMessages: [user("x1", "a fresh start")], ignored: [] });
+});
+
+test("a message edited inside the cut is both edited and deleted", async () => {
+  const conv = await journal();
+  const [u1, a1, u2, c2] = branch(conv);
+  const forged = { ...c2, toolCalls: [{ id: "call-2", type: "function", function: { name: "execute", arguments: '{"cmd":"cat /secret"}' } }] } as Message;
+  const c = classify(conv, [u1, a1, u2, forged, user("u4", "next")]);
+  assert.equal(c.anchor, "u2");
+  assert.deepEqual(ids(c.path), ["u1", "a1", "u2"]);
+  assert.deepEqual(ids(c.newMessages), ["u4"]);
+  assert.deepEqual(kinds(c), [["edited", "c2"], ["deleted", "c2"]]);
+  assert.deepEqual(c.ignored[0].message, forged);
+});
+
+test("a run that made two parallel calls and answered one moves the anchor back to its user message", async () => {
+  const conv = await journal(r1(), r2(), [
+    { type: "run_start", at: AT, run_id: "r3", anchor: "a2", messages: [user("u3", "both")], ignored: [], request, source: "chat" },
+    ev("r3", { type: EventType.RUN_STARTED, threadId: ID, runId: "r3" }),
+    ev("r3", { type: EventType.TOOL_CALL_START, toolCallId: "call-a", toolCallName: "execute", parentMessageId: "c3" }),
+    ev("r3", { type: EventType.TOOL_CALL_END, toolCallId: "call-a" }),
+    ev("r3", { type: EventType.TOOL_CALL_START, toolCallId: "call-b", toolCallName: "execute", parentMessageId: "c3" }),
+    ev("r3", { type: EventType.TOOL_CALL_END, toolCallId: "call-b" }),
+    ev("r3", { type: EventType.TOOL_CALL_RESULT, messageId: "t3", toolCallId: "call-a", content: "a", role: "tool" }),
+    { type: "run_end", at: AT, run_id: "r3", status: "cancelled", error: null },
+  ]);
+  assert.deepEqual(conv.runs.at(-1)!.added, ["u3", "c3", "t3"]);
+  const held = ["u1", "a1", "u2", "c2", "t2", "a2", "u3", "c3", "t3"].map((id) => conv.nodes.get(id)!.message);
+  const c = classify(conv, [...held, user("u4", "next")]);
+  assert.equal(c.anchor, "u3");
+  assert.deepEqual(ids(c.path), ["u1", "a1", "u2", "c2", "t2", "a2", "u3"]);
+  assert.deepEqual(ids(c.newMessages), ["u4"]);
+  assert.deepEqual(kinds(c), [["deleted", "c3"], ["deleted", "t3"]]);
+});
+
 test("reordered history keeps the anchor and flags nothing", async () => {
   // Review Focus 1: devtools moves a reply above its question, the browser reorders two turns.
   const conv = await journal();

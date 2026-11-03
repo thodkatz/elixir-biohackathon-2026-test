@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Message } from "@ag-ui/client";
-import type { JournalFs } from "./journal.ts";
+import type { Clock, JournalFs } from "./journal.ts";
 import {
   Journals, ValidationError, autoTitle, isSessionId, normaliseTags, parsePatch, shared,
 } from "./sessions.ts";
@@ -310,6 +310,70 @@ test("a torn last line gets \\n before the next append, and the rebuild skips it
   } finally {
     logged.mock.restore();
   }
+});
+
+test("a failed interval fsync does not fail the session's next append: it is written with a fresh writer", async () => {
+  // Every sync fails until the test heals the disk; the interval timer fires only when the test fires it.
+  let healthy = true;
+  const syncs = { failed: 0 };
+  const flaky: JournalFs = {
+    open: async (p, flags) => {
+      const handle = await fs.open(p, flags);
+      return {
+        appendFile: (data: string) => handle.appendFile(data),
+        sync: async () => {
+          if (!healthy) {
+            syncs.failed++;
+            throw Object.assign(new Error("EIO: i/o error, fsync"), { code: "EIO" });
+          }
+          await handle.sync();
+        },
+        close: () => handle.close(),
+        stat: () => handle.stat(),
+        read: (buf: Buffer, off: number, len: number, pos: number) => handle.read(buf, off, len, pos),
+      };
+    },
+    syncDir: async () => {},
+  };
+  const timers: (() => void)[] = [];
+  const clock: Clock = { now: () => 0, setTimeout: (fn) => timers.push(fn), clearTimeout: () => {} };
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "journals-"));
+  const journals = new Journals(dir, { fs: flaky, clock });
+  const { id } = await seedRun(journals, "before the fault");
+  await journals.append(id, { type: "meta", pinned: true }, "soon"); // arms the interval fsync
+  const logged = mock.method(console, "error", () => {});
+  try {
+    healthy = false;
+    for (const fire of timers.splice(0)) fire();
+    for (let i = 0; i < 100 && syncs.failed === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.equal(syncs.failed, 1, "the interval fsync ran and failed");
+    await new Promise((r) => setTimeout(r, 5));
+    healthy = true;
+    await journals.patch(id, { title: "after the fault" });
+    const last = JSON.parse((await fs.readFile(file(dir, id), "utf8")).trimEnd().split("\n").at(-1)!);
+    assert.equal(last.title, "after the fault");
+    assert.equal((await journals.get(id))?.title, "after the fault");
+  } finally {
+    logged.mock.restore();
+  }
+});
+
+test("get() during an append: an unterminated last segment is dropped without a warning", async () => {
+  const { journals, dir } = await tmpJournals();
+  const { id } = await seedRun(journals, "kept");
+  const whole = await fs.readFile(file(dir, id), "utf8");
+  // As a reader outside the session's queue sees a line still being appended.
+  await fs.appendFile(file(dir, id), '{"type":"meta","at":"2026-10-29T10:00:00.000Z","title":"half');
+  const warned = mock.method(console, "warn", () => {});
+  try {
+    const view = await journals.get(id);
+    assert.equal(view?.title, "kept");
+    assert.equal(view?.messages.length, 2);
+    assert.equal(warned.mock.callCount(), 0, JSON.stringify(warned.mock.calls.map((c) => c.arguments)));
+  } finally {
+    warned.mock.restore();
+  }
+  assert.ok((await fs.readFile(file(dir, id), "utf8")).startsWith(whole));
 });
 
 test("a journal without a created line lists with its first line's time", async () => {

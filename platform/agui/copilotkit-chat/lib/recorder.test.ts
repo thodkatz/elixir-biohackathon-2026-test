@@ -356,6 +356,57 @@ test("decision 4: a journal that cannot be written refuses the run with 'could n
   }
 });
 
+// A filesystem whose fsyncs fail for the first `failing` calls: run_start's line reaches the file, its fsync
+// does not (finding 1 of #24's review).
+function syncFailing(failing: number): JournalFs {
+  let calls = 0;
+  return {
+    open: async (p, flags) => {
+      const handle = await fs.open(p, flags);
+      return {
+        appendFile: (data: string) => handle.appendFile(data),
+        sync: async () => {
+          if (calls++ < failing) throw Object.assign(new Error("EIO: i/o error, fsync"), { code: "EIO" });
+          await handle.sync();
+        },
+        close: () => handle.close(),
+        stat: () => handle.stat(),
+        read: (buf: Buffer, off: number, len: number, pos: number) => handle.read(buf, off, len, pos),
+      };
+    },
+    syncDir: async () => {},
+  };
+}
+
+test("decision 4: run_start written but its fsync failed: refused, and a best-effort run_end aborted ends it", async () => {
+  const server = await startTestAgent();
+  const logged = mock.method(console, "error", () => {});
+  try {
+    const journals = await tmpJournals({ fs: syncFailing(1) });
+    const recorder = new SessionRecorder(() => journals);
+    const id = randomUUID();
+    const out = await drive(recorder, input(id, "secret canary text"), new HttpAgent({ url: server.url, fetch: recorder.fetch }));
+    assert.deepEqual(types(out), [EventType.RUN_STARTED, EventType.RUN_ERROR]);
+    assert.equal(message(out, 1), NOT_SAVED);
+    assert.equal(server.requests.length, 0);
+    const all = await lines(journals, id);
+    assert.deepEqual(all.map((l) => l.type), ["created", "run_start", "run_end"]);
+    const end = await onlyEnd(journals, id);
+    assert.deepEqual([end.status, end.error], ["aborted", NOT_SAVED]);
+    assert.equal(end.run_id, (all[1] as RunStartLine).run_id);
+    // Both fsyncs failing: still refused, and the log names ids only.
+    const failing = await tmpJournals({ fs: syncFailing(Infinity) });
+    const again = new SessionRecorder(() => failing);
+    const out2 = await drive(again, input(randomUUID(), "secret canary text"), new HttpAgent({ url: server.url, fetch: again.fetch }));
+    assert.deepEqual([types(out2), message(out2, 1)], [[EventType.RUN_STARTED, EventType.RUN_ERROR], NOT_SAVED]);
+    assert.equal(server.requests.length, 0);
+    assert.doesNotMatch(JSON.stringify(logged.mock.calls.map((c) => c.arguments)), /secret canary text/);
+  } finally {
+    logged.mock.restore();
+    await server.close();
+  }
+});
+
 for (const [name, text, expected] of [
   ["RUN_ERROR", "error please", "failed"],
   ["an HTTP error from the agent before any event", "boom", "failed"],

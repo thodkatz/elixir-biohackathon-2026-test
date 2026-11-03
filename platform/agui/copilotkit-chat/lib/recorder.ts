@@ -270,17 +270,6 @@ export class SessionRecorder extends Middleware {
       if (shared().closing) return { refused: CLOSING };
       const classification = classify(conv, input.messages);
       const { tools, context, state, forwardedProps } = input;
-      try {
-        // Inside withSession already: append directly, never through withSession again.
-        if (conv === null) await journals.append(id, { type: "created", version: 1, id }, "soon");
-        await journals.append(id, {
-          type: "run_start", run_id: input.runId, anchor: classification.anchor, messages: classification.newMessages,
-          ignored: classification.ignored, request: { tools, context, state, forwardedProps }, source: "chat",
-        }, "now");
-      } catch (error) {
-        console.error(`journal: run_start of run ${input.runId} of ${id} failed: ${codeOf(error)}`);
-        return { refused: NOT_SAVED };
-      }
       // A run journaled but not admitted: its run_end, then the refusal the client sees. A run_end that cannot
       // be written leaves the run incomplete in the journal; the client is refused either way.
       const endHere = async (status: RunStatus, error: string): Promise<Admission> => {
@@ -291,6 +280,21 @@ export class SessionRecorder extends Middleware {
         }
         return { refused: error };
       };
+      let runStartTried = false;
+      try {
+        // Inside withSession already: append directly, never through withSession again.
+        if (conv === null) await journals.append(id, { type: "created", version: 1, id }, "soon");
+        runStartTried = true;
+        await journals.append(id, {
+          type: "run_start", run_id: input.runId, anchor: classification.anchor, messages: classification.newMessages,
+          ignored: classification.ignored, request: { tools, context, state, forwardedProps }, source: "chat",
+        }, "now");
+      } catch (error) {
+        console.error(`journal: run_start of run ${input.runId} of ${id} failed: ${codeOf(error)}`);
+        // The line may be in the file although its write or fsync failed: end it, so the run is not left
+        // incomplete (Journals.append dropped the failed writer, so this reopens the journal).
+        return runStartTried ? endHere("aborted", NOT_SAVED) : { refused: NOT_SAVED };
+      }
       if (classification.newMessages.length === 0) return endHere("refused", NO_NEW_MESSAGE);
       // Re-checked once run_start is on disk: SIGTERM may have landed during its fsync, after shutdown() took
       // its snapshot of `running`, so a run admitted now would never be cancelled and drain would time out.

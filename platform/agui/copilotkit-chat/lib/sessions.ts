@@ -6,7 +6,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { Message } from "@ag-ui/client";
-import { JournalWriter, idOfJournal, journalPath, parseJournal } from "./journal.ts";
+import { EarlierFailure, JournalWriter, idOfJournal, journalPath, parseJournal } from "./journal.ts";
 import type { Clock, Durability, JournalFs, Line, NewLine } from "./journal.ts";
 import { branchOfTip, rebuildText } from "./rebuild.ts";
 import type { Conversation } from "./rebuild.ts";
@@ -291,30 +291,38 @@ export class Journals {
     return { fs: this.fs, now: this.now, ...(this.clock ? { clock: this.clock } : {}) };
   }
 
-  /** The journal's conversation, or null when the session has no journal. */
-  async load(id: string): Promise<Conversation | null> {
+  /** The journal's conversation, or null when the session has no journal. With `outsideQueue` (a read not
+   *  under withSession(id), so an append may be in flight), a last segment without its "\n" is a line still
+   *  being written: dropped without a warning. Otherwise it is a torn line, skipped and logged (§13). */
+  async load(id: string, opts: { outsideQueue?: boolean } = {}): Promise<Conversation | null> {
     const text = await readText(this.fs, this.file(id));
-    return text === null ? null : rebuildText(id, text);
+    if (text === null) return null;
+    return rebuildText(id, opts.outsideQueue ? text.slice(0, text.lastIndexOf("\n") + 1) : text);
   }
 
   /** Appends one line (stamped by the writer) and folds it into the index. The caller holds
-   *  withSession(id); a writer that failed is dropped, so the next append opens the journal again. */
+   *  withSession(id); a writer that failed is dropped, so the next append opens the journal again, and an
+   *  append that found its writer already failed is retried once on a fresh one. */
   async append(id: string, line: NewLine, durability: Durability): Promise<void> {
     const file = this.file(id);
     const d = await this.ready();
     if (line.type === "run_end") await testSaveDelay();
-    let writer = d.writers.get(id);
-    if (!writer) {
-      writer = new JournalWriter(file, this.writerOpts());
-      d.writers.set(id, writer);
-    }
-    let written: Line;
-    try {
-      written = await writer.append(line, durability);
-    } catch (error) {
-      if (d.writers.get(id) === writer) d.writers.delete(id);
-      void writer.close().catch(() => {});
-      throw error;
+    let written: Line | null = null;
+    // Twice at most: a writer whose earlier call failed (an interval fsync no caller waited on) rejects this
+    // line without writing it, so it is dropped and the line goes to a fresh writer once.
+    for (let attempt = 0; written === null; attempt++) {
+      let writer = d.writers.get(id);
+      if (!writer) {
+        writer = new JournalWriter(file, this.writerOpts());
+        d.writers.set(id, writer);
+      }
+      try {
+        written = await writer.append(line, durability);
+      } catch (error) {
+        if (d.writers.get(id) === writer) d.writers.delete(id);
+        void writer.close().catch(() => {});
+        if (!(error instanceof EarlierFailure) || attempt > 0) throw error;
+      }
     }
     let entry = d.entries.get(id);
     if (!entry) {
@@ -342,7 +350,7 @@ export class Journals {
     const d = await this.ready();
     const entry = d.entries.get(id);
     if (!entry || !listed(entry)) return null;
-    const conv = await this.load(id);
+    const conv = await this.load(id, { outsideQueue: true });
     if (!conv || conv.tip === null) return null;
     const { last_run_at: _lastRun, ...meta } = toMeta(entry);
     return { ...meta, messages: branchOfTip(conv) };

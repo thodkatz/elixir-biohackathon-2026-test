@@ -44,9 +44,12 @@ UNKNOWN_COMMAND = "Unknown command."
 
 
 def _command(run_input: RunAgentInput) -> dict | None:
+    """The run's command, None for an ordinary run; a value that is not an object is an unknown command ({})."""
     props = run_input.forwarded_props
-    command = props.get(COMMAND_KEY) if isinstance(props, dict) else None
-    return command if isinstance(command, dict) else None
+    if not isinstance(props, dict) or props.get(COMMAND_KEY) is None:
+        return None
+    command = props[COMMAND_KEY]
+    return command if isinstance(command, dict) else {}
 
 # The marker goes out before the next event that opens a response or ends the run, never before a tool
 # result: the run is one event ahead of this loop, so the step's last tool result may still be on its way.
@@ -250,6 +253,7 @@ class Service:
         run_input = adapter.run_input
         recorder = RunRecorder(run_input)
         focus = command.get("focus") if isinstance(command.get("focus"), str) else None
+        focus = (focus or "").strip() or None
         status, records, usage = "cancelled", [], RunUsage()
 
         def end(event: BaseEvent) -> BaseEvent:
@@ -259,6 +263,7 @@ class Service:
         try:
             yield end(RunStartedEvent(thread_id=run_input.thread_id, run_id=run_input.run_id))
             if command.get("name") != "compact":
+                recorder.command_input(self.sanitize(f"/{command.get('name')}"))
                 status = "failed"
                 yield end(RunErrorEvent(message=UNKNOWN_COMMAND))
                 return

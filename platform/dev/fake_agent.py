@@ -81,15 +81,15 @@ FRESH: set[str] = set()
 
 def summarise(messages, info) -> ModelResponse:
     """The compaction's summary request: system prompt SUMMARY_PROMPT (automatic) or SUMMARY_PROMPT_MANUAL
-    (/compact), the transcript as the user part, with a manual request's focus appended after FOCUS_HEADING."""
-    system, text_part = messages[0].parts[0], messages[0].parts[-1]
+    (/compact), the transcript as the first user part, a manual request's focus (after FOCUS_HEADING) as a second."""
+    system, text_part, *focus_part = messages[0].parts
     if not isinstance(system, SystemPromptPart) or system.content not in (SUMMARY_PROMPT, SUMMARY_PROMPT_MANUAL):
         raise RuntimeError("not a summary request")
     text = str(text_part.content)
     if system.content == SUMMARY_PROMPT_MANUAL:
-        body, _, focus = text.partition(f"\n\n{FOCUS_HEADING}:\n\n")
+        focus = str(focus_part[0].content).removeprefix(f"{FOCUS_HEADING}:\n\n") if focus_part else ""
         focus_text = focus.strip("`\n") or "(none)"
-        return ModelResponse(parts=[TextPart(f"Scripted summary on request of {len(body)} characters. "
+        return ModelResponse(parts=[TextPart(f"Scripted summary on request of {len(text)} characters. "
                                              f"Focus: {focus_text}")])
     latest = next((line for line in reversed(text.splitlines()) if "compact" in line.lower()), "")
     nonce = f"[summary {uuid.uuid4().hex[:8]}]"

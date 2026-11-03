@@ -1073,10 +1073,9 @@ async def test_command_compacts_without_the_model_loop(tmp_path):
     assert script.streamed == [] and len(script.summaries) == 1
     (messages, info), = script.summaries
     assert info.function_tools == []
-    system, text = messages[0].parts
+    system, text, focus = messages[0].parts
     assert system.content == cmp.SUMMARY_PROMPT_MANUAL
-    body, _, focus = text.content.partition(f"\n\n{cmp.FOCUS_HEADING}:\n\n")
-    assert "User: thanks" in body and focus == "```\nkeep the canary paths\n```"
+    assert "User: thanks" in text.content and focus.content == f"{cmp.FOCUS_HEADING}:\n\n```\nkeep the canary paths\n```"
 
 
 async def test_command_run_started_before_the_model_is_called(tmp_path):
@@ -1152,15 +1151,22 @@ async def test_command_usage_is_recorded_and_limited(tmp_path, monkeypatch):
 
 async def test_command_errors(tmp_path):
     # config() writes the prompt file under tmp_path: each subdir must exist first.
-    for name in ("off", "empty", "unknown", "after"):
+    for name in ("off", "empty", "unknown", "after", "not-an-object"):
         (tmp_path / name).mkdir()
     off = await command_run(tmp_path / "off", Script(), command_body(), compaction={"enabled": False})
     empty = await command_run(tmp_path / "empty", Script(), command_body(messages=[]))
     unknown = await command_run(tmp_path / "unknown", Script(), command_body(name="nope"))
+    assert log_records(tmp_path / "unknown")[0]["input"] == "/nope"
+    not_an_object = command_body()
+    not_an_object["forwardedProps"] = {"spe_command": "compact"}
+    script = Script()
+    not_an_object = await command_run(tmp_path / "not-an-object", script, not_an_object)
+    assert script.streamed == []  # not the model loop
     marker = {"id": cmp.MANUAL_MARKER_PREFIX + "1", "role": "assistant", "content": "SUMMARY"}
     after = await command_run(tmp_path / "after", Script(), command_body(messages=[*HISTORY, marker]))
     for evs, message in ((off, "Compaction is turned off on this instance."), (empty, "Nothing to compact yet."),
-                         (after, "Nothing to compact yet."), (unknown, "Unknown command.")):
+                         (after, "Nothing to compact yet."), (unknown, "Unknown command."),
+                         (not_an_object, "Unknown command.")):
         assert [e["type"] for e in evs] == ["RUN_STARTED", "RUN_ERROR"] and evs[-1]["message"] == message
 
 

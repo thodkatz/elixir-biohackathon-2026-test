@@ -81,7 +81,8 @@ When the run input's `forwardedProps.spe_command.name` is `"compact"`, `app.py` 
    prompt, cut tool output, the window budget, the retry with the older half left out when the summary request
    itself overflows). Two things differ. The focus is not a `User:` entry of the transcript: it follows the
    transcript as a section of its own, "The participant's instructions for this summary", fenced with a fence
-   longer than any backtick run inside, never in the system prompt; so the latest real request stays the one the
+   longer than any backtick run inside, in a user part of its own (so no tool output in the transcript can pose
+   as it), never in the system prompt; so the latest real request stays the one the
    transcript pins and the summary quotes. And the prompt and the summary's frame say the participant asked for
    the summary, not that the conversation no longer fit (a manual variant of each). It counts towards the run's
    usage limits and is checked before it is sent.

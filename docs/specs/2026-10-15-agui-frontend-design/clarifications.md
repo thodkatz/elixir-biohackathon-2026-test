@@ -188,4 +188,6 @@ in the parts it amends.
     *Reason:* rulings 1 and 2 of the `/compact` plan. *Cost if wrong:* a marker written before this slice is
     automatic, which it was; a reader that parses the id after the prefix as a UUID breaks (none does); one more
     null field per record. *Amends:* §15 *The agent*, item 4; the compaction design's decisions 7 and 11.
-    *Status:* folded.
+    *Status:* folded. Added in review (#28): the focus is a user part of its own after the transcript's, not text
+    appended to it, since a tool output in the transcript could carry the heading and pose as a focus; §15 *The
+    agent*, item 3, says so.

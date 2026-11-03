@@ -31,7 +31,11 @@ For the plan that builds §15 (decisions 31–39).
   early output (the README's *Early output*, `/compact`) first, before decisions 34, 37 and 38, so the user's
   judgement of decision 33 comes while it is cheap to change.
 - Slice 1 reads how pydantic-ai's AG-UI adapter exposes `forwarded_props` and where `app.py` can answer a run
-  without `adapter.run_stream`, and reuses `Compaction._compact`'s summary path rather than a copy of it.
+  without `adapter.run_stream`, and reuses `Compaction._compact`'s summary path rather than a copy of it. That
+  path needs a `RunContext` and a `ModelRequestContext` today, counts towards the three per run and appends to
+  `pending`: slice 1 splits out a summary function taking the model, the configuration, the history, the focus
+  and a usage accumulator, which both the capability and the command path call, and the command path writes its
+  usage into the run log's `usage` as `on_complete` does for a model run.
 - Decision 39 runs on de.NBI's `qwen3.8-27b`, not on the development VM's model: an instance deployed from the
   slice's worktree, the LLM key and model as the portal's workspaces use them. It is a paid run: the slice asks
   the user before it.

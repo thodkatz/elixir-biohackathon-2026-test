@@ -40,9 +40,11 @@ model.
 §13 *The run route*, with these differences for a command run:
 
 - **Step 2.** The command message is not a new message: the run's `messages` is empty. Its id is **known** from
-  then on: a later client history that sends it back unchanged ignores nothing for it, one that sends it with a
-  different role or content records it `edited`. It is never on the path, so it is never `deleted`, and the
-  rebuild and the session API leave it out.
+  then on, for one purpose only: a later client history that sends it back unchanged ignores nothing for it, one
+  that sends it with a different role or content records it `edited`. It is never the anchor and never on the
+  path, so it is never `deleted`, and the rebuild and the session API leave it out. The browser does send it
+  back: after a refusal, or a stop before the agent's `RUN_STARTED`, no snapshot replaces its bubble, and the
+  next run anchors on the latest path message the client holds, as if the bubble were not there.
 - **Step 4.** `run_start` carries `command: {name: "compact", focus: <string | null>, message_id: <the client's
   id>}`. Two refusals follow it, as decision 3's do (`run_end` `refused`, `RUN_STARTED` then `RUN_ERROR` to the
   client, the agent not called):
@@ -61,32 +63,43 @@ model.
 
 Everything else in §13 is unchanged: the admission checks, the duplicate `runId`, a run with no new user message
 (decision 3), the journal's lines and fsyncs, the termination table, concurrency (a `/compact` sent beside another
-run is a sibling branch from the same anchor; the browser's input is disabled during a run anyway).
+run is a sibling branch from the same anchor; the browser's input is disabled during a run anyway). Accepted:
+a `/compact` from a second tab while the first tab's run streams compacts the path up to that run's user
+message, and if the other run ends later the tip is its reply, on a branch without the marker, so the
+compaction has no effect on what the chat reopens on; the archive keeps both branches.
 
 ### The agent
 
 When the run input's `forwardedProps.spe_command.name` is `"compact"`, `app.py` does not start the model loop:
 
-1. It converts the input as for any run (markers become cut points) and takes what would be sent (compaction §3).
+1. It sends `RUN_STARTED` at once, before any model request, so `chat-ui`'s snapshot (step 5) replaces the
+   bubble as the run starts. It converts the input as for any run (markers become cut points) and takes what
+   would be sent (compaction §3).
 2. With compaction off (`compaction.enabled: false`): `RUN_ERROR` "Compaction is turned off on this instance."
    With nothing after the latest cut: `RUN_ERROR` "Nothing to compact yet." (the backstop of `chat-ui`'s check).
 3. Otherwise one summary request, as compaction decision 5 makes it (same model, no tools, the package's
    prompt, cut tool output, the window budget, the retry with the older half left out when the summary request
-   itself overflows), with the focus appended to the transcript as the participant's request, fenced with a
-   fence longer than any backtick run inside, never as an instruction of the system prompt. It counts towards the run's usage limits and is checked before it is
-   sent.
-4. It streams `RUN_STARTED`, the marker's three events (compaction decision 7), back to back once the summary is
-   complete, then `RUN_FINISHED`. A failed summary request is `RUN_ERROR`, sanitized as every error is.
+   itself overflows). Two things differ. The focus is not a `User:` entry of the transcript: it follows the
+   transcript as a section of its own, "The participant's instructions for this summary", fenced with a fence
+   longer than any backtick run inside, never in the system prompt; so the latest real request stays the one the
+   transcript pins and the summary quotes. And the prompt and the summary's frame say the participant asked for
+   the summary, not that the conversation no longer fit (a manual variant of each). It counts towards the run's
+   usage limits and is checked before it is sent.
+4. It streams the marker's three events (compaction decision 7), back to back once the summary is complete,
+   then `RUN_FINISHED`. A failed summary request is `RUN_ERROR`, sanitized as every error is. A run cancelled
+   during the summary request (the stop button, or `chat-ui` going away) sends no marker events, and its run log
+   record has the cancelled run's status and `compactions` empty.
 
-Any other `spe_command` gets `RUN_ERROR` "Unknown command." The run log's record has `compactions: [{trigger:
+Any other `spe_command` gets `RUN_ERROR` "Unknown command." The run log's record has `input` `/compact`, or
+`/compact <focus>`, not the path's last user message, and `compactions: [{trigger:
 "manual", focus, …}]` (`manual` a third trigger beside `threshold` and `overflow`), the fields of compaction
 decision 11, `next_input_tokens` null, redacted as every
 record is.
 
 ### A marker cut short
 
-A marker counts only when its `TEXT_MESSAGE_END` is in the journal. The rebuild drops a marker message whose run
-ended (stopped, failed, cut) between its `TEXT_MESSAGE_START` and its `TEXT_MESSAGE_END`, so the agent is never
+A marker counts only when its `TEXT_MESSAGE_END` is in the journal. The rebuild drops a marker message with no
+`TEXT_MESSAGE_END`, whatever its run's status (stopped, failed, cut, or incomplete with no `run_end`), so the agent is never
 sent a truncated summary as its cut point. This holds for automatic compactions too. Stopping a command run
 during the summary request ends it `cancelled` with no marker: nothing is compacted.
 
@@ -94,9 +107,9 @@ during the summary request ends it `cancelled` with no marker: nothing is compac
 
 The marker renders as compaction's "Compacted" section (§14, decision 16), with one more line when its run was a
 command run: *Requested by the participant (`/compact`)*, and the focus, fenced with a fence longer than any
-backtick run inside. The exporter takes it from `run_start.command` and puts it on the run's assistant message
-as `spe_command`. `index.md`'s `compactions` count includes manual ones. A refused or failed command run renders
-as any refused or failed run.
+backtick run inside. The exporter takes it from `run_start.command` and puts it on the run's message as
+`spe_command`, for every command run, refused and failed ones too, so the archive shows the command a refused
+or failed run carried beside its status. `index.md`'s `compactions` count includes manual ones.
 
 ### Upstream
 

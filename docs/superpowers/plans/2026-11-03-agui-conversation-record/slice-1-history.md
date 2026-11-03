@@ -104,7 +104,7 @@ import { CopilotRuntime, createCopilotRuntimeHandler } from "@copilotkit/runtime
 import type { Observable } from "rxjs";
 import { startTestAgent } from "./test-agent.ts";
 
-// Stands in for slice 3's recorder: keeps what the client sent, forwards `history` plus the client's last
+// Stands in for the run route's recorder: keeps what the client sent, forwards `history` plus the client's last
 // message (the new user message) instead.
 class Replace extends Middleware {
   seen: Message[][] = [];

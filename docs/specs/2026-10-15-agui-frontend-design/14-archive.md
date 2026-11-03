@@ -5,7 +5,7 @@ fetch, write on the controller (`roles/run_archive`). Each journal is exported a
 the existing Open WebUI renderer turns into the same run layout, so both frontends are saved and exported one
 way. Decisions 15, 16 and 30 of the [README](README.md#decisions-taken).
 
-As built (clarifications 11 and 13), every archive copies live (decision 30): only the final archive
+As built (clarifications 11 and 14), every archive copies live (decision 30): only the final archive
 `destroy.yml` runs keeps step 1's barrier, stopping `chat-ui` then the agent; run on its own, `archive.yml`
 interrupts nothing, and the bundle says `spe_archive_mode: live`. Runs archived before the record keep the
 files written for them (`agui-sessions/<uuid>.json`, rendered by the renderer of that time); they are not

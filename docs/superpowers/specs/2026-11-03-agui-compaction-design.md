@@ -1,6 +1,6 @@
 # AG-UI compaction — design
 
-**Status:** approved, PR #15. **Latest clarification:** 8 (2026-11-03, slice 2).
+**Status:** approved, PR #15. **Latest clarification:** 9 (2026-11-03, `/compact`); 5 folded in slice 3.
 Read against this repo at `4a59a6c` (`main`), with `pydantic-ai-slim` 2.56.0, `ag-ui-protocol` 0.1.22,
 `@ag-ui/core`/`@ag-ui/client` 1.0.2 and CopilotKit 1.79.0 as pinned there.
 
@@ -40,9 +40,9 @@ archive renders it. The browser always keeps and sends the full history; only wh
 | 8 | The chat renders a compaction marker (an assistant message with id prefix `spe-compaction-`) as a divider ("Earlier conversation compacted") with the summary in a collapsed `<details>`, as text; nothing else in the chat changes | [The chat](#6-the-chat) | Playwright against `fake_agent.py` scripted to emit a compaction: the divider appears in place, live and after a reload; expanding shows the summary as literal text (a summary holding `<img src=x onerror=…>` shows the markup); screenshots light and dark in the slice's handoff |
 | 9 | The session record keeps every message the browser sent plus the marker message; schema `version` stays 1; title, runs and the session API are unchanged | [Session record and archive](#7-session-record-and-archive) | `npm test`: a recorded compacting run validates against the existing schema; the auto title is still the first user message |
 | 10 | The archive renders a compaction marker as a marked section with the fenced summary, between the messages it sits between; all original messages are still rendered | [Session record and archive](#7-session-record-and-archive) | `pytest platform/dev/tests -k agui_run`: a fixture session with a compaction renders every original message, then the "Compacted" section with the summary in a fence longer than any backtick run inside it; the index gains a `compactions` count per session |
-| 11 | The run log records each compaction: trigger (`threshold` or `overflow`), estimated tokens before, messages cut, the summary text, the summary request's usage and the input tokens of the first request after it; redacted like every record | [Run log](#8-run-log) | `pytest`: a compacting run's record has a `compactions` list with those fields; a summary containing the sandbox key is written redacted |
+| 11 | The run log records each compaction: trigger (`threshold`, `overflow`, or `manual` with its `focus`: living AG-UI spec §15), estimated tokens before, messages cut, the summary text, the summary request's usage and the input tokens of the first request after it; redacted like every record | [Run log](#8-run-log) | `pytest`: a compacting run's record has a `compactions` list with those fields; a summary containing the sandbox key is written redacted |
 | 12 | Configuration: `compaction.enabled` (default true), `compaction.context_window_tokens` (default null), `compaction.trigger_ratio` (default 0.8, in (0, 1)), `compaction.summary_max_tokens` (default 4096), rendered by Ansible from `spe_agent_compaction_*` variables; the de.NBI model's window is set beside `spe_webui_model_id` in `inventory/group_vars/all.yml`, the dev VM's in its private instance file | [Configuration](#9-configuration) | `pytest` (config): defaults, a ratio of 0 or 1 or an unknown key refused; with `enabled: false` neither trigger acts; `ansible-playbook --syntax-check`; `verify.yml` on the dev VM shows the rendered `compaction` block (a new task in `roles/agui/tasks/checks.yml`) |
-| 13 | A session that already fails with an overflow recovers: its next message compacts (decision 3) and the run completes | [Trigger](#2-trigger) | On the dev VM (Haiku, approved): a session pushed past a small configured window (`context_window_tokens: 20000`) by tool output keeps working, the divider shows, and the run log's input tokens of the first request after the compaction (decision 11) are below the window; the same session with compaction disabled fails with the provider's error |
+| 13 | A session that already fails with an overflow recovers: its next message compacts (decision 3) and the run completes | [Trigger](#2-trigger) | On de.NBI (`qwen3.8-27b`): a session whose tool output is past qwen's own window fails with the provider's context-window error while compaction is disabled; with compaction enabled and no window set, its next message compacts (trigger `overflow`), the divider shows, the run completes and the run log's input tokens of the first request after the compaction (decision 11) are below the window (clarification 5). The proactive path on a small window (`context_window_tokens: 20000`) is the early output's session |
 
 ## Early output
 
@@ -108,7 +108,8 @@ to the run's history and opens the request once more with them, so the retried r
 client like any other (clarification 6). The summary request goes to the wrapped model, not through the
 wrapper. The overflow errors are a fixed list in `compaction.py`, each with a test:
 `ModelHTTPError` with status 400 or 413 whose body contains `prompt is too long` (Anthropic),
-`context_length_exceeded` or `maximum context length` (OpenAI and vLLM), `input is too long` or
+`context_length_exceeded` or `maximum context length` (OpenAI and vLLM), `context window exceeded` (a LiteLLM
+proxy such as de.NBI's gateway, which refuses before vLLM sees the request), `input is too long` or
 `too many tokens`. Any other error passes through as today. The reactive path is what makes a session that
 already overflows recover (decision 13), and it covers an unset or wrong window.
 
@@ -230,8 +231,9 @@ sessions spec's §4, gains a clarification pointing here (its clarification 3; *
 
 ## 8. Run log
 
-Each run record gains `compactions`: a list, empty when none, of `{trigger: "threshold" | "overflow",
-estimated_tokens, messages_cut, summary, usage, next_input_tokens}`, where `next_input_tokens` is the input
+Each run record gains `compactions`: a list, empty when none, of `{trigger: "threshold" | "overflow" | "manual",
+estimated_tokens, messages_cut, summary, usage, next_input_tokens}`, plus `focus` (string or null) for a `manual` one (`/compact`, §15 of the living AG-UI spec), where
+`next_input_tokens` is the input
 tokens of the first model request sent after the compaction (null if none was answered). It is redacted like
 the rest of the record, and its fields are cut at the run log's 16384 bytes like every field, so a long
 summary may be cut there; the session record holds it in full. With both, an analysis can tell where each
@@ -255,7 +257,8 @@ Ansible renders it from `spe_agent_compaction_enabled`, `spe_agent_context_windo
 `inventory/group_vars/all.yml`, rendering in `roles/agui/tasks/main.yml`), and `roles/agui/tasks/checks.yml`
 gains a task that shows the rendered block, so `verify.yml` does. The de.NBI model is fixed in
 `inventory/group_vars/all.yml` (`spe_webui_model_id: qwen3.8-27b`, which `spe_agent_model` derives from), so
-`spe_agent_context_window_tokens` is set beside it to that model's `max_model_len`; the Coder testbed presets
+its window is set beside it (`spe_webui_model_context_tokens`, the de.NBI gateway's `max_input_tokens`), and
+`spe_agent_context_window_tokens` is derived from it while the agent uses that model; the Coder testbed presets
 can only set existing `coder_parameter`s and are not touched. The dev VM's private instance file sets Haiku's.
 `docs/getting-started.md` says how to set it for another model; `platform/ansible/README.md` and the agent's
 README describe the block.
@@ -266,7 +269,8 @@ this work (`docs/guides/contributing-upstream.md`). No upstream PR is part of th
 ## Out of scope
 
 - A **manual "compact" action** in the chat (as `/compact` in Claude Code). It needs a run with no new user
-  message, which the recorder's title rule and the agent's run input do not have today. To `BACKLOG.md`.
+  message, which the recorder's title rule and the agent's run input do not have today. Designed since as
+  `/compact`, §15 of the living AG-UI spec (`docs/specs/2026-10-15-agui-frontend-design/`).
 - **Dropping or shortening old tool results** before summarising (Anthropic's context editing), as a cheaper
   first stage. To `BACKLOG.md`, to revisit if summary requests prove costly.
 - **Reading the window from the provider** (vLLM's `/v1/models` reports `max_model_len`): declined. One
@@ -338,7 +342,20 @@ this work (`docs/guides/contributing-upstream.md`). No upstream PR is part of th
    summary could no longer say what was asked (found by task 3). `test_transcript_keeps_the_latest_request`
    pins it. *Amends:* §4.
    *Status:* folded.
-<!-- 5: reserved, proposed on PR #16, slice 3/3 folds it -->
+5. **Decision 13 is checked against the model's own window, on qwen** (2026-11-03; plan PR #16, slice 3/3).
+   The check runs on de.NBI's `qwen3.8-27b` at its own window (262144, the gateway's `max_input_tokens`): one
+   tool result past it (`seq`, the output cap raised for the check) fails the run with the provider's
+   context-window error while compaction is disabled; with compaction on and no window configured, the same
+   session's next message compacts through the reactive trigger and completes. The provider's error there is
+   de.NBI's LiteLLM gateway's (`ContextWindowExceededError`, "Context Window exceeded"), which refuses before
+   vLLM sees the request; the overflow list gained its wording (§2). The proactive part (window 20000, the
+   divider, the first request after the compaction below the window) is the early output's session (Haiku) and
+   the de.NBI session on qwen (clarification 8). *Reason:* at `context_window_tokens: 20000` the proactive
+   trigger acts long before any provider fails, so "the same session with compaction disabled fails with the
+   provider's error" cannot happen there; and the user asked to run it on qwen rather than Haiku, to spare
+   Haiku's tokens. Evidence: the plan's `evidence/slice-3/decision-13/`. *Amends:* decision 13's acceptance
+   check, §2's overflow list.
+   *Status:* folded.
 6. **The reactive retry goes through the streamed request, inside a wrapper model** (2026-11-03; slice 1/3;
    numbered 6 because 3–4 were then proposed for task 6 and 5 is reserved for slice 3). `wrap_model_request`
    sets the request's model to a `WrapperModel` whose `request_stream` (and `request`) catches a listed overflow
@@ -377,3 +394,10 @@ this work (`docs/guides/contributing-upstream.md`). No upstream PR is part of th
    participants use; the Haiku runs do not show that its token counts, its `max_model_len` and its summaries
    work with the trigger. *Cost if wrong:* a few qwen requests on de.NBI's quota. *Amends:* *Inputs for the
    plan* (paid runs). *Status:* folded.
+
+9. **A third trigger, `manual`, with the participant's focus** (2026-11-03; the fork's PR #26, `/compact`). A
+   compaction on request (§15 of the living AG-UI spec, `docs/specs/2026-10-15-agui-frontend-design/`) is
+   recorded with `trigger: "manual"` and `focus`, and `next_input_tokens` null, since its run sends no request
+   after it. *Reason:* the run log must tell a requested compaction from an automatic one, and the focus shapes
+   the summary an analysis reads. *Cost if wrong:* a reader of the run log that expects only `threshold` or
+   `overflow` meets a third value. *Amends:* decision 11, §8. *Status:* folded.

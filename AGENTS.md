@@ -189,8 +189,9 @@ is open (`docs/guides/contributing-upstream.md`, step 6).
 
 - **Canary evaluation ladder** (biohackathon 0013): spec (#1) and plan (#2) merged. **Next: slice 1/9**
   `impl/canary-eval-ladder-1-scoring`. Handoff: `ls docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs | tail -1`.
-- **AG-UI compaction** (Full mode): spec (#15), plan (#16), slices 1/3 (#17, the agent) and 2/3 (#18, chat and
-  archive) merged. **Next: slice 3/3** `impl/agui-compaction-3-denbi-docs`. Handoff: `ls docs/superpowers/plans/2026-11-03-agui-compaction/handoffs | tail -1`.
+- **AG-UI `/compact`** (Full mode): a `/compact [focus]` chat command, journaled as a command, compacted by the
+  agent; §15 of the living AG-UI spec. Spec merged (#26). **Next: the plan** `plan/agui-compact-command` (two
+  slices). Handoff: `ls docs/handoffs | tail -1`.
 - **Upstream PR kraatz #9** (`contrib/agui-token-cap-optional`): the AG-UI agent's token cap optional, off by
   default (fork #4); waits on upstream's review (`docs/guides/contributing-upstream.md`, step 6).
 - **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice; its *Next*, the ones due soon or
@@ -230,7 +231,9 @@ an upstream PR (`docs/guides/contributing-upstream.md`).
 
 Private instance files and `platform/ansible/output/` exist only in the main checkout,
 not in a worktree. To deploy a worktree's agent or chat UI before it is merged,
-run Ansible from the main checkout with `-e spe_agui_source_dir=<worktree>/platform/agui`.
+run Ansible from the main checkout with `-e spe_agui_source_dir=<worktree>/platform/agui`, and with
+`-i <worktree>/platform/ansible/inventory/hosts.yml` if the branch changes `group_vars`
+(`docs/knowledge/agui-worktree-deploy-inventory.md`).
 
 When this repository is a submodule (of `biohackathon`), the parent records the
 pinned commit; move the pin there after the push.

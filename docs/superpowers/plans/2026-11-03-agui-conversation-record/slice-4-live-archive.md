@@ -794,7 +794,7 @@ def check_restore_tip(r: Run) -> None:
     run until it reloads, so their runs are sibling branches; a reopened session shows the branch of the
     run that ended last, whichever tab ran it. Not literally concurrent: the route's CopilotKit runtime
     admits one run per thread at a time and refuses a second with "Thread already running" before the
-    recorder is ever called (clarification 12, BACKLOG.md), so tab B sends only once tab A's run has
+    recorder is ever called (clarification 13, BACKLOG.md), so tab B sends only once tab A's run has
     ended; neither tab refetches, so both still anchor at the one reply they last knew, which is enough
     for a sibling branch."""
     page = r.page

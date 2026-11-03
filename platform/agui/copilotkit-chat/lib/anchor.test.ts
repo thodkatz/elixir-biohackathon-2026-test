@@ -171,6 +171,26 @@ test("a run cancelled or cut mid tool call: its dangling call is no anchor, the 
   }
 });
 
+test("a run classified while another still streams does not anchor at the streaming run's partial reply", async () => {
+  // r3 has started and streamed part of a3 (no run_end yet) when r4 is classified from a client that holds
+  // a3. Anchoring at a3 would let r3 attach a later tool call to a3 with its result on r3's own branch, and
+  // a later run's path (…, a3{call}, u4, …) would send the agent a dangling call.
+  const streaming: Line[] = [
+    { type: "run_start", at: AT, run_id: "r3", anchor: "a2", messages: [user("u3", "thanks")], ignored: [], request, source: "chat" },
+    ev("r3", { type: EventType.RUN_STARTED, threadId: ID, runId: "r3" }),
+    ev("r3", { type: EventType.TEXT_MESSAGE_START, messageId: "a3", role: "assistant" }),
+    ev("r3", { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "a3", delta: "wel" }),
+  ];
+  const conv = await journal(r1(), r2(), streaming);
+  assert.equal(conv.runs.at(-1)!.status, "incomplete");
+  const held = ["u1", "a1", "u2", "c2", "t2", "a2", "u3", "a3"].map((id) => conv.nodes.get(id)!.message);
+  const c = classify(conv, [...held, user("u4", "next")]);
+  assert.equal(c.anchor, "u3");
+  assert.deepEqual(ids(c.path), ["u1", "a1", "u2", "c2", "t2", "a2", "u3"]);
+  assert.deepEqual(ids(c.newMessages), ["u4"]);
+  assert.deepEqual(kinds(c), [["deleted", "a3"]]);
+});
+
 test("reordered history keeps the anchor and flags nothing", async () => {
   // Review Focus 1: devtools moves a reply above its question, the browser reorders two turns.
   const conv = await journal();

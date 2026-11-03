@@ -178,6 +178,14 @@ test("a journal cut after a run's third event: the run is incomplete with the te
   assert.deepEqual(shape(branchOfTip(conv)), [["user", "u1", "q1"], ["assistant", "a1", "half an answer"]]);
 });
 
+test("a run without run_end is no boundary at its last message: it may still be writing", async () => {
+  const conv = await rebuild(ID, [created(), start("r1", null, [user("u1", "q1")]), ...reply("r1", "a1", "half", false)]);
+  assert.equal(conv.runs[0].status, "incomplete");
+  assert.deepEqual(conv.runs[0].added, ["u1", "a1"]);
+  assert.equal(isBoundary(conv, "a1"), false);
+  assert.equal(isBoundary(conv, "u1"), true);
+});
+
 test("journal without a created line", async () => {
   // Review Focus 3: a crash tore the first line; the runs still rebuild and created_at falls back.
   const lines = [created(), start("r1", null, [user("u1", "q1")]), ...reply("r1", "a1", "x"), end("r1")];

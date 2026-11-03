@@ -70,16 +70,18 @@ export function pathTo(conv: Conversation, id: string | null): Message[] {
   return path.reverse();
 }
 
-// A point the agent may continue from: a user message, or the last message a run added, but only if every
-// tool call any message that run added holds is answered by a `tool` message the same run added (a call the
-// last message itself holds, with nothing later in the run to answer it, is the special case this excludes:
-// a run cancelled, failed or cut mid tool call), so the agent is never sent a dangling tool call (§13).
+// A point the agent may continue from: a user message, or the last message an ended run (one with a run_end)
+// added, but only if every tool call any message that run added holds is answered by a `tool` message the
+// same run added (a call the last message itself holds, with nothing later in the run to answer it, is the
+// special case this excludes: a run cancelled or failed mid tool call), so the agent is never sent a dangling
+// tool call (§13). A run without a run_end may still be writing: a call it adds later to its last message
+// would be answered only on its own branch, so its last message is no boundary until it ends.
 export function isBoundary(conv: Conversation, id: string): boolean {
   const node = conv.nodes.get(id);
   if (!node) return false;
   if (node.message.role === "user") return true;
   const run = conv.runs.find((r) => r.added.at(-1) === id);
-  if (!run) return false;
+  if (!run || run.status === "incomplete") return false;
   const calls = new Set<string>();
   const answered = new Set<string>();
   for (const addedId of run.added) {

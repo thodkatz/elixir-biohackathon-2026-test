@@ -18,6 +18,26 @@ start reads this section; keep it short.
   due: before the ladder's slice 5 (agent suite), whose plan 0015 reviews.
 - Dev VM: redeploy `dev-local` (`create.yml -e @instances/dev-local.yml`, no model call) and run `verify.yml`, so the agent there compacts at Haiku's window: the private instance file already says `spe_agent_context_window_tokens: 1000000`, but `/` had 4.5 GB free on 2026-11-03, under the preflight's 5 — from the compaction plan, slice 3/3, task 4, step 5; waits on the user, who decides whether to prune the dev VM's Docker build cache (12 GB, `docker builder prune -af`, see `docs/knowledge/denbi-disk-full.md`).
 - AG-UI `/compact`: plan merged (#27, `docs/superpowers/plans/2026-11-03-agui-compact-command/`) — asked for by the user (2026-11-03, PR #21); due: slice 2/2 (`impl/agui-compact-command-2-chat`), next (slice 1/2 merged, #28).
+- AG-UI via Coder, before any upstream PR: (1) merge `upstream/main` into our `main`, moving our AG-UI work onto
+  its clone-on-VM layout (`platform/instance/compose.yml`, `spe-apply`; `roles/agui/templates/docker-compose.yml.j2`
+  is gone upstream); (2) test end to end in a workspace from the portal's main template: `~/sperange` fetches our
+  fork's branch, `spe-apply all`, then in the chat: several sessions open at once, switching between them (also
+  mid-run), new / rename / delete, reload and reopen, automatic compaction, `/compact` with and without a focus,
+  stop mid-run and send again at once (no "Thread already running"), the live archive; (3) the archive on stop runs from the portal's upstream checkout, so test it with
+  `create.yml`/`destroy.yml` from our checkout. Passes when, on the AG-UI route: long conversations (several
+  compactions per session) run smoothly with no error in the chat or in the agent and `chat-ui` logs; every run is
+  saved as it happens (journal written per run, live archive keeps up); and nothing is lost: each session's
+  messages in the chat, its rebuilt journal after a reload, the live archive and the final archive agree, run for
+  run — asked for by the user (2026-11-03); due: after the `/compact`
+  track's slice 2/2 merges, before the *Upstream: port the AG-UI package* item. Approved by the user (2026-11-03):
+  instances and paid model calls for this test need no further OK, but at most one instance at a time (a Coder
+  workspace counts; stop it before step 3's `create.yml`), destroyed when done.
+- AG-UI chat minors, asked for by the user (2026-11-03): (1) a model-written initial title, as Open WebUI 0.11.3
+  does (after the first reply, a background task-model call on the last two messages, `{"title": …}` 2–4 words;
+  `ENABLE_TITLE_GENERATION`, `TASK_MODEL`): replaces `autoTitle`'s first 60 characters unless the user renamed it,
+  journaled as a `meta` line, its model call in the run log, off by a switch; (2) a sidebar resizable by dragging its
+  edge (Open WebUI's `sidebarWidth`, default 245), width kept per browser, min/max, keyboard-resizable. (1) changes
+  the agent, record and spec §6 (Full mode or a spec clarification); (2) is a Change. Due: after the `/compact` track.
 
 ## Unscheduled
 
@@ -57,5 +77,5 @@ start reads this section; keep it short.
 - AG-UI record: each session's `JournalWriter` (`lib/sessions.ts`) stays open for the chat UI process's life, one fd per session ever appended to, never closed even at shutdown — from slice 3's final review, waits because fd growth only bites a long-lived instance with many sessions; options are closing idle writers past a cap or an age, or `shutdown()` closing them after the drain.
 - AG-UI record: a journal the index build could not read (a transient EMFILE or EIO) stays out of the index until a restart: `list()` leaves it out and `GET` answers 404 while runs are still admitted, and after the next run the entry is folded from the new lines only (wrong `created_at` and auto title, earlier `meta` lines missing) — `lib/sessions.ts`, `build()`; fix: fold the whole journal when `append` finds no entry, or retry skipped files on `ready()` — from #24's review (finding 3), waits because it needs a read failure at startup and a restart repairs it.
 - AG-UI record: a journal that cannot be read (`isDeleted` or `load` throwing in `admit`, `lib/recorder.ts`) refuses the run with "this session could not be saved", which tells the user and operator that saving failed when reading did; a distinct "this session could not be read" is a spec change: §13 step 1, `REFUSAL_MESSAGES` and `reconcile.ts`'s refused-run list, as the spec fixes six refusal messages — from #24's review (finding 4), waits because the run is refused either way and the log line says `reading … failed`.
-- AG-UI record: the chat route refuses a second in-flight run on one session ("Thread already running": CopilotRuntime's default `InMemoryAgentRunner`, `onConcurrentRun: "throw"`, no `runner` override in `app/api/copilotkit/[[...slug]]/route.ts`), so decision 9's overlap holds in `lib/recorder.ts` (`npm test`) but not through the route — from the conversation record's slice 4, task 2 (Playwright checks); waits because it fails safe (the second run errors, nothing is recorded wrong) and fixing it needs a `runner` override or a different `AgentRunner`, outside the slice.
+- AG-UI record: the chat route refuses a second in-flight run on one session ("Thread already running": CopilotRuntime's default `InMemoryAgentRunner`, `onConcurrentRun: "throw"`, no `runner` override in `app/api/copilotkit/[[...slug]]/route.ts`), so decision 9's overlap holds in `lib/recorder.ts` (`npm test`) but not through the route — from the conversation record's slice 4, task 2 (Playwright checks); waits because it fails safe (the second run errors, nothing is recorded wrong) and the user ruled two tabs sending on one session at once acceptable as refused (2026-11-03) and fixing it needs a `runner` override or a different `AgentRunner`, outside the slice.
 - AG-UI archive: a final archive re-run after its barrier failed (e.g. `chat-ui` exited 1, a drain timeout) finds the services already stopped, so `export.yml`'s exit-code check has nothing to check and the bundle and `index.md` say `final` ("copied after the chat UI and the agent had stopped") although the last run's end may be missing from its journal; the failure message says so, the archive does not — from PR #25's local review (correctness, finding 4); waits because the run then shows as incomplete in the archive rather than wrong, and marking it needs a new bundle field through the exporter and `write_run.py`.

@@ -16,6 +16,11 @@ Projects classic, `tooling-gotchas.md`). Asked for by the user 2026-11-03 as a C
    `--sidebar-width` in `app/globals.css:85`), task E the spec (§6 *Sessions*, session API table, *Layout*;
    §5 *Configuration*, *Run log*; a clarification) and `BACKLOG.md` (delete the *AG-UI chat minors* item; add
    *nicer tool-call cards*, below).
+   Task F, asked for by the user after the plan was written: a light/dark theme toggle. Today there is none: the
+   theme follows the OS only (`prefers-color-scheme` in `app/globals.css`, `useSystemColorScheme` `app/page.tsx:298`,
+   `colorScheme: "light dark"` `app/layout.tsx:8`). Add System / Light / Dark (e.g. in the sidebar's footer, as
+   Open WebUI's settings offer), kept per browser in `localStorage` (try/catch), `data-theme` on `<html>` overriding
+   the media query, applied before paint (no flash); spec §6 *Layout*. Add it to the PR body's plan first.
 2. Check who reads `runs.jsonl` before adding the `type: "title"` line (exporter, `write_run.py`, promptfoo
    provider/scoring): a reader that assumes every line is a run must skip it, with a test.
 3. Local review round (correctness + methodology), merge squashed, clean up, move the pin in `biohackathon`.

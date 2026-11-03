@@ -57,7 +57,7 @@ root unless a step `cd`s; `AGENT` means `platform/agui/pydantic-ai-agent`, `CHAT
 - `CompactionPart(content, *, id, provider_name, provider_details)` (`messages.py:2269`). On input,
   `ActivityMessage(activity_type="pydantic_ai_compaction")` becomes a `CompactionPart` (`ui/ag_ui/_adapter.py:589-593`)
   that `MessagesBuilder.add` appends to the last message if it is a `ModelResponse`, else to a new one, which the
-  following assistant parts then join (plan README, proposed clarification 3). `compaction_payload` is in
+  following assistant parts then join (spec clarification 3, folded). `compaction_payload` is in
   `ui/_adapter.py:187` (private); `COMPACTION_ACTIVITY_TYPE` in `ui/ag_ui/_utils.py:71`.
 - `AGUIAdapter.messages` is a `cached_property` over `run_input`, and neither `UIAdapter` nor `AGUIAdapter`
   defines a `__post_init__`. Their generated `__init__` does not call one a plain subclass adds, so `_Adapter`
@@ -1806,7 +1806,7 @@ async def test_cancelled_run_keeps_compaction_record(tmp_path):
     assert record["compactions"][0]["next_input_tokens"] is None
 ```
 
-  `test_later_run_cuts_at_marker` is the cross-run test of decision 4 and verifies proposed clarification 3: the
+  `test_later_run_cuts_at_marker` is the cross-run test of decision 4 and pins spec clarification 3 (folded): the
   marker follows a tool result, so pydantic-ai starts a new `ModelResponse` with it, which the answer joins.
   `test_reactive_marker_before_the_retried_response` pins that task 5's retry queues the summary before the
   retried stream opens. A marker whose content is a list never reaches the agent: ag-ui 0.1.22's

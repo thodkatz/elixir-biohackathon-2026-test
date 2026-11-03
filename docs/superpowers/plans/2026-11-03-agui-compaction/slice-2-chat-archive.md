@@ -527,7 +527,7 @@ git commit -s -m "Archive: render a compaction as '## Compacted' and count them 
 ```python
 COMPACTED = "Earlier conversation compacted"
 SUMMARY_LINE = "Summary the model continues from"
-XSS = "compact <img src=x onerror=window.__speXss=1>"
+COMPACTION_XSS = "compact <img src=x onerror=window.__speXss=1>"
 
 
 def check_compaction(r: Run) -> None:
@@ -537,7 +537,7 @@ def check_compaction(r: Run) -> None:
     page.get_by_role("button", name="New chat").click()
     expect(page.locator(".spe-header-title")).to_have_text("New chat")
     box = page.get_by_test_id("copilot-chat-textarea")
-    box.fill(XSS)
+    box.fill(COMPACTION_XSS)
     box.press("Enter")
     expect(page.get_by_text("The conversation was compacted.")).to_be_visible(timeout=20_000)
     divider = page.locator(".spe-compaction")
@@ -553,12 +553,12 @@ def check_compaction(r: Run) -> None:
     r.shot("compaction-open")
     # The divider sits between the user's message and the answer that followed the compaction.
     texts = page.locator(".spe-chat").inner_text()
-    assert texts.index(XSS) < texts.index(COMPACTED) < texts.index("The conversation was compacted."), texts
+    assert texts.index(COMPACTION_XSS) < texts.index(COMPACTED) < texts.index("The conversation was compacted."), texts
     sid = r.url_session()
     rec = r.wait_runs(sid, 1)
     markers = [m for m in rec["messages"] if m["id"].startswith("spe-compaction-")]
     assert [m["role"] for m in markers] == ["assistant"] and "Scripted summary" in markers[0]["content"], rec
-    assert rec["title"] == XSS, rec["title"]
+    assert rec["title"] == COMPACTION_XSS, rec["title"]
     page.reload()
     expect(page.locator(".spe-compaction")).to_have_count(1, timeout=10_000)
     expect(page.get_by_text("The conversation was compacted.")).to_be_visible()
@@ -566,15 +566,19 @@ def check_compaction(r: Run) -> None:
     box = page.get_by_test_id("copilot-chat-textarea")
     box.fill("one more")
     box.press("Enter")
-    expect(page.get_by_text(re.compile(r"Turn \d+: the command ran\.$"))).to_have_count(1, timeout=20_000)
+    # Turn numbering restarts after a compaction (the sent history is cut), so this later answer is also
+    # "Turn 1"; it is told apart from the compacted one by "Its output was:", never in the compacted answer.
+    expect(page.get_by_text(re.compile(r"Turn \d+: the command ran\. Its output was:"))).to_have_count(
+        1, timeout=20_000)
     expect(page.locator(".spe-compaction")).to_have_count(1)
     r.wait_runs(sid, 2)
     r.ok("compaction: divider in place live and after a reload, summary collapsed and shown as text, record keeps it")
 ```
 
-  The `$` anchors the later answer apart from the compacted one (`… the command ran. The conversation was
-  compacted.`); if `get_by_text` with a regex matches a container rather than the message, narrow it to the
-  assistant message's element as `check_view` and `send` do.
+  `COMPACTION_XSS`, not `XSS`: the module already has an `XSS`. The later answer is matched on `Its output
+  was:`, which the compacted answer (`… the command ran. The conversation was compacted.`) never holds: turn
+  numbering restarts after a compaction, so both are `Turn 1`. If `get_by_text` with a regex matches a
+  container rather than the message, narrow it to the assistant message's element as `check_view` and `send` do.
 
 - [ ] **Step 2: wire the scenarios.** `LOCAL = ("all", "stop", "compaction")`; in `main`'s local branch, call
   `check_compaction(r)` in `all` after `check_deleted_open(r)`, and for `--scenario compaction` after
@@ -681,17 +685,17 @@ python3 platform/dev/e2e/sessions.py --url http://127.0.0.1:3000 --compose-file 
   --scenario compaction-live --shots docs/superpowers/plans/2026-11-03-agui-compaction/evidence/slice-2/live
 ```
 
-  Expected: `compacted after N turns` with N about 3 (20000 × 0.8 = 16000 tokens; each `seq 1 3000` adds about
-  5000). If it never compacts in 8 turns, read the run log's estimates before changing anything: the trigger or
+  Expected: `session <id>, <n> compactions after <t> turns`, with t about 2 (20000 × 0.8 = 16000 tokens; each
+  `seq 1 3000` adds about 5000) and n ≥ 1 (one turn can compact more than once). If it never compacts in 8 turns, read the run log's estimates before changing anything: the trigger or
   the estimate is wrong, and that is a slice 1 bug to fix here with a test.
 
 - [ ] **Step 3: verify and archive.**
   `ansible-playbook playbooks/verify.yml -e @instances/dev-local.yml </dev/null`: the new task shows the rendered
   `compaction` block with `context_window_tokens: 20000` (decision 12). Then
   `ansible-playbook playbooks/archive.yml -e @instances/dev-local.yml </dev/null` and, in the output directory it
-  prints, read `index.md` (the session's row has `Compactions` 1), the session's `chats/NN-*.md` (the
+  prints, read `index.md` (the session's row has `Compactions` ≥ 1), the session's `chats/NN-*.md` (the
   `## Compacted` section where the divider was) and `agent-runs.jsonl`'s `compactions` (trigger, estimated tokens,
-  messages cut, usage, `next_input_tokens` below 20000). Copy the chat's `.md` into `evidence/slice-2/live/`
+  messages cut, usage, each entry's `next_input_tokens` below 20000). Copy the chat's `.md` into `evidence/slice-2/live/`
   only after checking it holds no canary or key (the session ran `seq` only; the system prompt is not in it);
   never copy `canaries.json` or the `.json` record.
 

@@ -7,8 +7,8 @@ staged`: `git -C <worktree> ls-files -- pydantic-ai-agent copilotkit-chat` lists
 …/pydantic-ai-agent` fails with "No such file or directory". The running containers are not touched.
 
 **Why.** The role expects the directory that directly holds `pydantic-ai-agent/` and `copilotkit-chat/`
-(`inventory/group_vars/all.yml`, `spe_agui_source_dir`'s default `{{ playbook_dir }}/../../agui`). The AG-UI
-frontend spec's §7 still shows the repository root, from before the sources moved under `platform/agui/`.
+(`inventory/group_vars/all.yml`, `spe_agui_source_dir`'s default `{{ playbook_dir }}/../../agui`). Docs that
+said `<worktree>` dated from before the sources moved under `platform/agui/`.
 
 **Works**, from the main checkout's `platform/ansible/`:
 

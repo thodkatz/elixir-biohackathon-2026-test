@@ -197,11 +197,11 @@ Paid on de.NBI's quota: a scripted session of ordinary commands, no participant 
   20000` in that instance file (as slice 2 did on the dev VM), and say so in the evidence.
 - [ ] **Step 2: the session.** `python3 platform/dev/e2e/sessions.py --url <the instance's chat URL> --compose-file
   <its frontend compose file> --scenario compaction-live --shots <evidence>/denbi` (the dummy conversation: `seq
-  1 3000` turns until the agent compacts). Expected: `compacted after N turns`, the divider, and a later answer
+  1 3000` turns until the agent compacts). Expected: `session <id>, <n> compactions after <t> turns` with n ≥ 1, the divider, and a later answer
   that still knows the task (the summary carried it).
 - [ ] **Step 3: verify and archive.** `verify.yml` shows the `compaction` block; `archive.yml`, then the session's
-  `index.md` row (`Compactions` 1), its `## Compacted` section, and the run log's `compactions` (trigger
-  `threshold`, `next_input_tokens` below the window). Copy only the screenshots and the chat `.md`, grepped for
+  `index.md` row (`Compactions` ≥ 1), its `## Compacted` section, and the run log's `compactions` (each entry's
+  trigger `threshold`, `next_input_tokens` below the window). Copy only the screenshots and the chat `.md`, grepped for
   canaries and keys first. Put the window back to task 1's value afterwards.
 
 ---

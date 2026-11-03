@@ -823,11 +823,13 @@ def compaction_live(r: Run, turns: int = 8) -> None:
         expect(page.get_by_role("button", name="New chat")).to_be_enabled(timeout=120_000)
         if page.locator(".spe-compaction").count():
             break
-    expect(page.locator(".spe-compaction")).to_have_count(1)
+    # One turn can compact more than once: the model reads a truncated output again and the window fills again.
+    expect(page.locator(".spe-compaction").first).to_be_visible()
     r.shot("live-compaction")
-    page.locator(".spe-compaction-summary > summary").click()
+    page.locator(".spe-compaction-summary > summary").first.click()
     r.shot("live-compaction-open")
-    print(f"session {r.url_session()}, compacted after {turn} turns")
+    print(f"session {r.url_session()}, {page.locator('.spe-compaction').count()} compactions "
+          f"after {turn} turns")
 
 
 LOCAL = ("all", "stop", "compaction")

@@ -10,12 +10,17 @@ from __future__ import annotations
 
 import copy
 import json
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
 from dataclasses import dataclass, field, replace
 from importlib.resources import files
 from typing import Any, Literal
 
+from ag_ui.core import (
+    ActivityMessage, AssistantMessage, BaseEvent, RunAgentInput, TextMessageContentEvent, TextMessageEndEvent,
+    TextMessageStartEvent,
+)
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
@@ -26,6 +31,10 @@ from pydantic_ai.models import Model, ModelRequestContext, ModelRequestParameter
 from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import RunContext
+# Private in pydantic-ai 2.56.0 (pinned): the payload and type pydantic-ai's AG-UI adapter reads back
+# into a CompactionPart.
+from pydantic_ai.ui._adapter import compaction_payload
+from pydantic_ai.ui.ag_ui._utils import COMPACTION_ACTIVITY_TYPE
 
 from .config import CompactionCfg
 
@@ -368,3 +377,29 @@ class _Reactive(WrapperModel):
                 with self._retrying():
                     stream = await open_(messages)
             yield stream
+
+
+def _is_marker_message(message: Any) -> bool:
+    return (isinstance(message, AssistantMessage) and message.id.startswith(MARKER_PREFIX)
+            and isinstance(message.content, str) and not message.tool_calls)
+
+
+def markers_to_activities(run_input: RunAgentInput) -> RunAgentInput:
+    """Turn each marker message into the activity pydantic-ai reads as our CompactionPart."""
+    if not any(_is_marker_message(m) for m in run_input.messages):
+        return run_input
+    messages = [
+        ActivityMessage(id=m.id, activity_type=COMPACTION_ACTIVITY_TYPE,
+                        content=compaction_payload(CompactionPart(content=m.content, provider_name=PROVIDER_NAME)))
+        if _is_marker_message(m) else m
+        for m in run_input.messages
+    ]
+    return run_input.model_copy(update={"messages": messages})
+
+
+def marker_events(summary: str) -> list[BaseEvent]:
+    """The marker's three events; `summary` is never empty (an empty one is EMPTY_SUMMARY by now)."""
+    message_id = MARKER_PREFIX + str(uuid.uuid4())
+    return [TextMessageStartEvent(message_id=message_id, role="assistant"),
+            TextMessageContentEvent(message_id=message_id, delta=summary),
+            TextMessageEndEvent(message_id=message_id)]

@@ -1,6 +1,6 @@
 # AG-UI compaction — design
 
-**Status:** approved, PR #15. **Latest clarification:** 1 (2026-11-03, slice 1).
+**Status:** approved, PR #15. **Latest clarification:** 6 (2026-11-03, slice 1).
 Read against this repo at `4a59a6c` (`main`), with `pydantic-ai-slim` 2.56.0, `ag-ui-protocol` 0.1.22,
 `@ag-ui/core`/`@ag-ui/client` 1.0.2 and CopilotKit 1.79.0 as pinned there.
 
@@ -133,8 +133,9 @@ marker** and builds what is sent:
 4. every part after the marker, unchanged, so tool calls and their results stay paired: a cut is only made
    before a model request, never between a call and its result.
 
-The cut is at part level. On reload, pydantic-ai's AG-UI adapter merges the marker into the `ModelResponse`
-that follows it, so the parts after the `CompactionPart` in that response are kept and the ones before it
+The cut is at part level. On reload, pydantic-ai's AG-UI adapter appends the marker to the preceding
+`ModelResponse` when the message before it is one, else starts a new response that the following assistant
+parts join (clarification 3); either way the parts after the `CompactionPart` are kept and the ones before it
 cut. A marker followed directly by a user message (a run that failed after compacting) cuts the same way.
 
 **No `CompactionPart` is sent**, ours or any other producer's: every one is stripped from what is sent.
@@ -168,9 +169,9 @@ One request to the same `Model`, outside the agent's graph (`model.request`), wi
 - no tool definitions; `max_tokens` = `summary_max_tokens`.
 
 If the transcript itself is past the trigger, its oldest entries after the previous summary are left out,
-oldest first, until it fits, and the transcript says how many were left out. With no window configured, a
-summary request that the provider rejects as too long is retried once with the older half of those entries
-left out the same way.
+oldest first, until it fits, except the participant's latest request and the last entry (clarification 4),
+and the transcript says how many were left out. With no window configured, a summary request that the
+provider rejects as too long is retried once with the older half of those entries left out the same way.
 
 **Usage.** The request counts like any model request: before it is sent, the capability checks the run's
 `UsageLimits` (`check_before_request`) itself, since the graph's check ran before the hook; after it, it
@@ -318,6 +319,21 @@ the glossary are rewritten to match.
 prompt, framed summary, latest user request), so later requests of the same run start from it and the history
 holds no `CompactionPart` that a model could be sent. The marker exists only in the AG-UI stream and, on later
 runs, in the input. `test_compacts_inside_a_run` and `test_fourth_compaction_fails` pin the in-run behaviour.
+
+### 3. On reload the marker joins the preceding response — folded
+
+**2026-11-03, slice 1, task 6.** `MessagesBuilder.add` (`pydantic_ai/ui/_messages_builder.py:31-44`) appends a
+part to the last message when that message is a `ModelResponse`, else starts a new one. A marker after a tool
+result therefore starts a response that the following answer joins; a marker right after an assistant message
+joins that message's response. The cut is at part level in both cases. `test_later_run_cuts_at_marker` and
+`test_build_sent_marker_merged_into_a_response_cuts_at_part_level` pin it.
+
+### 4. A shortened transcript keeps the latest request — folded
+
+**2026-11-03, slice 1, task 3.** Leaving out the oldest entries first would drop the participant's request
+before the tool output it started, and the summary could no longer say what was asked. `transcript` never leaves
+out the previous summary, the latest user entry or the last entry; the rest go oldest first.
+`test_transcript_keeps_the_latest_request` pins it.
 
 ### 6. The reactive retry goes through the streamed request, inside a wrapper model — folded
 

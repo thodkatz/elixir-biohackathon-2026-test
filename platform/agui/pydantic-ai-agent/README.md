@@ -58,7 +58,12 @@ stripped (`manage_system_prompt='server'`); the agent's prompt is reinjected.
 
 **Runs.** Each request builds its history from the request alone (AG-UI
 `RunAgentInput.messages`, including earlier tool calls and results); nothing is
-shared between requests. The AG-UI thread id is sent to the sandbox as
+shared between requests. When that history nears the model's context window
+(`compaction.context_window_tokens` × `trigger_ratio`), or the provider rejects a
+request as too long, the agent asks the same model for a summary and sends it in
+place of the older messages; the summary goes into the stream as an assistant message
+whose id starts with `spe-compaction-`, so the chat keeps it, and later runs cut the
+history there. The run log's `compactions` lists each one. The AG-UI thread id is sent to the sandbox as
 `X-Session-Id`, as Open WebUI sends its chat id. Per run, `UsageLimits` caps model
 requests (`limits.request_limit`, 50) and tool calls (`tool_calls_limit`, 100). These
 are per-run caps, not a spend budget: the provider account's spend limit is the

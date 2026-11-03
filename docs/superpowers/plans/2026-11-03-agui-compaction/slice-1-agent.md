@@ -59,9 +59,10 @@ root unless a step `cd`s; `AGENT` means `platform/agui/pydantic-ai-agent`, `CHAT
   that `MessagesBuilder.add` appends to the last message if it is a `ModelResponse`, else to a new one, which the
   following assistant parts then join (plan README, proposed clarification 3). `compaction_payload` is in
   `ui/_adapter.py:187` (private); `COMPACTION_ACTIVITY_TYPE` in `ui/ag_ui/_utils.py:71`.
-- `AGUIAdapter.messages` is a `cached_property` over `run_input`, and `UIAdapter` defines no `__post_init__`,
-  so `_Adapter.__post_init__` can replace `self.run_input` before anything reads it, on both paths
-  (`Service.run` and `_Adapter.from_request`).
+- `AGUIAdapter.messages` is a `cached_property` over `run_input`, and neither `UIAdapter` nor `AGUIAdapter`
+  defines a `__post_init__`. Their generated `__init__` does not call one a plain subclass adds, so `_Adapter`
+  is itself a `@dataclass`: its generated `__init__` calls `_Adapter.__post_init__`, which replaces
+  `self.run_input` before anything reads it, on both paths (`Service.run` and `_Adapter.from_request`).
 - `AnthropicModel` adds the `compact-2026-01-12` beta for any `CompactionPart` in a request
   (`models/anthropic.py:1487-1506`); `OpenAIChatModel` drops them (`models/openai.py:1822-1824`).
 - Emitting a `CustomEvent` from a capability raises `UserError` (`_run_context.py:816-823`), hence the queue.
@@ -1613,6 +1614,7 @@ git commit -s -m "Compact after the provider rejects a request as too long, thro
 - Modify: `AGENT/src/spe_agent/runlog.py` (`RunRecorder.observe`, `RunRecorder.compactions`, `compactions: []`)
 - Test: `AGENT/tests/test_app.py`
 - Modify: `AGENT/README.md` (*Runs*), `docs/superpowers/specs/2026-11-03-agui-compaction-design.md` (clarifications 3, 4)
+- Modify: `BACKLOG.md` (step 10)
 
 **Interfaces:**
 - Consumes: `CompactionRun.take_pending()`, `.records` (task 4).
@@ -1623,6 +1625,10 @@ git commit -s -m "Compact after the provider rejects a request as too long, thro
 - [ ] **Step 1: write the failing tests.** Append to `test_app.py`:
 
 ```python
+def markers(evs, kind="TEXT_MESSAGE_START"):
+    return [n for n, e in enumerate(evs) if e["type"] == kind and e.get("messageId", "").startswith(cmp.MARKER_PREFIX)]
+
+
 async def test_marker_order(tmp_path):
     evs = await compact_run(tmp_path, Script(), **window(6000))
     types = [(e["type"], e.get("messageId", "")) for e in evs]
@@ -1639,9 +1645,36 @@ async def test_marker_order(tmp_path):
 
 async def test_marker_before_run_error(tmp_path):
     evs = await compact_run(tmp_path, Script(calls=10), **window(6000))
-    starts = [n for n, e in enumerate(evs) if e["type"] == "TEXT_MESSAGE_START"
-              and e["messageId"].startswith(cmp.MARKER_PREFIX)]
+    starts = markers(evs)
     assert len(starts) == 3 and starts[-1] < len(evs) - 1 and evs[-1]["type"] == "RUN_ERROR"
+
+
+async def test_each_marker_is_emitted_once(tmp_path):
+    # take_pending drains the queue: three compactions, three markers, each with its own id and summary once.
+    evs = await compact_run(tmp_path, Script(calls=10), **window(6000))
+    ids = [evs[n]["messageId"] for n in markers(evs)]
+    assert len(ids) == len(set(ids)) == 3
+    assert len(markers(evs, "TEXT_MESSAGE_CONTENT")) == 3
+    assert len(log_records(tmp_path)[0]["compactions"]) == 3
+
+
+def test_take_pending_drains():
+    run = cmp.CompactionRun()
+    run.pending.extend(["a", "b"])
+    assert run.take_pending() == ["a", "b"]
+    assert run.take_pending() == [] and run.pending == []
+
+
+async def test_reactive_marker_before_the_retried_response(tmp_path):
+    # The summary is queued before the retry's stream opens, so the marker precedes the retried response.
+    _, _, evs = await overflow_run(tmp_path, [too_long()])
+    assert terminal(evs) == ["RUN_FINISHED"]
+    (i,) = markers(evs)
+    assert [e["type"] for e in evs[i:i + 4]] == ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END",
+                                                 "TEXT_MESSAGE_START"]
+    assert evs[i + 3]["messageId"] != evs[i]["messageId"]
+    assert not any(e["type"].startswith(("TEXT_MESSAGE", "TOOL_CALL")) for e in evs[:i])
+    assert log_records(tmp_path)[0]["compactions"][0]["trigger"] == "overflow"
 
 
 def chat_history_after_compaction(summary="SUMMARY"):
@@ -1685,6 +1718,7 @@ async def test_later_run_estimates_after_the_marker(tmp_path):
 
 
 async def test_only_plain_text_markers_are_rewritten(tmp_path):
+    # A marker id on an assistant message with tool calls is an ordinary assistant message, not a cut point.
     history = chat_history_after_compaction()
     history[3] = {**history[3], "toolCalls": [{"id": "x", "type": "function",
                                                "function": {"name": "run_command", "arguments": "{}"}}]}
@@ -1698,6 +1732,17 @@ async def test_only_plain_text_markers_are_rewritten(tmp_path):
     assert BIG in str(script.streamed[0])  # not a cut point: the history is sent whole
 
 
+async def test_marker_with_list_content_cannot_reach_the_agent(tmp_path):
+    # ag-ui 0.1.22: an assistant message's content is a string, so a list-content marker is refused at input.
+    history = chat_history_after_compaction()
+    history[3] = {**history[3], "content": [{"type": "text", "text": "SUMMARY"}]}
+    app, _ = build(tmp_path)
+    async with running(app) as client:
+        await until_status(client, 200)
+        r = await client.post("/agent", json=run_body(messages=history), headers=AUTH)
+    assert r.status_code == 422
+
+
 async def test_run_log_compactions(tmp_path):
     await compact_run(tmp_path, Script(), **window(6000))
     (record,) = log_records(tmp_path)
@@ -1707,6 +1752,27 @@ async def test_run_log_compactions(tmp_path):
     assert entry["estimated_tokens"] >= 4800 and entry["messages_cut"] >= 3
     assert set(entry["usage"]) == {"input_tokens", "output_tokens"}
     assert isinstance(entry["next_input_tokens"], int)
+
+
+async def test_next_input_tokens_is_the_next_responses_input(tmp_path):
+    script = Script()
+    seen = []
+    model = script.model()
+    original = model.request_stream
+
+    @asynccontextmanager
+    async def request_stream(messages, *a, **kw):
+        async with original(messages, *a, **kw) as s:
+            seen.append((messages, s))
+            yield s
+
+    model.request_stream = request_stream
+    app, _ = build(tmp_path, model=model, **window(6000))
+    async with running(app) as client:
+        await until_status(client, 200)
+        await post_run(client)
+    after = next(s.usage.input_tokens for messages, s in seen if _framed(messages[0]))
+    assert log_records(tmp_path)[0]["compactions"][0]["next_input_tokens"] == after > 0
 
 
 async def test_run_log_no_compactions(tmp_path):
@@ -1738,9 +1804,14 @@ async def test_cancelled_run_keeps_compaction_record(tmp_path):
 
   `test_later_run_cuts_at_marker` is the cross-run test of decision 4 and verifies proposed clarification 3: the
   marker follows a tool result, so pydantic-ai starts a new `ModelResponse` with it, which the answer joins.
+  `test_reactive_marker_before_the_retried_response` pins that task 5's retry queues the summary before the
+  retried stream opens. A marker whose content is a list never reaches the agent: ag-ui 0.1.22's
+  `AssistantMessage.content` is `Optional[str]`, so `/agent` answers 422
+  (`test_marker_with_list_content_cannot_reach_the_agent`).
 
-- [ ] **Step 2: run them to see them fail.** `(cd AGENT && uv run --group dev pytest tests/test_app.py -q -k "marker or later_run or run_log or redacted or cancelled_run")`.
-  Expected: no marker events, no `compactions` field.
+- [ ] **Step 2: run them to see them fail.** `(cd AGENT && uv run --group dev pytest tests/test_app.py -q -k "marker or later_run or run_log or redacted or cancelled_run or next_input")`.
+  Expected: no marker events, no `compactions` field (`test_take_pending_drains`, the plain-text and the
+  list-content tests already pass: they pin what must not change).
 
 - [ ] **Step 3: the AG-UI helpers.** Append to `compaction.py`, with these imports at the top:
 
@@ -1777,16 +1848,21 @@ def markers_to_activities(run_input: RunAgentInput) -> RunAgentInput:
 
 
 def marker_events(summary: str) -> list[BaseEvent]:
+    """The marker's three events; `summary` is never empty (an empty one is EMPTY_SUMMARY by now)."""
     message_id = MARKER_PREFIX + str(uuid.uuid4())
     return [TextMessageStartEvent(message_id=message_id, role="assistant"),
-            TextMessageContentEvent(message_id=message_id, delta=summary or EMPTY_SUMMARY),
+            TextMessageContentEvent(message_id=message_id, delta=summary),
             TextMessageEndEvent(message_id=message_id)]
 ```
 
-- [ ] **Step 4: the input rewrite.** In `app.py`, in `class _Adapter`:
+- [ ] **Step 4: the input rewrite.** In `app.py`, make `_Adapter` a dataclass (`AGUIAdapter`'s generated
+  `__init__` does not call `__post_init__`; `_Adapter`'s own generated `__init__` does):
 
 ```python
+@dataclass
 class _Adapter(AGUIAdapter):
+    # A dataclass, so that the generated __init__ calls __post_init__ (AGUIAdapter's own __init__ does not).
+
     def __post_init__(self) -> None:
         # Before anything reads `messages` (a cached property over run_input): our compaction markers,
         # assistant messages in the chat's history, become the activity pydantic-ai reads as a cut point.
@@ -1898,7 +1974,8 @@ out the previous summary, the latest user entry or the last entry; the rest go o
 ```bash
 git add platform/agui/pydantic-ai-agent/src/spe_agent/compaction.py platform/agui/pydantic-ai-agent/src/spe_agent/app.py \
   platform/agui/pydantic-ai-agent/src/spe_agent/runlog.py platform/agui/pydantic-ai-agent/tests/test_app.py \
-  platform/agui/pydantic-ai-agent/README.md docs/superpowers/specs/2026-11-03-agui-compaction-design.md
+  platform/agui/pydantic-ai-agent/README.md docs/superpowers/specs/2026-11-03-agui-compaction-design.md \
+  docs/superpowers/plans/2026-11-03-agui-compaction/README.md docs/superpowers/plans/2026-11-03-agui-compaction/slice-1-agent.md
 git commit -s -m "Stream the compaction marker, cut at it on later runs, log compactions; spec clarifications 3, 4"
 ```
 

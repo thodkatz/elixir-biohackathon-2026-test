@@ -819,3 +819,182 @@ async def test_overflowing_summary_without_a_window_is_sent_shorter(tmp_path):
     assert len(failed) + len(script.summaries) == 2  # two summary requests: one rejected, one answered
     assert "earlier entries left out" not in first and "earlier entries left out]" in second
     assert "User: now" in second
+
+
+# --- the marker in the stream, the cut on later runs, the run log -----------------------------
+
+def markers(evs, kind="TEXT_MESSAGE_START"):
+    return [n for n, e in enumerate(evs) if e["type"] == kind and e.get("messageId", "").startswith(cmp.MARKER_PREFIX)]
+
+
+async def test_marker_order(tmp_path):
+    evs = await compact_run(tmp_path, Script(), **window(6000))
+    types = [(e["type"], e.get("messageId", "")) for e in evs]
+    i = next(n for n, (t, mid) in enumerate(types) if t == "TEXT_MESSAGE_START" and mid.startswith(cmp.MARKER_PREFIX))
+    marker = evs[i]["messageId"]
+    assert evs[i]["role"] == "assistant"
+    assert [t for t, _ in types[i:i + 3]] == ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"]
+    assert evs[i + 1]["delta"] == "SUMMARY"
+    assert types[i - 1][0] == "TOOL_CALL_RESULT"                       # after the step it summarised
+    assert types[i + 3][0] == "TEXT_MESSAGE_START" and types[i + 3][1] != marker  # right before the response
+    uuid_part = marker.removeprefix(cmp.MARKER_PREFIX)
+    assert len(uuid_part) == 36
+
+
+async def test_marker_before_run_error(tmp_path):
+    evs = await compact_run(tmp_path, Script(calls=10), **window(6000))
+    starts = markers(evs)
+    assert len(starts) == 3 and starts[-1] < len(evs) - 1 and evs[-1]["type"] == "RUN_ERROR"
+
+
+async def test_each_marker_is_emitted_once(tmp_path):
+    # take_pending drains the queue: three compactions, three markers, each with its own id and summary once.
+    evs = await compact_run(tmp_path, Script(calls=10), **window(6000))
+    ids = [evs[n]["messageId"] for n in markers(evs)]
+    assert len(ids) == len(set(ids)) == 3
+    assert len(markers(evs, "TEXT_MESSAGE_CONTENT")) == 3
+    assert len(log_records(tmp_path)[0]["compactions"]) == 3
+
+
+def test_take_pending_drains():
+    run = cmp.CompactionRun()
+    run.pending.extend(["a", "b"])
+    assert run.take_pending() == ["a", "b"]
+    assert run.take_pending() == [] and run.pending == []
+
+
+async def test_reactive_marker_before_the_retried_response(tmp_path):
+    # The summary is queued before the retry's stream opens, so the marker precedes the retried response.
+    _, _, evs = await overflow_run(tmp_path, [too_long()])
+    assert terminal(evs) == ["RUN_FINISHED"]
+    (i,) = markers(evs)
+    assert [e["type"] for e in evs[i:i + 4]] == ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END",
+                                                 "TEXT_MESSAGE_START"]
+    assert evs[i + 3]["messageId"] != evs[i]["messageId"]
+    assert not any(e["type"].startswith(("TEXT_MESSAGE", "TOOL_CALL")) for e in evs[:i])
+    assert log_records(tmp_path)[0]["compactions"][0]["trigger"] == "overflow"
+
+
+def chat_history_after_compaction(summary="SUMMARY"):
+    """The messages the chat sends on the next run: as the browser applied the first run's events."""
+    return [
+        {"id": "u1", "role": "user", "content": "do the task"},
+        {"id": "a1", "role": "assistant", "content": "",
+         "toolCalls": [{"id": "call-1", "type": "function",
+                        "function": {"name": "run_command", "arguments": json.dumps({"command": "echo " + BIG})}}]},
+        {"id": "t1", "role": "tool", "toolCallId": "call-1", "content": "ran echo " + BIG},
+        {"id": f"{cmp.MARKER_PREFIX}0d5e2a1c-0000-4000-8000-000000000001", "role": "assistant", "content": summary},
+        {"id": "a2", "role": "assistant", "content": "final answer"},
+        {"id": "u2", "role": "user", "content": "next question"},
+    ]
+
+
+async def test_later_run_cuts_at_marker(tmp_path):
+    script = Script(calls=0)
+    app, _ = build(tmp_path, model=script.model())
+    async with running(app) as client:
+        await until_status(client, 200)
+        evs = await post_run(client, messages=chat_history_after_compaction())
+    assert terminal(evs) == ["RUN_FINISHED"] and script.summaries == []
+    (sent,) = script.streamed
+    shape = [[(type(p).__name__, str(getattr(p, "content", ""))) for p in m.parts] for m in sent]
+    assert shape[0][0][0] == "SystemPromptPart"
+    assert shape[0][1:] == [("UserPromptPart", cmp.frame("SUMMARY"))]
+    assert shape[1:] == [[("TextPart", "final answer")], [("UserPromptPart", "next question")]]
+    assert BIG not in str(sent)
+
+
+async def test_later_run_estimates_after_the_marker(tmp_path):
+    # Decision 2: the estimate starts after the marker. Counted from the start, BIG alone (≈ 5,000) would be
+    # past the trigger (4,800) and the run would compact; from the marker on it is ≈ 3,000.
+    script = Script(calls=0)
+    app, _ = build(tmp_path, model=script.model(), **window(6000))
+    async with running(app) as client:
+        await until_status(client, 200)
+        evs = await post_run(client, messages=chat_history_after_compaction())
+    assert terminal(evs) == ["RUN_FINISHED"] and script.summaries == []
+
+
+async def test_only_plain_text_markers_are_rewritten(tmp_path):
+    # A marker id on an assistant message with tool calls is an ordinary assistant message, not a cut point.
+    history = chat_history_after_compaction()
+    history[3] = {**history[3], "toolCalls": [{"id": "x", "type": "function",
+                                               "function": {"name": "run_command", "arguments": "{}"}}]}
+    history.insert(4, {"id": "t9", "role": "tool", "toolCallId": "x", "content": "ok"})
+    script = Script(calls=0)
+    app, _ = build(tmp_path, model=script.model())
+    async with running(app) as client:
+        await until_status(client, 200)
+        evs = await post_run(client, messages=history)
+    assert terminal(evs) == ["RUN_FINISHED"]
+    assert BIG in str(script.streamed[0])  # not a cut point: the history is sent whole
+
+
+async def test_marker_with_list_content_cannot_reach_the_agent(tmp_path):
+    # ag-ui 0.1.22: an assistant message's content is a string, so a list-content marker is refused at input.
+    history = chat_history_after_compaction()
+    history[3] = {**history[3], "content": [{"type": "text", "text": "SUMMARY"}]}
+    app, _ = build(tmp_path)
+    async with running(app) as client:
+        await until_status(client, 200)
+        r = await client.post("/agent", json=run_body(messages=history), headers=AUTH)
+    assert r.status_code == 422
+
+
+async def test_run_log_compactions(tmp_path):
+    await compact_run(tmp_path, Script(), **window(6000))
+    (record,) = log_records(tmp_path)
+    assert record["answer"] == "final answer"  # the marker's text is not in the answer
+    (entry,) = record["compactions"]
+    assert entry["trigger"] == "threshold" and entry["summary"] == "SUMMARY"
+    assert entry["estimated_tokens"] >= 4800 and entry["messages_cut"] >= 3
+    assert set(entry["usage"]) == {"input_tokens", "output_tokens"}
+    assert isinstance(entry["next_input_tokens"], int)
+
+
+async def test_next_input_tokens_is_the_next_responses_input(tmp_path):
+    script = Script()
+    seen = []
+    model = script.model()
+    original = model.request_stream
+
+    @asynccontextmanager
+    async def request_stream(messages, *a, **kw):
+        async with original(messages, *a, **kw) as s:
+            seen.append((messages, s))
+            yield s
+
+    model.request_stream = request_stream
+    app, _ = build(tmp_path, model=model, **window(6000))
+    async with running(app) as client:
+        await until_status(client, 200)
+        await post_run(client)
+    after = next(s.usage.input_tokens for messages, s in seen if _framed(messages[0]))
+    assert log_records(tmp_path)[0]["compactions"][0]["next_input_tokens"] == after > 0
+
+
+async def test_run_log_no_compactions(tmp_path):
+    await compact_run(tmp_path, Script())
+    assert log_records(tmp_path)[0]["compactions"] == []
+
+
+async def test_compaction_summary_redacted(tmp_path):
+    await compact_run(tmp_path, Script(summary=f"the key is {SANDBOX_KEY}"), **window(6000))
+    entry = log_records(tmp_path)[0]["compactions"][0]
+    assert SANDBOX_KEY not in entry["summary"] and "[redacted]" in entry["summary"]
+
+
+async def test_cancelled_run_keeps_compaction_record(tmp_path):
+    script = Script()
+    app, _ = build(tmp_path, model=script.model(), **window(6000))
+    async with running(app) as client:
+        await until_status(client, 200)
+        service = app.state.service
+        stream = service.run(RunAgentInput.model_validate(run_body(text="do the task")))
+        async for event in stream:
+            if getattr(event, "message_id", "").startswith(cmp.MARKER_PREFIX):
+                break
+        await stream.aclose()
+    (record,) = log_records(tmp_path)
+    assert record["status"] == "cancelled"
+    assert record["compactions"][0]["next_input_tokens"] is None

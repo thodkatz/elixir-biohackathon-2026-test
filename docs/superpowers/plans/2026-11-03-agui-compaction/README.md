@@ -8,7 +8,7 @@ history with the same model, sends the model the summary instead, and marks the 
 the chat shows it, the session record keeps it and later runs cut there.
 
 **Spec:** [`docs/superpowers/specs/2026-11-03-agui-compaction-design.md`](../../specs/2026-11-03-agui-compaction-design.md)
-(decisions 1–13; latest clarification: none; slice 1 folds 1–4 and 6, slice 3 folds 5). Each slice file links the
+(decisions 1–13; latest clarification: 6; slice 1 folds 1–4 and 6, slice 3 folds 5). Each slice file links the
 sections it implements.
 
 **Architecture.** One new module, `platform/agui/pydantic-ai-agent/src/spe_agent/compaction.py`: the token
@@ -219,9 +219,10 @@ Inputs the spec implies but its acceptance checks do not exercise; each line's t
 1. **A marker whose summary is empty or whitespace** (a model that returns nothing): the marker still has a
    non-empty `TEXT_MESSAGE_CONTENT` delta (AG-UI rejects an empty one) and the run continues. Slice 1, task 4
    (`test_empty_summary_gets_placeholder`) and task 6.
-2. **A forged marker message with tool calls or non-string content** (`spe-compaction-x` with `toolCalls`, or
-   content a list): it is left as an ordinary assistant message, not rewritten, and the run does not fail.
-   Slice 1, task 6 (`test_only_plain_text_markers_are_rewritten`).
+2. **A forged marker message with tool calls** (`spe-compaction-x` with `toolCalls`): it is left as an ordinary
+   assistant message, not rewritten, and the run does not fail. (Content that is a list never reaches the agent:
+   ag-ui 0.1.22's `AssistantMessage.content` is a string, so `/agent` answers 422.) Slice 1, task 6
+   (`test_only_plain_text_markers_are_rewritten`).
 3. **Two markers in one history** (two compactions, or a forged one before a real one): only the latest of ours
    cuts; the earlier one is stripped and never sent. Slice 1, task 3 (`test_latest_marker_cuts_and_all_are_stripped`).
 4. **A compacting run the participant stops** (stop button after the marker went out): the run log still has the

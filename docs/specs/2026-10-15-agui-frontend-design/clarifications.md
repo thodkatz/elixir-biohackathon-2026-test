@@ -107,3 +107,15 @@ in the parts it amends.
    builds `SessionView` as `SessionMeta` without it rather than carrying a field nothing reads. *Cost if
    wrong:* a caller that read `last_run_at` off `GET /api/sessions/{id}` gets `undefined`; none does today.
    *Amends:* §6, the `GET /api/sessions/{id}` row. *Status:* folded.
+
+10. **Activity messages on the journal's path are neither sent to the agent nor counted `deleted`** (2026-11-03;
+    AG-UI conversation record, slice 3/4, task 2). §13 *The run route*, step 2 leaves every `role: "activity"`
+    message out of the path it classifies against, and step 5 sends the agent that path. *Reason:* `@ag-ui/client`
+    1.0.2's `AbstractAgent.prepareRunAgentInput` drops every activity message from a run's input, so the browser
+    never sends one back, and counting it `deleted` would raise a false alarm on every run after one that emitted
+    an `ACTIVITY_SNAPSHOT`; the recorder calls the agent itself, past that filter, so without this the agent would
+    get an activity message no other run's input can carry. *Cost if wrong:* a client that dropped an activity
+    message on purpose is not recorded as having done so, and a `MESSAGES_SNAPSHOT` sent after ignored content
+    lacks activity messages (the browser keeps its own, which the snapshot does not mark authoritative); recording
+    them later is a change to `classify` alone. *Amends:* §13 *The run route*, steps 2 and 5; decision 2.
+    *Status:* folded.

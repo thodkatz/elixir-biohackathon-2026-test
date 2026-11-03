@@ -1074,7 +1074,8 @@ red until then)."
   activity messages. `@ag-ui/client`'s `prepareRunAgentInput` drops them from every run's input, so the browser
   never sends one back (it is not `deleted`) and the agent, called past that filter, must not get one (the
   compacting-run test). In `anchor.ts`, the path computed as before is `held`, then
-  `const path = held.filter((m) => m.role !== "activity");`
+  `const path = held.filter((m) => m.role !== "activity");` (the spec's clarification 10, §13 *The run route*,
+  steps 2 and 5)
 - Unchanged, run: `CHAT/lib/clone.test.ts` (decision 24's unit half: the hook survives the clone with per-run
   state)
 

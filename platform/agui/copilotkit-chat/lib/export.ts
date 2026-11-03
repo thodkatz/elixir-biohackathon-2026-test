@@ -32,8 +32,10 @@ export type Bundle = {
   tags: { id: string; name: string }[]; notes: [];
 };
 
-// The exported assistant message of a run. Open WebUI never writes this prefix; kept private: no test imports it.
+// The exported assistant message of a run. Open WebUI never writes this prefix.
 const RUN_MESSAGE_PREFIX = "spe-run-";
+// A remapped id (see toOpenWebUIChat's freshIdFor): also forged, so two remaps can never collide either.
+const FRESH_ID_PREFIX = "spe-msg-";
 
 export function runMessageId(runId: string): string {
   return RUN_MESSAGE_PREFIX + runId;
@@ -108,14 +110,22 @@ export function toOpenWebUIChat(conv: Conversation): OpenWebUIChat {
     messages[m.id] = m;
     order.push(m.id);
   };
-  // D1: a journal/client message id that already lives in `messages`, or that forges the run-message prefix,
-  // is exported under a fresh id instead, carrying the original (never the run's own synthetic id, which is
-  // always exactly runMessageId(run_id) and never remapped). Without this, a participant could craft a user
-  // message id equal to its own run's exported id and make that run message its own parent, hanging the
-  // currentId → parentId walk below.
+  // A journal/client message id that already lives in `messages`, or that forges the run-message prefix or
+  // this remap's own prefix, is exported under a fresh id instead, carrying the original (never the run's own
+  // synthetic id, which is always exactly runMessageId(run_id) and never remapped). Without this, a
+  // participant could craft a user message id equal to its own run's exported id and make that run message
+  // its own parent, hanging the currentId → parentId walk below (spec §14, *The Open WebUI chat*). The
+  // candidate is tried until it is free of every id exported so far, not just the forged id's own slot, so two
+  // forged ids in the same chat can never collide with each other either.
   const freshIdFor = (id: string): { id: string; original?: string } => {
-    if (id in messages || id.startsWith(RUN_MESSAGE_PREFIX)) return { id: `spe-msg-${remapped++}`, original: id };
-    return { id };
+    if (!Object.hasOwn(messages, id) && !id.startsWith(RUN_MESSAGE_PREFIX) && !id.startsWith(FRESH_ID_PREFIX)) {
+      return { id };
+    }
+    let candidate: string;
+    do {
+      candidate = `${FRESH_ID_PREFIX}${remapped++}`;
+    } while (Object.hasOwn(messages, candidate));
+    return { id: candidate, original: id };
   };
   for (const run of conv.runs) {
     const fresh = new Set(run.new_messages.map((m) => m.id));

@@ -132,24 +132,15 @@ for (const mode of ["live", "final"] as const) {
   });
 }
 
-// D1: a journal/client message can forge the run-message prefix. Without the remap in toOpenWebUIChat, the
-// run's own exported message would overwrite the user message at the same key and end up parented on itself
-// (the user message's chain left `parent` pointing at that same id), hanging any currentId → parentId walk.
-test("a forged id does not collide with its own run's exported message, and the branch walk terminates", async () => {
-  const conv = await rebuild("00000000-0000-4000-8000-000000000006", [
-    { type: "created", at: "2026-11-03T12:00:00.000Z", version: 1, id: "00000000-0000-4000-8000-000000000006" },
-    {
-      type: "run_start", at: "2026-11-03T12:00:00.010Z", run_id: "r1", anchor: null,
-      messages: [{ id: "spe-run-r1", role: "user", content: "hi" }], ignored: [],
-      request: { tools: [], context: [], state: {}, forwardedProps: {} }, source: "chat",
-    },
-    { type: "run_end", at: "2026-11-03T12:00:00.020Z", run_id: "r1", status: "completed", error: null },
-  ]);
-  const c = toOpenWebUIChat(conv);
+// A journal/client message can forge the exporter's own id scheme: the run-message prefix, or the remap's
+// prefix (spec §14, *The Open WebUI chat*). Without the remap below, the first case lets a run's own exported
+// message overwrite the user message at the same key and end up parented on itself (the user message's chain
+// left `parent` pointing at that same id), hanging any currentId → parentId walk; the second case, two forged
+// ids in one chat, lets the second remap land on the slot the first one just took.
+function assertWalkTerminates(c: OpenWebUIChat, expectedIds: string[]): void {
   const ids = Object.keys(c.chat.history.messages);
+  assert.deepEqual([...ids].sort(), [...expectedIds].sort());
   assert.equal(new Set(ids).size, ids.length); // no id appears twice
-  const user = msg(c, ids.find((id) => id !== "spe-run-r1")!);
-  assert.equal(user.spe_original_id, "spe-run-r1");
   const seen = new Set<string>();
   let hops = 0;
   for (let id: string | null = c.chat.history.currentId; id !== null; id = c.chat.history.messages[id].parentId) {
@@ -158,9 +149,42 @@ test("a forged id does not collide with its own run's exported message, and the 
     assert.ok(hops++ < ids.length + 1, "the walk did not terminate"); // a hard stop, belt and suspenders
   }
   assert.deepEqual([...seen].sort(), [...ids].sort()); // the walk reaches the root and covers every message
+}
+
+test("a forged id never collides with its own run's exported message, and the branch walk terminates", async () => {
+  const selfParent = await rebuild("00000000-0000-4000-8000-000000000006", [
+    { type: "created", at: "2026-11-03T12:00:00.000Z", version: 1, id: "00000000-0000-4000-8000-000000000006" },
+    {
+      type: "run_start", at: "2026-11-03T12:00:00.010Z", run_id: "r1", anchor: null,
+      messages: [{ id: "spe-run-r1", role: "user", content: "hi" }], ignored: [],
+      request: { tools: [], context: [], state: {}, forwardedProps: {} }, source: "chat",
+    },
+    { type: "run_end", at: "2026-11-03T12:00:00.020Z", run_id: "r1", status: "completed", error: null },
+  ]);
+  const c1 = toOpenWebUIChat(selfParent);
+  assertWalkTerminates(c1, ["spe-msg-0", "spe-run-r1"]);
+  assert.equal(msg(c1, "spe-msg-0").spe_original_id, "spe-run-r1");
+
+  // Two client messages that each forge a different prefix: the first's fresh id must not land on the slot
+  // the second's remap also wants.
+  const twoForged = await rebuild("00000000-0000-4000-8000-000000000007", [
+    { type: "created", at: "2026-11-03T12:00:00.000Z", version: 1, id: "00000000-0000-4000-8000-000000000007" },
+    {
+      type: "run_start", at: "2026-11-03T12:00:00.010Z", run_id: "r1", anchor: null,
+      messages: [{ id: "spe-msg-0", role: "user", content: "a" }, { id: "spe-run-x", role: "user", content: "b" }],
+      ignored: [], request: { tools: [], context: [], state: {}, forwardedProps: {} }, source: "chat",
+    },
+    { type: "run_end", at: "2026-11-03T12:00:00.020Z", run_id: "r1", status: "completed", error: null },
+  ]);
+  const c2 = toOpenWebUIChat(twoForged);
+  const ids2 = Object.keys(c2.chat.history.messages);
+  assert.equal(ids2.length, 3); // both client messages, plus the run's own message, none overwritten
+  assertWalkTerminates(c2, ids2);
+  const originals = ids2.map((id) => c2.chat.history.messages[id].spe_original_id).filter((o) => o !== undefined);
+  assert.deepEqual(originals.sort(), ["spe-msg-0", "spe-run-x"]);
 });
 
-// D6: outputItems on messages outputItems's own fixtures don't exercise.
+// Messages the fixtures above don't cover:
 test("outputItems: a tool error, an unlisted role, and array content", () => {
   assert.deepEqual(outputItems({ id: "t1", role: "tool", toolCallId: "call-1", content: "partial", error: "boom" }),
     [{ type: "function_call_output", id: "t1", call_id: "call-1", output: [{ type: "input_text", text: "partial\nboom" }],

@@ -235,7 +235,7 @@ large enough to overflow it, which shows vLLM's real error with compaction off, 
 it on. The proactive half of decision 13 (window 20000, divider, `next_input_tokens` below it) is slice 2's
 early output on Haiku, cited, not repeated, and task 3's session on qwen.
 
-- [ ] **Step 0: the user's answer, and the size.** Read plan PR #16's comments and the user's since (`gh pr
+- [x] **Step 0: the user’s answer, and the size.** Read plan PR #16's comments and the user's since (`gh pr
   view 16 --repo thodkatz/elixir-biohackathon-2026-test --comments`): if the user objected to clarification 5
   or asked for another check, stop here and end blocked on this slice's PR (`development-workflow.md`,
   *Gates*). `W` is task 1's value. Size the output to about 2.3 × `W` tokens so the request is rejected, not
@@ -244,7 +244,7 @@ early output on Haiku, cited, not repeated, and task 3's session on qwen.
   output cap `C = 8 * N` bytes. (Sized against Haiku's window, 1,000,000 tokens from Anthropic's Models API
   `max_input_tokens` on 2026-11-03, the same check would have sent ≈ 7 MB.)
 
-- [ ] **Step 1: compaction off, tool results uncapped.** In `denbi-agui-01.yml`, remove task 3's
+- [x] **Step 1: compaction off, tool results uncapped.** In `denbi-agui-01.yml`, remove task 3's
   `spe_agent_context_window_tokens: 20000` and add `spe_agent_compaction_enabled: false`. Redeploy in place from
   the main checkout with this worktree's agent and the output cap `C` for this check only:
 

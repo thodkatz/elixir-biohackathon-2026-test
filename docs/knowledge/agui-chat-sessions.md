@@ -46,8 +46,8 @@ expecting the container to exist for `docker compose cp`) fails confusingly inst
 **Fix.** Check `docker compose ps -a -q <service>` is non-empty before relying on the stop, or before trying
 to copy from the container. `docker compose cp` itself does fail clearly on a missing *file* inside a stopped
 container (`Could not find the file … in container`, rc 1) — that part needs no extra check — but a missing
-*container* needs the explicit `ps -a -q` check first. `run_archive`'s `write_agui_run.py` export task does
-this for `chat-ui`.
+*container* needs the explicit `ps -a -q` check first. `run_archive`'s export task (`tasks/export.yml`)
+does this for `chat-ui`.
 
 **It also exits 0 when the container did not stop cleanly.** A process that exits 1 on `SIGTERM`, or one Docker
 kills after `-t` (exit 137), still leaves `docker compose stop` at rc 0. Read the exit code afterwards:

@@ -336,7 +336,7 @@ test("softDelete appends deleted_at; patch, delete and get then find nothing; th
   assert.equal(await journals.isDeleted(randomUUID()), false);
 });
 
-test("a hand-edited meta line with the wrong type for a key is folded without that key; list and get agree (slice 1 review #22)", async () => {
+test("a hand-edited meta line with the wrong type for a key is folded without that key; list and get agree", async () => {
   const { journals, dir } = await tmpJournals();
   const { id } = await seedRun(journals, "hello");
   const before = await fs.readFile(file(dir, id), "utf8");

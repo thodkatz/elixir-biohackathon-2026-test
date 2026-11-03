@@ -44,7 +44,8 @@ export function showsRun(list: readonly SessionMeta[], id: string, runStartServe
   return s !== undefined && s.last_run_at !== null && Date.parse(s.last_run_at) >= runStartServerMs;
 }
 
-/** True when a run error is the recorder's refusal at admission (nothing to reconcile). */
+/** True when a run error is a run the recorder refused or ended itself (nothing more is journaled for
+ *  it): nothing to reconcile. */
 export function isRefusal(message: string): boolean {
   return REFUSED_RUN_MESSAGES.some((m) => message.includes(m));
 }

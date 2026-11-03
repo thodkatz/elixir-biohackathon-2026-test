@@ -153,6 +153,7 @@ test("store failures give the generic 500, no path in the body, logged without m
       assert.deepEqual(JSON.parse(text), { error: "the session store failed; see the chat-ui logs" }, what);
       assert.doesNotMatch(text, new RegExp(journals.dir), what);
     }
+    assert.ok(logged.mock.callCount() >= 4);
     assert.doesNotMatch(JSON.stringify(logged.mock.calls.map((c) => c.arguments)), /canary-123/);
   } finally {
     logged.mock.restore();

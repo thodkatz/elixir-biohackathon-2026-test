@@ -174,7 +174,7 @@ def check_list(r: Run) -> dict[str, str]:
     assert first and first in r.files(), (first, list(r.files()))
     rec = r.files()[first]
     assert [x["status"] for x in rec["runs"]] == ["completed"] and rec["title"] == "List the home directory"
-    r.ok("first run: the row appears, the URL names the session, the file has one completed run")
+    r.ok("first run: the row appears, the URL names the session, the journal has one completed run")
 
     page.reload()
     expect(page.get_by_text("Turn 1: the command ran.")).to_be_visible(timeout=10_000)
@@ -458,7 +458,7 @@ def check_menu(r: Run, ids: dict[str, str]) -> None:
     page.goto(f"{BASE}/?session={ids['third']}")
     expect(page.get_by_test_id("copilot-chat-textarea")).to_be_visible(timeout=10_000)
     assert r.url_session() is None and page.locator(".spe-error").count() == 0
-    r.ok("delete: Cancel keeps it; Delete removes the row, keeps the file; its URL opens a new session")
+    r.ok("delete: Cancel keeps it; Delete removes the row, keeps the journal; its URL opens a new session")
 
     page.goto(f"{BASE}/?session={ids['first']}")
     expect(page.get_by_text("Turn 2: the command ran.")).to_be_visible(timeout=10_000)

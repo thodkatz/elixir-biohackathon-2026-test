@@ -217,7 +217,7 @@ export class SessionRecorder extends Middleware {
           },
         });
       }).catch((error: unknown) => {
-        // Starting the agent threw (admission catches its own failures).
+        // Admission or starting the agent threw.
         console.error(`journal: starting run ${runId} of ${id} failed`);
         terminal = true;
         disconnect();

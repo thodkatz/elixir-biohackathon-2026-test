@@ -44,7 +44,7 @@ neither read nor migrated.
 - `/api/sessions`: `GET` lists metadata (newest first, at most 1000, deleted ones left out);
   `GET`/`PATCH`/`DELETE /api/sessions/{id}` read one (its latest branch), change `title`, `tags`, `pinned` or
   `hidden` (bodies up to 16 KB; one `meta` line each), or mark it deleted. A deleted session's journal is
-  kept. There is no `POST`: a session exists once its first run has started. Errors are `{"error": "<message>"}`.
+  kept. There is no `POST`: a session is listed once a run has added a message. Errors are `{"error": "<message>"}`.
 
 The journals hold whatever participants typed and tools returned, canary values included: treat the
 volume like the agent's run log.

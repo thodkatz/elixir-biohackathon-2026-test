@@ -145,9 +145,9 @@ function newEntry(id: string): Entry {
   };
 }
 
-// A meta line's value is folded only when its type is the one parsePatch accepts for that key (slice 1's
-// review round, #22): a hand-edited line with the wrong type is skipped for that key, not fatal, so list()
-// and get() agree with what parsePatch would ever have written.
+// A meta line's value is folded only when its type is the one parsePatch accepts for that key: a hand-edited
+// line with the wrong type is skipped for that key, not fatal, so list() and get() agree with what parsePatch
+// would ever have written.
 function fold(entry: Entry, line: Line): void {
   entry.first_at ??= line.at;
   entry.last_line_at = line.at;
@@ -162,13 +162,13 @@ function fold(entry: Entry, line: Line): void {
   } else if (line.type === "run_end") {
     entry.last_run_at = line.at;
   } else if (line.type === "meta") {
-    if (line.title !== undefined && typeof line.title === "string") entry.title = line.title;
-    if (line.tags !== undefined && Array.isArray(line.tags) && line.tags.every((t) => typeof t === "string")) {
+    if (typeof line.title === "string") entry.title = line.title;
+    if (Array.isArray(line.tags) && line.tags.every((t) => typeof t === "string")) {
       entry.tags = line.tags;
     }
-    if (line.pinned !== undefined && typeof line.pinned === "boolean") entry.pinned = line.pinned;
-    if (line.hidden !== undefined && typeof line.hidden === "boolean") entry.hidden = line.hidden;
-    if (line.deleted_at !== undefined && typeof line.deleted_at === "string") entry.deleted_at = line.deleted_at;
+    if (typeof line.pinned === "boolean") entry.pinned = line.pinned;
+    if (typeof line.hidden === "boolean") entry.hidden = line.hidden;
+    if (typeof line.deleted_at === "string") entry.deleted_at = line.deleted_at;
   }
 }
 

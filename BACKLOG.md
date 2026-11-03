@@ -17,7 +17,7 @@ start reads this section; keep it short.
   (2026-10-23, "check 0015 review point as well"); waits on the user: 0015 is `proposed`, accept it first;
   due: before the ladder's slice 5 (agent suite), whose plan 0015 reviews.
 - Dev VM: redeploy `dev-local` (`create.yml -e @instances/dev-local.yml`, no model call) and run `verify.yml`, so the agent there compacts at Haiku's window: the private instance file already says `spe_agent_context_window_tokens: 1000000`, but `/` had 4.5 GB free on 2026-11-03, under the preflight's 5 — from the compaction plan, slice 3/3, task 4, step 5; waits on the user, who decides whether to prune the dev VM's Docker build cache (12 GB, `docker builder prune -af`, see `docs/knowledge/denbi-disk-full.md`).
-- AG-UI `/compact`: plan merged (#27, `docs/superpowers/plans/2026-11-03-agui-compact-command/`) — asked for by the user (2026-11-03, PR #21); due: slice 1/2 (`impl/agui-compact-command-1-agent`), next; then slice 2/2 (#25, which it waited on, has merged).
+- AG-UI `/compact`: plan merged (#27, `docs/superpowers/plans/2026-11-03-agui-compact-command/`) — asked for by the user (2026-11-03, PR #21); due: slice 2/2 (`impl/agui-compact-command-2-chat`), next (slice 1/2 merged, #28).
 
 ## Unscheduled
 

@@ -129,8 +129,9 @@ test("a compacting run stopped after the marker: cancelled, the marker kept", as
     await settled(id);
     const [record, run] = await onlyRun(store, id);
     assert.equal(run.status, "cancelled");
-    assert.deepEqual(record.messages.map((m) => [m.role, m.content]),
-      [["user", "compact and hang"], ["assistant", "SUMMARY of the earlier turns"]]);
+    // Only the marker is asserted: a reply's start can arrive in the same chunk as the marker's end.
+    assert.ok(record.messages.some((m) => m.role === "assistant" && String(m.id).startsWith("spe-compaction-")
+      && m.content === "SUMMARY of the earlier turns"));
   } finally {
     await server.close();
   }
@@ -284,8 +285,11 @@ The recorder tests pin that the session record keeps it, also when stopped."
   - constants beside `SLOW_STEPS`:
 
 ```python
-COMPACT_WINDOW = 4000        # tokens: ordinary turns stay far under it, one long output passes 0.8 of it
-LONG_OUTPUT_CHARS = 20_000   # about 6700 tokens at the agent's 3 characters per token
+# The 16 tool definitions alone estimate ≈ 3,000 tokens (slice 1's verified facts), so an ordinary turn is
+# ≈ 3,100, under the trigger (0.8 × 8000 = 6,400). The long output is cut to the agent's 16,384-byte tool cap,
+# ≈ 5,460 tokens, which takes the next request to ≈ 8,500, past it.
+COMPACT_WINDOW = 8000        # tokens
+LONG_OUTPUT_CHARS = 20_000   # more than the tool cap, so the cut, not this number, sets the size
 ```
 
   - in `fake_sandbox`, inside `if path == "/execute":`, before the ordinary response:

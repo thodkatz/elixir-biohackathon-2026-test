@@ -7,6 +7,9 @@
 //   contains "compact": also sends a compaction marker (an assistant message, id `spe-compaction-<runId>`)
 //   contains "activity": also sends an ACTIVITY_SNAPSHOT (the form the spec first chose; pinned as dropped)
 //   contains "echo-input": the reply's text is the JSON of [{role, id}] for every message the agent received
+//   `forwardedProps.spe_command` (checked first): RUN_STARTED, a manual marker (id `spe-compaction-manual-<runId>`,
+//   its text naming the focus), RUN_FINISHED; a focus containing "hang" stops after RUN_STARTED until the
+//   client goes away, one containing "error" sends RUN_ERROR
 //   a body that is not JSON: HTTP 400, not kept in `requests`
 //   anything else: a text message echoing it, then RUN_FINISHED (after `delayMs`, default 0)
 // Each request is kept in `requests`; `closed` turns true when its connection closes.
@@ -50,14 +53,29 @@ export async function startTestAgent(delayMs = 0, headerDelayMs = 0): Promise<Te
       const send = (event: object) => res.write(`data: ${JSON.stringify(event)}\n\n`);
       const ids = { threadId: body.threadId, runId: body.runId };
       const messageId = `reply-${body.runId}`;
-      send({ type: "RUN_STARTED", ...ids });
-      if (text.includes("compact")) {
-        // As the agent sends a compaction marker: an assistant message whose id has the marker prefix.
-        const markerId = `spe-compaction-${body.runId}`;
+      // As the agent sends a compaction marker: an assistant message whose id has the marker prefix.
+      const marker = (markerId: string, summary: string) => {
         send({ type: "TEXT_MESSAGE_START", messageId: markerId, role: "assistant" });
-        send({ type: "TEXT_MESSAGE_CONTENT", messageId: markerId, delta: "SUMMARY of the earlier turns" });
+        send({ type: "TEXT_MESSAGE_CONTENT", messageId: markerId, delta: summary });
         send({ type: "TEXT_MESSAGE_END", messageId: markerId });
+      };
+      const command = body.forwardedProps?.spe_command;
+      if (command) {
+        send({ type: "RUN_STARTED", ...ids });
+        const focus = String(command.focus ?? "");
+        if (focus.includes("hang")) return; // the client's abort or close ends it
+        if (focus.includes("error")) {
+          send({ type: "RUN_ERROR", message: "scripted failure" });
+          res.end();
+          return;
+        }
+        marker(`spe-compaction-manual-${body.runId}`, `SUMMARY on request. Focus: ${command.focus ?? "(none)"}`);
+        send({ type: "RUN_FINISHED", ...ids });
+        res.end();
+        return;
       }
+      send({ type: "RUN_STARTED", ...ids });
+      if (text.includes("compact")) marker(`spe-compaction-${body.runId}`, "SUMMARY of the earlier turns");
       if (text.includes("activity")) {
         // The form the spec first chose; pinned as dropped by CopilotKit's input path.
         send({ type: "ACTIVITY_SNAPSHOT", messageId: `act-${body.runId}`, activityType: "pydantic_ai_compaction",

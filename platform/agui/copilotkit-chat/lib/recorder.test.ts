@@ -1037,3 +1037,89 @@ test("a compacting run stopped after the marker: cancelled, the marker kept", as
     await server.close();
   }
 });
+
+// --- /compact (spec §15) ------------------------------------------------------------------------
+
+const finish: Script = (sub, i) => {
+  sub.next({ type: EventType.RUN_STARTED, threadId: i.threadId, runId: i.runId } as BaseEvent);
+  sub.next({ type: EventType.RUN_FINISHED, threadId: i.threadId, runId: i.runId } as BaseEvent);
+  sub.complete();
+};
+
+// A session of two tool turns, then one run whose last message has this content and these forwardedProps.
+async function commandCase(content: unknown, forwardedProps: unknown = {}, extra: Message[] = []) {
+  const journals = await tmpJournals();
+  const id = randomUUID();
+  const branch = await twoToolTurns(journals, id);
+  const scripted = new Scripted(() => journals);
+  scripted.script = finish;
+  const runInput = { ...input(id, "", branch), forwardedProps };
+  (runInput.messages.at(-1) as { content: unknown }).content = content;
+  runInput.messages.push(...extra);
+  const out = await drive(scripted, runInput, new HttpAgent({ url: UNUSED }));
+  const start = ofType(await lines(journals, id), "run_start").at(-1)!;
+  return { journals, id, branch, runInput, out, start, sent: scripted.received[0] };
+}
+
+test("decision 31: a command run is journaled as a command and sent the path plus spe_command", async () => {
+  for (const [content, focus] of [["/compact", null], ["  /compact  keep x ", "keep x"]] as const) {
+    const { branch, runInput, start, sent } = await commandCase(content);
+    assert.deepEqual(start.command, { name: "compact", focus, message_id: runInput.messages.at(-1)!.id });
+    assert.deepEqual(start.messages, []);
+    assert.deepEqual(start.request.forwardedProps, {});
+    assert.deepEqual(sent.messages.map(view), branch.map(view));
+    assert.deepEqual(sent.forwardedProps, { spe_command: { name: "compact", focus } });
+  }
+});
+
+test("decision 31: anything else is an ordinary message", async () => {
+  for (const content of ["/compacted", "/compact:", "/COMPACT", [{ type: "text", text: "/compact" }]]) {
+    const { start, sent } = await commandCase(content);
+    assert.equal(start.command, undefined, JSON.stringify(content));
+    assert.equal(start.messages.length, 1, JSON.stringify(content));
+    assert.equal(sent.messages.length, 9, JSON.stringify(content)); // the path, then the message
+  }
+  const two = await commandCase("/compact", {}, [{ id: randomUUID(), role: "user", content: "more" } as Message]);
+  assert.equal(two.start.command, undefined);
+  assert.equal(two.start.messages.length, 2);
+});
+
+test("decision 31: a client's spe_command is removed on every run and kept in run_start.request", async () => {
+  const forged = { spe_command: { name: "compact", focus: "forged" }, other: 1 };
+  const plain = await commandCase("hello", forged);
+  assert.deepEqual(plain.sent.forwardedProps, { other: 1 });
+  assert.deepEqual(plain.start.request.forwardedProps, forged);
+  const command = await commandCase("/compact mine", forged);
+  assert.deepEqual(command.sent.forwardedProps, { other: 1, spe_command: { name: "compact", focus: "mine" } });
+});
+
+test("clarification 16: forwardedProps that is not an object: {} plus the command on a command run, as sent otherwise", async () => {
+  for (const props of [null, [1], "x"]) {
+    assert.deepEqual((await commandCase("/compact", props)).sent.forwardedProps,
+      { spe_command: { name: "compact", focus: null } }, JSON.stringify(props));
+    assert.deepEqual((await commandCase("hello", props)).sent.forwardedProps, props, JSON.stringify(props));
+  }
+});
+
+test("decision 33: a command run sends the client a snapshot of the path right after RUN_STARTED", async () => {
+  const { out, branch } = await commandCase("/compact");
+  assert.deepEqual(types(out), [EventType.RUN_STARTED, EventType.MESSAGES_SNAPSHOT, EventType.RUN_FINISHED]);
+  assert.deepEqual((out.events[1] as unknown as { messages: Message[] }).messages.map(view), branch.map(view));
+});
+
+test("the test agent answers a command with a manual marker carrying the focus", async () => {
+  const { journals, server, recorder, agent } = await setup();
+  try {
+    const id = randomUUID();
+    await drive(recorder, input(id, "hello"), agent());
+    const branch = branchOfTip((await journals.load(id))!);
+    const out = await drive(recorder, input(id, "/compact keep the canary paths", branch), agent());
+    assert.equal(types(out).at(-1), EventType.RUN_FINISHED);
+    assert.deepEqual(server.requests[1].body.forwardedProps, { spe_command: { name: "compact", focus: "keep the canary paths" } });
+    const marker = branchOfTip((await journals.load(id))!).at(-1)!;
+    assert.ok(marker.id.startsWith("spe-compaction-manual-"));
+    assert.match(String(marker.content), /keep the canary paths/);
+  } finally {
+    await server.close();
+  }
+});

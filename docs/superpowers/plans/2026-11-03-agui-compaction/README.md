@@ -162,7 +162,7 @@ not in `answer`.
 
 **Fake agent** (slice 2, task 2): a user message containing `compact` makes `platform/dev/fake_agent.py`'s
 scripted model push the history past its small window, so the real `Compaction` capability compacts (summary
-from the scripted `function=`: `Scripted summary: …`).
+from the scripted `function=`: `Scripted summary of N characters of conversation. The latest request was: …`).
 
 **Archive** (slice 2, task 3): `write_agui_run.py` gains `is_compaction(message: dict) -> bool` and renders the
 marker as `## Compacted`; `index.md`'s columns become `| # | Session | Tags | Created | Runs | Compactions | State |`.

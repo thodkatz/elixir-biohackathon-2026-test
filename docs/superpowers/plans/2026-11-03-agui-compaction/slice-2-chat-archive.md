@@ -284,11 +284,20 @@ The recorder tests pin that the session record keeps it, also when stopped."
     `from spe_agent.compaction import FRAME, SUMMARY_PROMPT`;
   - constants beside `SLOW_STEPS`:
 
+Not this task's own first draft of ≈8,500: `FunctionModel`'s usage estimate
+(`pydantic_ai.models.function._estimate_usage`) counts only message content, never tool schemas, so the
+≈3,000-token tool-definition overhead never enters the estimate once a response carries usage. An ordinary
+turn is ≈95 tokens; the long output, cut to the agent's 16,384-byte tool cap, takes the next request to
+≈5,500 — under an 8000 window's trigger (0.8 × 8000 = 6,400), so that window never compacts; 6000's trigger
+(4,800) does. Confirmed by hand (Step 2) against both windows: `compactions` is `[]` at 8000, one record at
+6000.
+
 ```python
-# The 16 tool definitions alone estimate ≈ 3,000 tokens (slice 1's verified facts), so an ordinary turn is
-# ≈ 3,100, under the trigger (0.8 × 8000 = 6,400). The long output is cut to the agent's 16,384-byte tool cap,
-# ≈ 5,460 tokens, which takes the next request to ≈ 8,500, past it.
-COMPACT_WINDOW = 8000        # tokens
+# Not the brief's ≈8,500: FunctionModel's own usage estimate (pydantic_ai.models.function._estimate_usage)
+# counts only message content, never tool schemas, so the brief's ≈3,000-token tool overhead never enters
+# the estimate once a response carries usage. An ordinary turn is ≈95 tokens; the long output, cut to the
+# tool cap, takes the next request to ≈5,500 — over this window's trigger (0.8 × 6000) but under 8000's.
+COMPACT_WINDOW = 6000        # tokens
 LONG_OUTPUT_CHARS = 20_000   # more than the tool cap, so the cut, not this number, sets the size
 ```
 

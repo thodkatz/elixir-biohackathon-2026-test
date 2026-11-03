@@ -1739,7 +1739,7 @@ git commit -s -m "Stream the compaction marker, cut at it on later runs, log com
 
 **Files:**
 - Create: `docs/superpowers/plans/2026-11-03-agui-compaction/handoffs/<UTC>-slice-1-done-start-slice-2.md`
-- Modify: `AGENTS.md` (*Current work*), this plan's README (slices table)
+- Modify: `AGENTS.md` (*Current work*), this plan's README (slices table), `BACKLOG.md` (the upstream port)
 
 - [ ] **Step 1: pick the session.** On the dev VM's main checkout, take the longest archived AG-UI session with
   tool calls (`ls -S platform/ansible/output/*/sessions/*.json | head -3`, or a run directory's
@@ -1789,9 +1789,15 @@ print(response.parts[0].content)
   the transcript size and usage, the judgement, any ruling of this slice, and slice 2's start. If the summary
   restates the injection as a request, change `compaction_prompt.md` once, re-run, and record both outputs.
 
-- [ ] **Step 4: review, PR, merge.** Update the slices table's status and *Current work* (`AGENTS.md`), open the
+- [ ] **Step 4: the upstream port in `BACKLOG.md`.** Add under *Unscheduled*: "AG-UI compaction upstream:
+  participants get compaction only through an upstream PR (`docs/guides/contributing-upstream.md`); that port
+  also rewrites upstream's `docs/specs/2026-10-15-agui-frontend-design.md` *History* (l. 243), stale on our
+  `main` since slice 1/3 of the compaction plan — from the compaction plan (PR #16 review, finding 10), waits
+  for the track's slice 3/3." Commit it with the handoff (`git add BACKLOG.md`).
+
+- [ ] **Step 5: review, PR, merge.** Update the slices table's status and *Current work* (`AGENTS.md`), open the
   PR `Agent compacts the conversation (1/3)` with `gh pr create --repo thodkatz/elixir-biohackathon-2026-test
   --base main`, the body saying what ran (the four suites, the syntax check, the Haiku sample) and the summary
-  sample for the user to read, and that upstream's `docs/specs/2026-10-15-agui-frontend-design.md` *History*
-  (l. 243) is now stale and changes only with an upstream port. Then the local review round, the merge and the
+  sample for the user to read, and that upstream's frontend spec *History* is now stale (the `BACKLOG.md` item
+  of step 4). Then the local review round, the merge and the
   cleanup (`AGENTS.md`, *Development workflow*).

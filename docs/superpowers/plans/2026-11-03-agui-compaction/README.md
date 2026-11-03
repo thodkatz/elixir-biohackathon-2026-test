@@ -255,8 +255,8 @@ Each is added by the slice that verifies it, with status `folded`, and the spec 
    Haiku's own window with one large tool result (compaction off: Anthropic's `prompt is too long`), then
    recovers the same session through the reactive trigger (compaction on, no window); the proactive half is
    slice 2's early output. Decision 13's acceptance check is rewritten: **an approved acceptance check changes, so
-   the user is pointed at this clarification** in this plan's PR and in slice 3's PR, and slice 3 asks before its
-   paid run. Slice 3, task 3.
+   the user is pointed at this clarification** in this plan's PR and in slice 3's PR, and slice 3 reads the
+   user's answer on this plan's PR before its paid run (task 3, step 0). Slice 3, task 3.
 
 ## Handoffs
 

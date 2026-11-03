@@ -197,29 +197,47 @@ large enough to overflow it, which shows the provider's real error with compacti
 recovery with it on. The proactive half of decision 13 (window 20000, divider, `next_input_tokens` below it) is
 slice 2's early output, cited, not repeated.
 
+- [ ] **Step 0: the user's answer, and Haiku's window.** Clarification 5 rewrites an approved acceptance check
+  and changes this paid run's shape; plan PR #16's body pointed the user at it. Read that PR's comments and the
+  user's comments since (`gh pr view 16 --repo thodkatz/elixir-biohackathon-2026-test --comments`): if the user
+  objected or asked for another check, stop here and end blocked on this slice's PR (`development-workflow.md`,
+  *Gates*). Then read `claude-haiku-5-5`'s context window `W` (tokens) from Anthropic's model documentation and
+  note where in the handoff; steps 1, 2 and 5 use it. Size the output to 2–3× `W` so the request is rejected,
+  not billed: `N = W` (`seq 1 N` prints ≈ 6.9 characters per line for N in 10^5–10^6, ≈ 7 N characters, and
+  digits tokenise at fewer than 3 characters per token, so ≥ 2.3 W tokens), and the output cap
+  `C = 8 * N` bytes.
+
 - [ ] **Step 1: compaction off, tool results uncapped.** In `MAIN/…/instances/dev-local.yml`, remove
   `spe_agent_context_window_tokens: 20000` and add `spe_agent_compaction_enabled: false`. Redeploy in place from
-  the main checkout with this worktree's agent and a large output cap for this check only:
+  the main checkout with this worktree's agent and the output cap `C` for this check only:
 
 ```bash
 cd /workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test/platform/ansible
-ansible-playbook playbooks/create.yml -e @instances/dev-local.yml -e spe_agent_max_output_bytes=1500000 \
+ansible-playbook playbooks/create.yml -e @instances/dev-local.yml -e spe_agent_max_output_bytes=<C> \
   -e spe_agui_source_dir=$PWD/../../.claude/worktrees/impl-agui-compaction-3-denbi-docs </dev/null
 ```
 
 - [ ] **Step 2: the overflow.** In the chat UI (Playwright or by hand, screenshots into `evidence/slice-3/`), a
-  new chat: "Run `seq 1 200000` and tell me only the last line it printed." Expected: the tool call and its
-  result (about 1.3 MB, well past 200000 tokens) show, then the red error bar with Anthropic's `prompt is too
-  long` (through `Service.sanitize`); the session record's last run is `failed`. If the result arrives cut
-  (`[truncated: …]`), the cap did not take: check `agent.yaml`'s `max_output_bytes`. If the request never
-  reaches Anthropic (a body limit in the chat UI or runtime), note where, and use four commands of `seq 1 60000`
-  in one message instead, each under the limit. Screenshot `overflow-disabled`.
+  new chat: "Run `seq 1 <N>` and tell me only the last line it printed." Expected: the tool call and its result
+  show, then the red error bar with Anthropic's `prompt is too long` (through `Service.sanitize`); the session
+  record's last run is `failed`. Then check, in that order:
+  - **The request was rejected.** If the run completed instead, the request was billed in full: stop, put the VM
+    back (step 5), and end blocked on this slice's PR with the run log's `usage` in the comment; do not retry
+    with a larger `N`.
+  - **The result is whole.** The run log's tool result (or the session record's) is ≈ 7 `N` characters, not cut:
+    a `[truncated: …]` mark means the cap did not take (check `agent.yaml`'s `max_output_bytes`); a shorter
+    result without one means the sandbox caps output too: note the limit, and use as many `seq` commands in one
+    message as reach 2–3× `W` together, each under it.
+  - If the request never reaches Anthropic (a body limit in the chat UI or runtime), note where, and split the
+    output across several commands the same way.
+
+  Screenshot `overflow-disabled`.
 
 - [ ] **Step 3: compaction on, the same session recovers.** In `dev-local.yml`, remove
   `spe_agent_compaction_enabled: false` (no window: only the reactive trigger can act, which is what decision 13
-  checks). Redeploy as in step 1, with the same `-e spe_agent_max_output_bytes=1500000` (the session's history
+  checks). Redeploy as in step 1, with the same `-e spe_agent_max_output_bytes=<C>` (the session's history
   holds the large result either way). Reopen the same session from the sidebar and send "What was the last line?".
-  Expected: the divider appears, then an answer naming `200000`; the run is `completed`. Screenshots `recovered`
+  Expected: the divider appears, then an answer naming `<N>`; the run is `completed`. Screenshots `recovered`
   and `recovered-open` (summary expanded). The first request of this run fails at Anthropic exactly as in step
   2; the capability's overflow list must recognise Anthropic's real wording here. If it does not, the run fails
   as before: that is a slice 1 bug (the listed wording is wrong); add the real body to
@@ -232,9 +250,7 @@ ansible-playbook playbooks/create.yml -e @instances/dev-local.yml -e spe_agent_m
   `evidence/slice-3/run-log.json`, after checking the summary holds no canary or key (the session ran `seq`
   only). The record for step 2's run has `compactions: []`.
 
-- [ ] **Step 5: put the VM back.** In `dev-local.yml`, set `spe_agent_context_window_tokens` to Haiku's
-  documented context window (Anthropic's model documentation for `claude-haiku-5-5`; say in the handoff where
-  it was read), so the dev VM's instance compacts proactively as decision 12 says. Redeploy without the
+- [ ] **Step 5: put the VM back.** In `dev-local.yml`, set `spe_agent_context_window_tokens` to `W` (step 0), so the dev VM's instance compacts proactively as decision 12 says. Redeploy without the
   `-e spe_agent_max_output_bytes` override, then `ansible-playbook playbooks/verify.yml -e
   @instances/dev-local.yml </dev/null`: the compaction task shows `enabled: true` and that window, and
   `max_output_bytes` is back to 16384 in `agent.yaml`.
@@ -262,7 +278,7 @@ compaction below the window) is the early output's session (slice 2).
   compaction enabled and no window set, its next message compacts (trigger `overflow`), the divider shows, the
   run completes and the run log's input tokens of the first request after the compaction are below the window
   (clarification 5). The proactive path on a small window (`context_window_tokens: 20000`) is the early
-  output's session." Also update the plan README's *Proposed spec clarifications* item 4 only if the wording
+  output's session." Also update the plan README's *Proposed spec clarifications* item 5 only if the wording
   changed in the run.
 
 ```bash
@@ -274,7 +290,8 @@ git commit -s -m "Check decision 13 on the dev VM; fold spec clarification 5" \
 
 - [ ] **Step 7: the end of the track.** Write the handoff (`handoffs/<UTC stamp>-slice3-merged-track-done.md`):
   what ran, the evidence paths, the run-log fields, Haiku's window and where it was read, any ruling, and that
-  participants get compaction only through an upstream port (spec §9; `BACKLOG.md` if no item says so yet).
+  participants get compaction only through an upstream port (spec §9). Check `BACKLOG.md`'s *AG-UI compaction
+  upstream* item (slice 1, task 7, step 4) is there and still true; add it if it is missing.
   Update the slices table (all three done) and **remove the track's line** from `AGENTS.md`, *Current work*.
   Open the PR `de.NBI window, docs, decision 13 (3/3)` with `gh pr create --repo
   thodkatz/elixir-biohackathon-2026-test --base main`; the body says what ran (the syntax check, the three

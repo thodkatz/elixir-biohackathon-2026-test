@@ -135,8 +135,13 @@ export async function rebuild(id: string, lines: Line[]): Promise<Conversation> 
           console.warn(`journal ${id}: event for run ${line.run_id} skipped (no run_start)`);
           break;
         }
+        if (run.end) {
+          // An ended run may be another run's anchor: nothing after its run_end may change it.
+          console.warn(`journal ${id}: event for run ${line.run_id} skipped (after its run_end)`);
+          break;
+        }
         run.events.push(line.event);
-        if (!run.end) [run.last_at, run.last_index] = [line.at, index];
+        [run.last_at, run.last_index] = [line.at, index];
         break;
       }
       case "run_end": {

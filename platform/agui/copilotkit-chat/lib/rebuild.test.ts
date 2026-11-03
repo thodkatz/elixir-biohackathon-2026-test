@@ -293,9 +293,10 @@ test("the first run_end counts: a second one changes neither status nor end time
   assert.deepEqual([run.status, run.error, run.ended_at, run.last_at], ["cancelled", null, first.at, first.at]);
 });
 
-test("events after a run's run_end are still applied but do not move its last time", async () => {
-  // JournalWriter's caller writes none; a journal that has them rebuilds them, and the run's place in the
-  // tip order stays its run_end's.
+test("events after a run's run_end are skipped and logged: the ended run stays as it ended", async (t) => {
+  // JournalWriter's caller writes none; a journal that has them must not change a run another run may
+  // already be anchored at (§13: a run's last message is a boundary once it has a run_end).
+  const warn = t.mock.method(console, "warn", () => {});
   const ended = end("r1");
   const conv = await rebuild(ID, [
     created(), start("r1", null, [user("u1", "q1")]), ...reply("r1", "a1", "x"), ended,
@@ -304,6 +305,10 @@ test("events after a run's run_end are still applied but do not move its last ti
     ev("r1", { type: EventType.TEXT_MESSAGE_CONTENT, messageId: "late", delta: "after the end" }),
   ]);
   const [r1] = conv.runs;
-  assert.deepEqual([r1.added, r1.events, r1.last_at], [["u1", "a1", "late"], 7, ended.at]);
+  assert.deepEqual([r1.added, r1.last_at], [["u1", "a1"], ended.at]);
+  assert.equal(isBoundary(conv, "a1"), true);
   assert.deepEqual([conv.tip, conv.tip_run], ["a2", "r2"]);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]),
+    [`journal ${ID}: event for run r1 skipped (after its run_end)`,
+     `journal ${ID}: event for run r1 skipped (after its run_end)`]);
 });

@@ -57,7 +57,7 @@ that is not here, add the task first, in its own commit.
 - Produces: `spe_webui_model_context_tokens` (the de.NBI model's window); `spe_agent_context_window_tokens`
   derived from it while the agent uses that model, `null` for any other model unless an instance sets it.
 
-- [ ] **Step 1: read the window, by hand, no model call.** From the main checkout, with the de.NBI key in the
+- [x] **Step 1: read the window, by hand, no model call.** From the main checkout, with the de.NBI key in the
   environment as for a deployment (`DENBI_LLM_API_KEY`):
 
 ```bash
@@ -74,7 +74,7 @@ curl -s -H "Authorization: Bearer $DENBI_LLM_API_KEY" https://denbi-llm-api-inte
   put a model card's figure in: vLLM's `max_model_len` is what the server enforces, and it may be set below the
   model's own.
 
-- [ ] **Step 2: set it.** In `all.yml`, after `spe_webui_model_id: qwen3.8-27b`:
+- [x] **Step 2: set it.** In `all.yml`, after `spe_webui_model_id: qwen3.8-27b`:
 
 ```yaml
 # Its context window in tokens: max_input_tokens from the de.NBI gateway's (LiteLLM)
@@ -91,7 +91,7 @@ spe_agent_context_window_tokens: "{{ spe_webui_model_context_tokens if spe_agent
 
   Ansible 2.20 keeps the template's native value (an integer or `None`); step 3 checks both cases.
 
-- [ ] **Step 3: render it locally.** From `ANSIBLE`:
+- [x] **Step 3: render it locally.** From `ANSIBLE`:
 
 ```bash
 T="msg={{ {'context_window_tokens': (spe_agent_context_window_tokens | int) if spe_agent_context_window_tokens is not none else none} | to_nice_yaml }}"
@@ -106,7 +106,7 @@ ansible-playbook --syntax-check playbooks/create.yml playbooks/verify.yml </dev/
   the syntax check passes. (As in slice 1, task 2, step 8: if loading the whole `all.yml` fails on an unrelated
   lookup, pass the variables with `-e`.)
 
-- [ ] **Step 4: commit.**
+- [x] **Step 4: commit.**
 
 ```bash
 git add platform/ansible/inventory/group_vars/all.yml
@@ -128,7 +128,7 @@ git commit -s -m "Set the de.NBI model's context window for the agent's compacti
 
 Upstream-clean: none of these texts names the fork, a plan, a slice or the dev VM's instance file by path.
 
-- [ ] **Step 1: the agent's README.** After the **Providers.** paragraph, add:
+- [x] **Step 1: the agent's README.** After the **Providers.** paragraph, add:
 
 ```markdown
 **Compaction.** The `compaction` block (all keys optional):
@@ -154,7 +154,7 @@ reactive trigger acts, too low and it compacts early.
   Then reread the *Runs* paragraph (slice 1 rewrote its first sentence): it points to the window and the run
   log; it needs no change unless it repeats this paragraph, in which case cut the repeat there.
 
-- [ ] **Step 2: the Ansible README.** In `## Agent frontend (AG-UI)`, in the **agent** bullet after "Run log in
+- [x] **Step 2: the Ansible README.** In `## Agent frontend (AG-UI)`, in the **agent** bullet after "Run log in
   volume `agent-runs` (player input and canaries: private).", add: "When a conversation nears the model's context
   window the agent compacts it (summarises the older part with the same model; the chat shows a divider, the
   archive a `## Compacted` section, the run log a `compactions` entry): `spe_agent_compaction_enabled` (true),
@@ -164,13 +164,13 @@ reactive trigger acts, too low and it compacts early.
   gateway's `max_input_tokens`) while `spe_agent_model` is `spe_webui_model_id`, and to null otherwise: set it for
   another model, or only a provider's "too long" error triggers a compaction." Keep the bullet's line width.
 
-- [ ] **Step 3: getting-started.** In step 3's table, after the `spe_agent_model_provider, …` row, add:
+- [x] **Step 3: getting-started.** In step 3's table, after the `spe_agent_model_provider, …` row, add:
 
 ```markdown
    | `spe_agent_context_window_tokens` | only for a model other than de.NBI's `qwen3.8-27b` (whose window is already set): the model's context window in tokens, so the agent compacts a long conversation before the provider refuses it, e.g. a vLLM server's `max_model_len` (`GET <base_url>/models`), a LiteLLM gateway's `max_input_tokens` (`GET <base_url>/model/info`) or the vendor's documented window. Unset, the agent compacts only after a "too long" error. `spe_agent_compaction_enabled: false` turns compaction off |
 ```
 
-- [ ] **Step 4: check and commit.** `grep -rn "context_window_tokens\|compaction" AGENT/README.md ANSIBLE/README.md
+- [x] **Step 4: check and commit.** `grep -rn "context_window_tokens\|compaction" AGENT/README.md ANSIBLE/README.md
   docs/getting-started.md`: every key name matches `config.py` and `all.yml` exactly. Read the three diffs once
   for any mention of a plan, slice, handoff or `dev-local` (upstream-clean).
 
@@ -254,7 +254,7 @@ ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml -e spe_age
   -e spe_agui_source_dir=$PWD/../../.claude/worktrees/impl-agui-compaction-3-denbi-docs/platform/agui </dev/null
 ```
 
-- [ ] **Step 2: the overflow.** In the chat UI (Playwright or by hand, screenshots into the evidence
+- [x] **Step 2: the overflow.** In the chat UI (Playwright or by hand, screenshots into the evidence
   directory), a new chat: "Run `seq 1 <N>` exactly as written, without pipes, filters or redirection, then read
   its whole output and tell me only the last line it printed." Expected: the tool call and its result show,
   then the red error bar with vLLM's "maximum context length" error (through `Service.sanitize`); the session
@@ -271,7 +271,7 @@ ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml -e spe_age
 
   Screenshot `overflow-disabled`.
 
-- [ ] **Step 3: compaction on, the same session recovers.** In `denbi-agui-01.yml`, remove
+- [x] **Step 3: compaction on, the same session recovers.** In `denbi-agui-01.yml`, remove
   `spe_agent_compaction_enabled: false` and set `spe_agent_context_window_tokens: null` (only the reactive
   trigger can act, which is what decision 13 checks; without it task 1 sets qwen's window). Redeploy as in step 1,
   with the same `-e spe_agent_max_output_bytes=<C>`. Reopen the same session from the sidebar and send "What was
@@ -281,14 +281,14 @@ ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml -e spe_age
   the run fails as before: that is a slice 1 bug (the listed wording is wrong); add the real body to
   `test_compaction_providers.py`'s overflow cases, fix the list, and redo this step.
 
-- [ ] **Step 4: the run log.** From `ANSIBLE`, `ansible-playbook playbooks/archive.yml -e
+- [x] **Step 4: the run log.** From `ANSIBLE`, `ansible-playbook playbooks/archive.yml -e
   @instances/denbi-agui-01.yml </dev/null`, then in the output directory it prints, `agent-runs.jsonl`'s record
   for step 3's run: `compactions` has one entry with `trigger: "overflow"`, `messages_cut` ≥ 3, `usage` of the
   summary request, and `next_input_tokens` below `W`. Copy those fields (not the record, not `canaries.json`)
   into the evidence directory's `run-log.json`, after checking the summary holds no canary or key (the session
   ran `seq` only). The record for step 2's run has `compactions: []`.
 
-- [ ] **Step 5: put the instances back.** In `denbi-agui-01.yml`, remove `spe_agent_context_window_tokens`
+- [x] **Step 5: put the instances back.** In `denbi-agui-01.yml`, remove `spe_agent_context_window_tokens`
   (task 1's value applies), redeploy without the `-e spe_agent_max_output_bytes` override, then
   `ansible-playbook playbooks/verify.yml -e @instances/denbi-agui-01.yml </dev/null`: the compaction task shows
   `enabled: true` and `W`, and `max_output_bytes` is back to 16384 in `agent.yaml`. On the dev VM, set
@@ -297,7 +297,7 @@ ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml -e spe_age
   on 2026-11-03, under the preflight's 5: if it still refuses, the dev VM step waits on the user (pruning there
   is not ours to decide) and the PR says so.
 
-- [ ] **Step 6: fold clarification 5.** In the spec, add to *Clarifications* (after 4; template:
+- [x] **Step 6: fold clarification 5.** In the spec, add to *Clarifications* (after 4; template:
   `spec-and-plan-layout.md`):
 
 ```markdown
@@ -332,7 +332,7 @@ git commit -s -m "Check decision 13 on qwen; fold spec clarification 5" \
   -m "vLLM's real overflow error with compaction off, the reactive recovery with it on."
 ```
 
-- [ ] **Step 7: the end of the track.** Write the handoff (`handoffs/<UTC stamp>-slice3-merged-track-done.md`):
+- [x] **Step 7: the end of the track.** Write the handoff (`handoffs/<UTC stamp>-slice3-merged-track-done.md`):
   what ran, the evidence paths, the run-log fields, qwen's and Haiku's windows and where each was read, any ruling, and that
   participants get compaction only through an upstream port (spec §9). Check `BACKLOG.md`'s *AG-UI compaction
   upstream* item (slice 1, task 7, step 4) is there and still true; add it if it is missing.

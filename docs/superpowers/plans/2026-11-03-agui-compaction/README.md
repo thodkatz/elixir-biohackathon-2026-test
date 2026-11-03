@@ -199,7 +199,7 @@ the checks in `AGENTS.md`, *Overrides*, pass.
 |---|---|---|---|---|---|---|---|
 | 1/3 | `impl/agui-compaction-1-agent` | 7 | the agent compacts (both triggers, limits, usage), marker events, input cut, run log, configuration and Ansible; the Haiku summary sample in the handoff | ~1,000 | agent pytest; `npm test` (round trip); `--syntax-check` | [slice-1-agent.md](slice-1-agent.md) | merged #17 |
 | 2/3 | `impl/agui-compaction-2-chat-archive` | 5 | **early output**: divider in the chat, fake agent `compact`, archive `## Compacted` + column, Playwright with screenshots, dev VM session on Haiku at window 20000 | ~600 | `npm test`; `npm run build`; pytest `-k agui_run`; Playwright run with screenshots | [slice-2-chat-archive.md](slice-2-chat-archive.md) | merged #18 |
-| 3/3 | `impl/agui-compaction-3-denbi-docs` | 4 | de.NBI window, docs, a de.NBI session on qwen that compacts, decision 13's check | ~150 | `--syntax-check`; `verify.yml` on the dev VM and on de.NBI; the qwen session's `Compactions` ≥ 1; decision 13's run log lines (qwen) | [slice-3-denbi-docs.md](slice-3-denbi-docs.md) | planned |
+| 3/3 | `impl/agui-compaction-3-denbi-docs` | 4 | de.NBI window, docs, a de.NBI session on qwen that compacts, decision 13's check | ~150 | `--syntax-check`; `verify.yml` on the dev VM and on de.NBI; the qwen session's `Compactions` ≥ 1; decision 13's run log lines (qwen) | [slice-3-denbi-docs.md](slice-3-denbi-docs.md) | merged #21 |
 
 Slice 1 is about 1,000 lines with tests and 7 tasks, past the guide's ~5, and stays one unit: the agent half is
 one module and its wiring, and split, the first half (no events) could not be deployed with any visible effect.

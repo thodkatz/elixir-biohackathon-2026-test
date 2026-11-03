@@ -815,7 +815,8 @@ def compaction_live(r: Run, turns: int = 8) -> None:
     page.get_by_role("button", name="New chat").click()
     box = page.get_by_test_id("copilot-chat-textarea")
     for turn in range(1, turns + 1):
-        box.fill(f"Turn {turn}: run `seq 1 3000` and tell me only the last line it printed.")
+        box.fill(f"Turn {turn}: run `seq 1 3000` exactly as written, without pipes, filters or redirection, "
+                 "then read its whole output and tell me only the last line it printed.")
         box.press("Enter")
         # New chat is disabled while a run is in flight (as two_turn waits for a run's end).
         expect(page.get_by_role("button", name="New chat")).to_be_disabled(timeout=10_000)

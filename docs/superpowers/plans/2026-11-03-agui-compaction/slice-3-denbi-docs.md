@@ -246,7 +246,9 @@ ansible-playbook playbooks/create.yml -e @instances/dev-local.yml -e spe_agent_m
 ```
 
 - [ ] **Step 2: the overflow.** In the chat UI (Playwright or by hand, screenshots into `evidence/slice-3/`), a
-  new chat: "Run `seq 1 <N>` and tell me only the last line it printed." Expected: the tool call and its result
+  new chat: "Run `seq 1 <N>` exactly as written, without pipes, filters or redirection, then read its whole
+  output and tell me only the last line it printed." (Haiku piped a shorter prompt's output to `tail` in slice 2,
+  task 5.) Expected: the tool call and its result
   show, then the red error bar with Anthropic's `prompt is too long` (through `Service.sanitize`); the session
   record's last run is `failed`. Then check, in that order:
   - **The request was rejected.** If the run completed instead, the request was billed in full: stop, put the VM

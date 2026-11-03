@@ -74,7 +74,7 @@ Every task's requirements include these.
 - **Summaries are rendered as text**, never HTML: React text in the chat, a fence in the archive.
 - **No model calls without the user's OK.** The user approved Haiku (`claude-haiku-5-5`) on the dev VM for this
   work (2026-11-02): slice 1's summary sample, slice 2's early output, slice 3's decision 13 check. Nothing else
-  calls a model; no de.NBI runs.
+  calls a model, except slice 3, task 3: a de.NBI session on qwen that compacts (the user's request, 2026-11-03).
 - **The dev VM's instance** is redeployed in place with `create.yml` from the main checkout and
   `-e spe_agui_source_dir=<worktree>` (`AGENTS.md`, *Worktrees and deploying*). No cloud instance is created or
   destroyed.
@@ -258,7 +258,7 @@ Each is added by the slice that verifies it, with status `folded`, and the spec 
    recovers the same session through the reactive trigger (compaction on, no window); the proactive half is
    slice 2's early output. Decision 13's acceptance check is rewritten: **an approved acceptance check changes, so
    the user is pointed at this clarification** in this plan's PR and in slice 3's PR, and slice 3 reads the
-   user's answer on this plan's PR before its paid run (task 3, step 0). Slice 3, task 3.
+   user's answer on this plan's PR before its paid run (task 4, step 0). Slice 3, task 4.
 6. **The reactive retry goes through the streamed request**, inside a wrapper model that `wrap_model_request`
    sets: in 2.56.0 a streamed request's error surfaces in the task that reads the stream, never in the hook.
    Rewrites decision 3's row, §1 and §2. Slice 1, task 5.

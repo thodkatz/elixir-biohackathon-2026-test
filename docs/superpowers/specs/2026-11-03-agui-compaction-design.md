@@ -1,6 +1,6 @@
 # AG-UI compaction — design
 
-**Status:** proposed, PR #15. **Latest clarification:** none.
+**Status:** approved, PR #15. **Latest clarification:** none.
 Read against this repo at `4a59a6c` (`main`), with `pydantic-ai-slim` 2.56.0, `ag-ui-protocol` 0.1.22,
 `@ag-ui/core`/`@ag-ui/client` 1.0.2 and CopilotKit 1.79.0 as pinned there.
 

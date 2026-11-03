@@ -9,8 +9,8 @@ prompt run once on Haiku (paid, approved), whose output goes into the handoff fo
 
 **Implements:** spec [`2026-11-03-agui-compaction-design.md`](../../specs/2026-11-03-agui-compaction-design.md)
 §1–§5, §8, §9 (agent and Ansible), *Inputs for the plan* (first three bullets). Decisions **1** (task 4
-`test_threshold_compaction_shape`; task 5 `test_providers.py`), **2** (task 3 `test_estimate_*`; task 4
-`test_over_trigger_boundaries`, `test_no_window_no_proactive`, `test_compacts_inside_a_run`), **3** (task 5),
+`test_threshold_compaction_shape`; task 5 `test_compaction_providers.py`), **2** (task 3 `test_estimate_*`; task 4
+`test_over_trigger_boundaries`, `test_no_window_no_proactive`, `test_compacts_inside_a_run`), **3** (task 5 `test_overflow_*`, `test_unlisted_400_is_not_retried`, `test_compaction_providers.py`),
 **4** (task 3 `test_build_sent_*`; task 6 `test_later_run_cuts_at_marker`), **5** (task 3 `test_transcript_*`;
 task 4 `test_summary_request_*`, `test_usage_counts_summary`, `test_request_limit_checked_before_summary`), **6**
 (task 4 `test_summary_past_trigger_sent_anyway`, `test_fourth_compaction_fails`), **7** (task 1, the round trip;
@@ -1041,7 +1041,7 @@ class Compaction(AbstractCapability[Any]):
             # The graph records usage only for the handler's response.
             ctx.usage.requests += 1
             ctx.usage.incr(response.usage)
-        if run.records and run.records[-1].next_input_tokens is None and (compacted_now or run.pending == []):
+        if run.records and run.records[-1].next_input_tokens is None:
             run.records[-1].next_input_tokens = response.usage.input_tokens
         return response
 
@@ -1084,12 +1084,6 @@ class Compaction(AbstractCapability[Any]):
                 return None
             raise
 ```
-
-  The `next_input_tokens` condition reads: the newest record gets the input tokens of the first response after
-  it. Simplify it to `if run.records and run.records[-1].next_input_tokens is None:` if no test needs more: a
-  response always follows the compaction that preceded it in the same `wrap_model_request`, and the record was
-  made in this call or an earlier one whose response was never answered (then null is correct only until this
-  answer, which is the first one after it). Use the simple form.
 
   `RunContext.usage_limits` may be named differently in 2.56 (`grep -n "usage_limits" SITE/pydantic_ai/_run_context.py`);
   use the attribute the graph sets. `ToolDefinition` fields are `name`, `description`, `parameters_json_schema`.
@@ -1263,13 +1257,11 @@ async def test_overflow_after_a_proactive_compaction_fails(tmp_path):
     assert len(script.summaries) == 1
 ```
 
-- [ ] **Step 2: run them.** `(cd AGENT && uv run --group dev pytest tests/test_app.py -q -k overflow or unlisted)`.
+- [ ] **Step 2: run them.** `(cd AGENT && uv run --group dev pytest tests/test_app.py -q -k "overflow or unlisted")`.
   Expected: pass with task 4's code. If the answer does not reach the stream (`answer == ""`), the graph did not
-  replay the direct response: the spec's fallback applies (*Inputs for the plan*, third bullet), the retry goes
-  through the handler instead — restructure `wrap_model_request` so the reactive path raises a private exception
-  caught by an outer retry is **not** possible (the handler is single-use); instead record a ruling and stop the
-  slice blocked, since the reactive trigger is decision 3. (The plan's research read the replay branch, so this
-  is not expected.)
+  replay the direct response, and the retry cannot go through the handler instead (it is single-use): record a
+  ruling (*decision, why, cost if wrong*) in the handoff and end the slice blocked, since decision 3 depends on
+  it. (The plan's research read the replay branch, so this is not expected.)
 
 - [ ] **Step 3: write the providers' tests.** Create `AGENT/tests/test_compaction_providers.py`:
 

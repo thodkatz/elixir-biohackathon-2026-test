@@ -225,8 +225,8 @@ How the chat sessions spec's constraints change:
   14 of the chat sessions spec). Other activity messages keep today's JSON rendering. `index.md` gains a
   `compactions` column.
 
-The chat sessions spec's §4 (archive layout, `index.md` columns) gains a clarification pointing here
-(*Inputs for the plan*).
+The living AG-UI spec's §14 (the archive as built, `index.md` columns), into which #19 folded the chat
+sessions spec's §4, gains a clarification pointing here (its clarification 3; *Inputs for the plan*).
 
 ## 8. Run log
 

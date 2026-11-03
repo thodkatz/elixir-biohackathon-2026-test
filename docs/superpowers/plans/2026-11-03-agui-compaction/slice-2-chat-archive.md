@@ -9,7 +9,7 @@ until it compacts, whose screenshots, archived `chats/NN-*.md` and run-log `comp
 user to look at.
 
 **Implements:** spec [`2026-11-03-agui-compaction-design.md`](../../specs/2026-11-03-agui-compaction-design.md)
-§6, §7, *Early output*, *Inputs for the plan* (the chat sessions spec clarification). Decisions **8** (task 4
+§6, §7, *Early output*, *Inputs for the plan* (the living AG-UI spec's clarification). Decisions **8** (task 4
 `check_compaction`, screenshots), **9** (task 1, the recorder test), **10** (task 3 `test_agui_run_compaction_*`),
 **12**'s `verify.yml` part (task 5, step 3). Slice 1 already folded clarification 1, so the spec's decision 7, §6
 and §7 speak of the assistant-message marker; read them as rewritten there.
@@ -510,7 +510,7 @@ git commit -s -m "Archive: render a compaction as '## Compacted' and count them 
 
 ---
 
-### Task 4: Playwright, light and dark, and the chat sessions spec clarification
+### Task 4: Playwright, light and dark, and the living AG-UI spec's clarification
 
 **Files:**
 - Modify: `platform/dev/e2e/sessions.py` (`check_compaction`; `LOCAL`; `main`)

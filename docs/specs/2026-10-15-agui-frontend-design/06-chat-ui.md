@@ -24,7 +24,7 @@ session id) and one journal (§13).
 - **Storage.** Journals live in `/data/sessions/` on the named volume `chat-sessions`, mounted at `/data` in
   `chat-ui` (`roles/agui/templates/docker-compose.yml.j2`). The app runs as `node` (uid 1000) without the
   rights to fix ownership, so the image creates the directory: the Dockerfile runs
-  `install -d -o node -g node -m 0700 /data /data/sessions`, and Docker copies it, with its owner, into the
+  `install -d -o node -g node -m 0700 /app/.next/cache /data /data/sessions`, and Docker copies it, with its owner, into the
   named volume when it is first mounted empty. The container keeps `read_only: true`, its tmpfs mounts
   (`/tmp`, `/app/.next/cache`), `cap_drop: ALL`, `no-new-privileges` and its limits.
 - **Code.** The sessions code lives in `lib/` beside `app/`; the Dockerfile copies `lib/` into the build
@@ -54,7 +54,7 @@ Routes under `app/api/sessions/`, beside `/api/copilotkit`. The browser changes 
 | Call | Answer |
 |---|---|
 | `GET /api/sessions` | `200`, a JSON list of metadata (`id`, `title`, `tags`, `pinned`, `hidden`, `created_at`, `updated_at`, and `last_run_at`: the last run's end, `null` before the first), deleted sessions left out, hidden ones included, newest `updated_at` first, at most 1000 |
-| `GET /api/sessions/{id}` | `200` with the session's metadata (without `deleted_at`) and `messages`: the tip's branch (§13); `404` if missing or deleted |
+| `GET /api/sessions/{id}` | `200` with `id`, `title`, `tags`, `pinned`, `hidden`, `created_at`, `updated_at`, `last_run_at` and `messages`: the tip's branch (§13); `404` if missing or deleted. `version` and `title_source` are no longer answered: the journal keeps neither |
 | `PATCH /api/sessions/{id}` | body: any of `title`, `tags`, `pinned`, `hidden`; `200` with the new metadata; `400` for an unknown key (`messages`, `runs` and `id` included), a wrong type or an invalid value (nothing changed); `404` if missing or deleted |
 | `DELETE /api/sessions/{id}` | sets `deleted_at`; `204`; `404` if missing or already deleted |
 

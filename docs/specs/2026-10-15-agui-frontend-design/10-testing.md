@@ -33,9 +33,11 @@ through every sidebar action, with the journals checked after each step.
 streams its answer over about 10 s) for stopping and archiving a run in
 progress.
 
-**Archive**: `pytest platform/dev/tests` over fixture journals: the
-exporter's bundle and `write_run.py`'s rendering of it (decisions 15, 16),
-an empty bundle, and an existing Open WebUI fixture rendering as before.
+**Archive**: the exporter (Node, in the `chat-ui` image) is tested by
+`npm test` over fixture journals, and the bundles it writes are committed as
+fixtures; `pytest platform/dev/tests` renders those bundles with
+`write_run.py` (decisions 15, 16), an empty bundle, and an existing Open WebUI
+fixture rendering as before.
 
 **promptfoo** (`evals/`):
 

@@ -5,6 +5,10 @@ fetch, write on the controller (`roles/run_archive`). Each journal is exported a
 the existing Open WebUI renderer turns into the same run layout, so both frontends are saved and exported one
 way. Decisions 15, 16 and 30 of the [README](README.md#decisions-taken).
 
+Until the record is built, the archive is the chat sessions' as built: `agui-sessions/<uuid>.json` copied from
+the volume and rendered by `files/write_agui_run.py` (`index.md` columns `# | Session | Tags | Created | Runs |
+State`). Runs archived in that form keep the files written for them; the new renderer does not re-render them.
+
 ### Export
 
 `tasks/export.yml`, the block for `spe_frontend == 'agui'`:
@@ -30,7 +34,8 @@ way. Decisions 15, 16 and 30 of the [README](README.md#decisions-taken).
    the bundle below.
 4. **Restart** both (`docker compose -p spe-frontend start agent chat-ui`), so `archive.yml` run on its own
    leaves a working instance; under `destroy.yml` they are removed right after.
-5. Pack `<tmp>` and fetch it to `{{ spe_output_dir }}`, remove both copies from the VM.
+5. Pack `<tmp>` and fetch it to `{{ spe_output_dir }}/archive-bundle-agui.tar.gz`, remove both copies from
+   the VM. The fetched bundle is removed after writing, like `archive-bundle.json`.
 
 Every journal is exported, hidden and deleted included. The containers are still up when `archive.yml` starts
 (`destroy.yml` imports it first; the Coder stop runs `destroy.yml`). If any step fails, `archive.yml` fails
@@ -44,9 +49,10 @@ notes: []}`), one chat per session, using the rebuild of §13:
 - `title`, `created_at`, `updated_at`, `archived` (the session is hidden), `meta.tags`, and
   `meta.spe_deleted_at` for a deleted session;
 - `chat.history.messages`: every message of every branch, keyed by id, with `parentId` and `childrenIds`;
-  `chat.history.currentId`: the tip;
+  `chat.history.currentId`: the exported assistant message of the tip's run (each run is folded into one, below);
 - a user message as Open WebUI's: `role`, `content`;
-- **one assistant message per run**, parent the run's last new user message, with `output` items in the order
+- **one assistant message per run**, parent the run's last new user message (the anchor, for a run that
+  added none), with `output` items in the order
   their first event arrived, in v0.11.3's shapes (`utils/middleware.py`, `utils/ask_user.py`): a text message as
   `{type: "message", id, role: "assistant", content: [{type: "output_text", text}]}`, a tool call as
   `{type: "function_call", id, call_id, name, arguments}` (`arguments` a JSON string), a tool result as

@@ -44,7 +44,10 @@ Per run:
    deleted, or that arrives while `chat-ui` is closing (§14, *Barrier*): emit `RUN_STARTED` then `RUN_ERROR`
    ("invalid session" / "this session was deleted" / …) and do not call the agent.
 2. Load the session from the index or journal. Compute the **anchor** and the **new messages** (decision 2),
-   and compare the client's history with the journal's path to the anchor:
+   and compare the client's history with the journal's path to the anchor. An anchor inside a run (a
+   message that is neither a user message nor a run's last message, such as an assistant tool call whose
+   result follows) moves back to the last run boundary before it, and the journal's messages after that
+   boundary are `deleted`, so the agent is never sent a dangling tool call:
    - a client message with an id the journal does not hold, other than a new message: `fabricated`; this
      includes every message after the anchor that is not a user message, and every forged marker;
    - a client message with a known id whose role, content, tool calls or tool call id differ: `edited`;
@@ -52,10 +55,14 @@ Per run:
    - a message on the journal's path missing from the client: `deleted`;
    - a client system message: `system` (the agent replaces it anyway; recorded so it is not mistaken for one
      that reached the model).
-3. Refuse a run with no new user message or a reused `runId` (decision 3).
-4. Write `run_start` (decision 4).
+3. Refuse a run with a `runId` the journal already holds, without a journal line (decision 3).
+4. Write `run_start` (decision 4). Then refuse a run with no new user message: `run_end` `refused`, and
+   `RUN_STARTED` then `RUN_ERROR` to the client, without calling the agent (decision 3), so what it carried
+   is recorded.
 5. Replace `messages` with the path plus the new messages and call `next` (decision 5). If anything was
-   ignored, emit `MESSAGES_SNAPSHOT` to the client first (decision 6).
+   ignored, emit `MESSAGES_SNAPSHOT` to the client right after the agent's `RUN_STARTED` (decision 6):
+   `@ag-ui/client` 1.0.2's event verifier refuses a stream whose first event is not `RUN_STARTED` or
+   `RUN_ERROR`.
 6. Append each event; write `run_end` from the terminal event, before that event is passed on, with its
    status:
 
@@ -97,17 +104,24 @@ be worse than a failed run. The journal and the archive hold no request headers 
 never the agent key; message content is stored unchanged. Session files in an earlier JSON format
 (`<uuid>.json`) are neither read nor migrated.
 
+A hard kill can leave a torn last line. Before its first append after loading a journal, `chat-ui` appends a
+`\n` if the file does not end in one, so the next line starts clean; the rebuild skips a line that does not
+parse (and logs it), so one torn line never hides the rest of the journal.
+
 ### Concurrency and branches
 
 Open WebUI allows a second message while a reply is streaming; so does this design. Each line names its run, and
 appends to one session go through one queue, so lines never interleave within a line. `chat-ui` is one Node
 process (`node server.js`), so no cross-process lock is needed; Next.js bundles each route separately, so the
-queue is kept on `globalThis` under `Symbol.for("spe.sessions.queue")` and every route bundle uses that one.
+queue and the session list's index (§6) are kept on `globalThis` under `Symbol.for("spe.sessions.queue")`
+and `Symbol.for("spe.sessions.index")`, and every route bundle uses those.
 
 Two runs from the same anchor each chain their messages under it: siblings. A browser that keeps sending its
 own history continues from its own latest message, so concurrent runs from two tabs show up as two branches
 rather than one corrupted history. The session's **tip** is the last message of the run whose `run_end` (or,
-if incomplete, last event) came last. The chat reopens on the tip; navigating between branches in the chat is
+if incomplete, last event) came last, among the runs that added a message; a refused run adds none. A session
+none of whose runs added a message (only refused runs) is journaled and archived but not listed, and `GET`
+answers `404` for it, as for a missing one. The chat reopens on the tip; navigating between branches in the chat is
 out of scope (the archive keeps them all).
 
 ### Rebuilding the conversation

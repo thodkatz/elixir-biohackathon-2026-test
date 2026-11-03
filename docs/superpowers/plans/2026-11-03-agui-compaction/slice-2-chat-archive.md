@@ -622,12 +622,13 @@ N. **The archive renders the agent's compaction marker as a section, and `index.
    summary in a fence; `index.md`'s columns become `# | Session | Tags | Created | Runs | Compactions | State`.
    *Reason:* the agent compacts a conversation that no longer fits the model's context and marks the point in
    the session's messages (`docs/superpowers/specs/2026-11-03-agui-compaction-design.md`, §7, clarification 1).
-   *Amends:* §14 *Write* (`index.md` columns). *Status:* folded.
+   *Amends:* §14, the as-built archive paragraph (`index.md` columns). *Status:* folded.
 ```
 
-  and in §14 *Write* (`14-archive.md`), on the `index.md` line of the run directory, name the columns with
-  `Compactions` before the state, and in the paragraph after it say the compaction marker is rendered as a
-  `## Compacted` section (clarification N).
+  and in §14 (`14-archive.md`), in the paragraph on the archive as built (*Until the record is built, …*), add
+  `Compactions` before `State` in the `index.md` columns and one sentence: "A compaction marker is rendered as a
+  `## Compacted` section (clarification N)." §14 *Write* (the record's renderer) already renders a "Compacted"
+  section (decision 16), and the record's plan carries the column over (`inputs-for-plan.md`), so leave it.
 
 - [ ] **Step 5: commit.**
 

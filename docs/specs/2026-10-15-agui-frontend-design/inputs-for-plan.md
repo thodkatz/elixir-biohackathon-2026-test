@@ -13,3 +13,5 @@ For the plan that builds the conversation record (decisions 1–18 and what they
   rewrites them.
 - `@ag-ui/client`'s event application is used as a library on the server; check that its entry point works in
   the Node runtime the image uses, and pin the behaviour with decision 11's test.
+- Carry the as-built archive's columns over: `write_agui_run.py`'s `index.md` columns (§14, as built), including
+  any compaction counts added before the record ships, go into the record's `index.md` table when that script goes.

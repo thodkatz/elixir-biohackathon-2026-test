@@ -10,7 +10,7 @@ optional token cap of upstream PR #9).
 `run_archive` Ansible roles, and whoever analyses archived AG-UI runs.
 
 **Problem.** The CopilotKit chat (`spe_frontend: agui`) is one conversation that a reload throws away
-(`docs/specs/2026-10-15-agui-frontend-design.md`, §6: "no persistence"). Participants cannot keep several
+(`docs/specs/2026-10-15-agui-frontend-design.md`, now a directory, §6: "no persistence"). Participants cannot keep several
 attempts apart, come back to one, or label them, as Open WebUI lets them. And because nothing is stored,
 the run archive keeps nothing of an AG-UI run (`platform/coder/README.md`: "The `agui` frontend is not
 archived"), so what participants tried is lost for later analysis.
@@ -169,8 +169,9 @@ plan*](../../specs/2026-10-15-agui-frontend-design/inputs-for-plan.md).
    *Inputs for the plan* are cut to pointers there. Its decisions are carried as the living spec's **19** (1: the
    volume and image part), **20** (5), **21** (6), **22** (7), **23** (8), **24** (4: the detached run and the
    clone), **25** (9), **26** (10), **27** (13), **28** (14), **29** (15) and **30** (11: the barrier part); 2 is
-   inside the living spec's 10. Replaced by the conversation record: 1's file format, 3 (atomic rewrite), 4's "at
-   most one run at a time" (now 9), 11's copy (15) and 12 (15, 16). *Reason:* the sessions stored the client's
+   inside the living spec's 10, 3's queue shared by every route bundle in 12, 4's termination table in 7, and 12's
+   identical re-render in 15. Replaced by the conversation record: 1's file format, 3 (atomic rewrite), 4's "at
+   most one run at a time" (now 9), 11's copy (15) and 12's renderer (15, 16). *Reason:* the sessions stored the client's
    history, which a participant can forge; the record replaces that storage, and one spec kept current lets the
    AG-UI work be read, reviewed and ported as one package (the living spec's clarification 1). *Amends:* every
    section (cut to a pointer); the decisions table (now history). *Status:* folded.

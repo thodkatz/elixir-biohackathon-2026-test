@@ -156,7 +156,13 @@ export class JournalWriter {
       } else if (this.timer === null) {
         this.timer = this.clock.setTimeout(() => {
           this.timer = null;
-          void this.enqueue(async () => this.handle?.sync()).catch(() => {});
+          // No caller waits on this fsync: its failure is logged here, and fails every later append. After an
+          // earlier failure (already reported to its caller) it does nothing.
+          void this.enqueue(async () => {
+            if (this.failure === null) await this.handle?.sync();
+          }, true).catch((error: unknown) => {
+            console.error(`journal ${path.basename(this.path)}: interval fsync failed: ${error instanceof Error ? error.message : String(error)}`);
+          });
         }, FSYNC_INTERVAL_MS);
       }
       return stamped;

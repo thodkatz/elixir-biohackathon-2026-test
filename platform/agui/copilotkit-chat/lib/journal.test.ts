@@ -40,10 +40,11 @@ function fakeClock() {
   return { clock, tick, pending: () => timers.size };
 }
 
-// The real filesystem, with sync() counted and appends made to fail on demand.
+// The real filesystem, with sync() counted and appends or syncs made to fail on demand.
 function countingFs() {
   const counts = { sync: 0, opens: [] as string[], dirSyncs: [] as string[] };
   let failAppend = false;
+  let failSync = false;
   const fsys: JournalFs = {
     open: async (file, flags) => {
       counts.opens.push(flags);
@@ -55,6 +56,7 @@ function countingFs() {
         },
         sync: async () => {
           counts.sync++;
+          if (failSync) throw new Error("EIO: i/o error, fsync");
           await handle.sync();
         },
         close: () => handle.close(),
@@ -72,7 +74,7 @@ function countingFs() {
       }
     },
   };
-  return { fsys, counts, failNext: () => (failAppend = true) };
+  return { fsys, counts, failNext: () => (failAppend = true), failSyncs: () => (failSync = true) };
 }
 
 const created = (id: string): NewLine => ({ type: "created", version: 1, id });
@@ -259,4 +261,57 @@ test("appends made without awaiting land whole and in call order", async () => {
   const { lines, skipped } = parseJournal(await fs.readFile(file, "utf8"));
   assert.equal(skipped, 0);
   assert.deepEqual(lines.map((l) => (l as unknown as { event: { delta: string } }).event.delta), Array.from({ length: 200 }, (_, n) => `${n}`));
+});
+
+test("a failed now fsync fails that append and every later one", async () => {
+  const file = path.join(await tmp(), `${randomUUID()}.jsonl`);
+  const { fsys, failSyncs } = countingFs();
+  const writer = new JournalWriter(file, { fs: fsys, now: fixed });
+  await writer.append(created("s1"), "now");
+  failSyncs();
+  await assert.rejects(writer.append({ type: "meta", pinned: true }, "now"), /EIO/);
+  await assert.rejects(writer.append({ type: "meta", hidden: true }, "soon"), /EIO/);
+  await writer.close();
+});
+
+test("a failed interval fsync is logged once, not thrown, and fails every later append", async (t) => {
+  const error = t.mock.method(console, "error", () => {});
+  const file = path.join(await tmp(), `${randomUUID()}.jsonl`);
+  const { clock, tick } = fakeClock();
+  const { fsys, counts, failSyncs } = countingFs();
+  const writer = new JournalWriter(file, { clock, fs: fsys, now: fixed });
+  await writer.append(event(1), "soon");
+  failSyncs();
+  await tick(FSYNC_INTERVAL_MS); // the soon timer's fsync fails; nothing rejects unhandled
+  assert.equal(counts.sync, 1);
+  assert.equal(error.mock.callCount(), 1);
+  assert.match(String(error.mock.calls[0].arguments[0]), /^journal .*: interval fsync failed: EIO/);
+  await assert.rejects(writer.append(event(2), "soon"), /EIO/);
+  await writer.close();
+  assert.equal(error.mock.callCount(), 1);
+});
+
+test("an interval fsync after a failed append neither syncs nor logs", async (t) => {
+  const error = t.mock.method(console, "error", () => {});
+  const file = path.join(await tmp(), `${randomUUID()}.jsonl`);
+  const { clock, tick } = fakeClock();
+  const { fsys, counts, failNext } = countingFs();
+  const writer = new JournalWriter(file, { clock, fs: fsys, now: fixed });
+  await writer.append(event(1), "soon");
+  failNext();
+  await assert.rejects(writer.append(event(2), "soon"), /ENOSPC/);
+  await tick(FSYNC_INTERVAL_MS);
+  assert.equal(counts.sync, 0);
+  assert.equal(error.mock.callCount(), 0);
+  await writer.close();
+});
+
+test("without a syncDir, a new journal's directory is fsynced with the real filesystem", async () => {
+  // The file opens (a fake handle, empty), but its directory does not exist: the real directory fsync fails.
+  const dir = path.join(await tmp(), "missing");
+  const handle = { appendFile: async () => {}, sync: async () => {}, close: async () => {}, stat: async () => ({ size: 0 }),
+    read: async () => ({ bytesRead: 0 }) };
+  const writer = new JournalWriter(path.join(dir, `${randomUUID()}.jsonl`), { fs: { open: async () => handle }, now: fixed });
+  await assert.rejects(writer.append(created("s1"), "now"), { code: "ENOENT" });
+  await writer.close();
 });

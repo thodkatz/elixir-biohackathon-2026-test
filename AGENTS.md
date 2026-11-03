@@ -150,6 +150,10 @@ because Z." This file wins over the guides in `.methodology/shared/guides/`.
 - In this repo, **a PR that merges `upstream/main` is merged with a merge commit** instead of the squash in
   `development-workflow.md`, *Review and merge*, step 6, and `forge-github.md`, *Merge*, because a squash drops `upstream/main` as a parent and
   the next upstream merge conflicts on every commit again (`docs/guides/contributing-upstream.md`).
+- In this repo, **a spec meant to go upstream lives in `docs/specs/`** (upstream's layout), written without links
+  to fork-only files, instead of `docs/superpowers/specs/` in `development-workflow.md`, *Full mode*, because it
+  then ports unchanged; its plan stays in `docs/superpowers/plans/`. First used by the living AG-UI spec,
+  `docs/specs/2026-10-15-agui-frontend-design/`.
 
 ## Contributing upstream
 
@@ -187,6 +191,9 @@ is open (`docs/guides/contributing-upstream.md`, step 6).
   `impl/canary-eval-ladder-1-scoring`. Handoff: `ls docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs | tail -1`.
 - **AG-UI compaction** (Full mode): spec (#15), plan (#16), slices 1/3 (#17, the agent) and 2/3 (#18, chat and
   archive) merged. **Next: slice 3/3** `impl/agui-compaction-3-denbi-docs`. Handoff: `ls docs/superpowers/plans/2026-11-03-agui-compaction/handoffs | tail -1`.
+- **AG-UI conversation record** (Full mode): `chat-ui` owns the history as an append-only journal, the agent
+  stays stateless. Spec merged (#19): §13–14 of the living AG-UI spec `docs/specs/2026-10-15-agui-frontend-design/`.
+  **Next: plan** `plan/agui-conversation-record`. Handoff: `docs/handoffs/2026-11-03T1035Z-agui-conversation-record-plan.md`.
 - **Upstream PR kraatz #9** (`contrib/agui-token-cap-optional`): the AG-UI agent's token cap optional, off by
   default (fork #4); waits on upstream's review (`docs/guides/contributing-upstream.md`, step 6).
 - **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice; its *Next*, the ones due soon or
@@ -255,7 +262,7 @@ stop (`platform/coder/README.md`). Testbed presets are `platform/coder/template/
 ### AG-UI agent frontend
 
 Built from plan `docs/plans/2026-10-15-agui-frontend.md` and spec
-`docs/specs/2026-10-15-agui-frontend-design.md` (§12: what implementation verified
+`docs/specs/2026-10-15-agui-frontend-design/` (§12: what implementation verified
 and changed) on branch `agent-agui-frontend`. The record of the work, every
 deviation from the plan with its cost if wrong, and the acceptance evidence is
 [`docs/plans/2026-10-15-agui-frontend-progress.md`](docs/plans/2026-10-15-agui-frontend-progress.md).

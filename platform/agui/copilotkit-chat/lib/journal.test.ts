@@ -140,6 +140,20 @@ test("parseJournal skips torn, foreign and incomplete lines and logs only their 
   }
 });
 
+test("a run_start whose messages are not objects with a string id is skipped", (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const runStart = (messages: unknown) => JSON.stringify({ type: "run_start", at: "t", run_id: "r1", anchor: null, messages,
+    ignored: [], request: {}, source: "chat" });
+  const text = [
+    runStart([{ id: "u1", role: "user", content: "q" }]),
+    runStart([null]), runStart(["u1"]), runStart([{ role: "user" }]), runStart([{ id: 7 }]), runStart([[]]),
+  ].join("\n") + "\n";
+  const { lines, skipped } = parseJournal(text);
+  assert.equal(lines.length, 1);
+  assert.equal(skipped, 5);
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), [2, 3, 4, 5, 6].map((n) => `journal: line ${n} skipped (not a journal line)`));
+});
+
 test("a torn last line gets a newline before the next append, and parsing skips only it", async () => {
   const file = path.join(await tmp(), `${randomUUID()}.jsonl`);
   const head = '{"type":"created","at":"t","version":1,"id":"s1"}\n{"type":"event","at":"t","run_id":"r1","ev';

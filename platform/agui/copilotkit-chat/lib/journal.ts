@@ -52,7 +52,7 @@ function isLine(v: unknown): v is Line {
       return isString(v.id);
     case "run_start":
       return isString(v.run_id) && (v.anchor === null || isString(v.anchor)) && Array.isArray(v.messages)
-        && Array.isArray(v.ignored) && isObject(v.request);
+        && v.messages.every((m) => isObject(m) && isString(m.id)) && Array.isArray(v.ignored) && isObject(v.request);
     case "event":
       return isString(v.run_id) && isObject(v.event) && isString(v.event.type);
     case "run_end":

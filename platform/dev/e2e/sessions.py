@@ -995,8 +995,9 @@ def check_save_failed(r: Run) -> None:
 
 def slow_loop(r: Run) -> None:
     """Archive check during a run: slow runs back to back, each in a new session, until the chat
-    UI goes away under the archive's barrier or 12 runs have passed. Prints each run's title; the
-    last one printed is the run the barrier stopped."""
+    UI goes away under the final archive's barrier (destroy.yml, or archive.yml with
+    spe_archive_final) or 12 runs have passed. Prints each run's title; the last one printed is the
+    run the barrier stopped."""
     page = r.page
     stamp = uuid.uuid4().hex[:8]
     page.goto(BASE + "/")

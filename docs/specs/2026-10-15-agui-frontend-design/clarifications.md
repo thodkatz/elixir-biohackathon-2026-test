@@ -144,8 +144,8 @@ in the parts it amends.
     runs on one session at once: it waits for tab A's run to end before tab B sends, so the two requests never
     collide with the route's lock, and the sibling-branch property still holds because neither tab refetches
     the other's work, so both still anchor at the one reply they last knew. *Reason:* no one had driven two
-    truly overlapping runs on one session through the real route before this check; the gap is tracked in
-    `BACKLOG.md` rather than fixed here because it fails safe (the second run errors; nothing is recorded
+    truly overlapping runs on one session through the real route before this check; it is left as
+    a known gap rather than fixed here because it fails safe (the second run errors; nothing is recorded
     wrong) and a fix needs a `runner` override or a different `AgentRunner`, outside this slice. *Cost if
     wrong:* a future regression specific to the route's own concurrent-run handling would not be caught by a
     Playwright check, only by `npm test`'s recorder-level coverage, until the route is fixed. *Amends:* §13

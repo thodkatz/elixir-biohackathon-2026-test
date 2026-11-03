@@ -52,3 +52,17 @@ in the parts it amends.
    `-e spe_agui_source_dir=<checkout>/platform/agui`. *Reason:* the platform moved under `platform/`, and the
    `agui` role stages `pydantic-ai-agent` and `copilotkit-chat` relative to this directory, so the repository
    root made `create.yml` fail. *Amends:* §7, the `agui` role's variables. *Status:* folded.
+
+6. **Classification reads decision 2 literally where §13 left it open: a known, unchanged message off the
+   anchor's path is not recorded** (2026-11-03; conversation record, slice 1/4). §13 *The run route*, step 2 now
+   states: the anchor is the client message the journal added last, not the last in the client's order; a run's
+   last message is not a run boundary while a tool call that run made has no result in that run; the messages
+   cut when the anchor moves back are `deleted` even if the client sent them; a message without a string id is
+   `fabricated`, and a repeated new id counts once; `ignored` lists the client's messages first, then `deleted`
+   in path order; a known message whose compared fields equal the journal's is not recorded, even off the
+   anchor's path (a message resent from another branch). *Reason:* the record keeps what reached the agent and
+   what the client sent that differs; an unchanged known message differs in nothing, the journal already holds
+   it verbatim, and `run_start.anchor` shows which branch the run continued; a reordered history must not raise
+   false alarms. *Cost if wrong:* an analyst cannot see in the journal that a client resent an unchanged message
+   from another branch; recording it later is one more `ignored` kind and its rendering in `write_run.py`,
+   absent from journals written before. *Amends:* §13 *The run route*, step 2; decision 2. *Status:* folded.

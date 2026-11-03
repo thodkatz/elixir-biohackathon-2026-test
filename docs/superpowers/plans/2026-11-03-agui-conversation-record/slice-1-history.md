@@ -1684,13 +1684,14 @@ Reordered histories and known ids resent from another branch flag nothing."
    and compare the client's history with the journal's path to the anchor. The anchor is, of the client's
    messages whose id the journal holds, the one the journal added last, whatever the client's order. An anchor
    inside a run (a message that is neither a user message nor a run's last message, such as an assistant tool
-   call whose result follows, or a run's last message that holds a tool call, as a run cancelled, failed or cut
-   mid tool call leaves it) moves back to the last run boundary before it, and the journal's messages after that
-   boundary are `deleted`, even those the client sent, so the agent is never sent a dangling tool call. The
-   new messages are the user messages after the anchor whose ids the journal does not hold, each id counted
-   once. A client message the journal holds with the same role, content, tool calls and tool call id is not
-   recorded, wherever it stands: the journal already holds it, and `run_start.anchor` shows which branch the
-   run continued. `ignored` lists the client's messages in the client's order, then `deleted` in path order:
+   call whose result follows, or a run's last message while a tool call that run made has no result in it, as
+   a run cancelled, failed or cut mid tool call leaves it) moves back to the last run boundary before it, and
+   the journal's messages after that boundary are `deleted`, even those the client sent, so the agent is never
+   sent a dangling tool call. The new messages are the user messages after the anchor whose ids the journal
+   does not hold, each id counted once. A client message the journal holds with the same role, content, tool
+   calls and tool call id is not recorded, wherever it stands: the journal already holds it, and
+   `run_start.anchor` shows which branch the run continued. `ignored` lists the client's messages in the
+   client's order, then `deleted` in path order:
 ```
 
   and in step 2's first bullet, replace ", and every forged marker" with ", every forged marker and every message
@@ -1702,15 +1703,16 @@ Reordered histories and known ids resent from another branch flag nothing."
 N. **Classification reads decision 2 literally where §13 left it open: a known, unchanged message off the
    anchor's path is not recorded** (YYYY-MM-DD; conversation record, slice 1/4). §13 *The run route*, step 2 now
    states: the anchor is the client message the journal added last, not the last in the client's order; a run's
-   last message that holds a tool call is not a run boundary; the messages cut when the anchor moves back are
-   `deleted` even if the client sent them; a message without a string id is `fabricated`, and a repeated new id
-   counts once; `ignored` lists the client's messages first, then `deleted` in path order; a known message whose
-   compared fields equal the journal's is not recorded, even off the anchor's path (a message resent from another
-   branch). *Reason:* the record keeps what reached the agent and what the client sent that differs; an
-   unchanged known message differs in nothing, the journal already holds it verbatim, and `run_start.anchor`
-   shows which branch the run continued; a reordered history must not raise false alarms. *Cost if wrong:* an
-   analyst cannot see in the journal that a client resent an unchanged message from another branch; recording it
-   later is one more `ignored` kind and its rendering in `write_run.py`, absent from journals written before.
+   last message is not a run boundary while a tool call that run made has no result in that run; the messages
+   cut when the anchor moves back are `deleted` even if the client sent them; a message without a string id is
+   `fabricated`, and a repeated new id counts once; `ignored` lists the client's messages first, then `deleted`
+   in path order; a known message whose compared fields equal the journal's is not recorded, even off the
+   anchor's path (a message resent from another branch). *Reason:* the record keeps what reached the agent
+   and what the client sent that differs; an unchanged known message differs in nothing, the journal already
+   holds it verbatim, and `run_start.anchor` shows which branch the run continued; a reordered history must
+   not raise false alarms. *Cost if wrong:* an analyst cannot see in the journal that a client resent an
+   unchanged message from another branch; recording it later is one more `ignored` kind and its rendering in
+   `write_run.py`, absent from journals written before.
    *Amends:* §13 *The run route*, step 2; decision 2. *Status:* folded.
 ```
 

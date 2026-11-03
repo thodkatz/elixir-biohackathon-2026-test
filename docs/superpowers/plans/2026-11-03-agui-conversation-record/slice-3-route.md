@@ -3007,18 +3007,20 @@ create() { script -qefc "set -a; . ~/.config/spe-dev/llm.env; set +a; cd $M/plat
 play() { local pb=$1; shift; script -qefc "cd $W/platform/ansible && ansible-playbook playbooks/$pb.yml -e @$M/platform/ansible/instances/dev-local.yml -e spe_output_root=$M/platform/ansible/output $* </dev/null" /dev/null; }
 create
 # The dev VM is this machine (ssh_target: localhost in output/dev-local/hosts.yml); its frontend directory is
-# spe_frontend_dir, /home/<spe_ssh_user>/spe-frontend.
-DC="docker compose -p spe-frontend -f $HOME/spe-frontend/docker-compose.yml"
+# spe_frontend_dir, /home/<spe_ssh_user>/spe-frontend: /home/ubuntu/spe-frontend, not this user's $HOME. A function,
+# not a $DC variable: zsh does not word-split an unquoted variable.
+dc() { docker compose -p spe-frontend -f /home/ubuntu/spe-frontend/docker-compose.yml "$@"; }
 J=$(ls $W/platform/dev/tests/fixtures/agui-record/*.jsonl | head -1)
-$DC cp $J chat-ui:/data/sessions/$(basename $J)
+dc cp $J chat-ui:/data/sessions/$(basename $J)
 play archive
 ```
 
   In the run directory `archive.yml` prints: `index.md` names the AG-UI frontend and its table has a row for the
   fixture's session (the volume's older `<uuid>.json` files are copied raw beside the journals and rendered as
   nothing, decision 14); `cmp agui-journals/$(basename $J) $J` is silent; `chats/01-*.md` renders it;
-  `agent-runs.jsonl` is there if the VM's agent ever ran. `$DC ps` shows `chat-ui` and `agent` running again.
-  Then `$DC exec chat-ui rm /data/sessions/$(basename $J)`. No model is called: no run is made. If the fixture's
+  `agent-runs.jsonl` is there if the VM's agent ever ran. `dc ps` shows `chat-ui` and `agent` running again.
+  Then `dc exec chat-ui rm /data/sessions/$(basename $J)` and `dc restart chat-ui` (its
+  in-memory index is built once, so a listed session's GET would otherwise answer 404). No model is called: no run is made. If the fixture's
   name is not a `<uuid>.jsonl`, copy it in under `$(python3 -c 'import uuid; print(uuid.uuid4())').jsonl` and
   compare against that name.
 

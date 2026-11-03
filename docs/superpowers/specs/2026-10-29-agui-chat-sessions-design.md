@@ -294,14 +294,15 @@ and `destroy.yml` deletes nothing, as for Open WebUI today.
 ```
 <run dir>/
   run.yml                    as today
-  index.md                   sessions table: #, title, tags, created, runs, state (active / hidden / deleted <time>)
+  index.md                   sessions table: #, title, tags, created, runs, compactions, state (active / hidden / deleted <time>)
   chats/NN-<slug>.md         user and assistant text; each tool call with fenced arguments and result
   chats/NN-<slug>.json       the session record as stored
   agui-sessions/<id>.json    the raw files, untouched
   agent-runs.jsonl           the agent's run log
 ```
 
-`NN` follows `created_at`. A deleted session's `.md` opens with "Deleted by the participant at <time>."
+`NN` follows `created_at`. A compaction marker is rendered as a `## Compacted` section (clarification 8).
+A deleted session's `.md` opens with "Deleted by the participant at <time>."
 Slugs and fences come from `write_run.py` (imported, same directory). Its `fence()` today picks three or
 four backticks, which content with four escapes; it is changed to a fence one longer than the longest run
 of backticks in the content (at least three), which fixes the Open WebUI path too. A bundle with no
@@ -484,3 +485,10 @@ The same slice rewrites every current text that says the AG-UI chat is not archi
    (`BACKLOG.md`); refocusing `⋯` after a click outside would take focus from whatever the click landed on.
    *Amends:* §3 *Layout*, *Row menu*, *Errors*; clarification 4's "focus back to `⋯`" (for Escape and a choice
    only). *Status:* folded.
+8. **The archive renders the agent's compaction marker as a section, and `index.md` counts them** (2026-11-03;
+   AG-UI compaction, slice 2/3). An assistant text message whose id starts with `spe-compaction-` is rendered
+   as `## Compacted`, the line "From here the model saw this summary instead of the messages above." and the
+   summary in a fence; `index.md`'s columns become `# | Session | Tags | Created | Runs | Compactions | State`.
+   *Reason:* the agent compacts a conversation that no longer fits the model's context and marks the point in
+   the session's messages (`docs/superpowers/specs/2026-11-03-agui-compaction-design.md`, §7, clarification 1).
+   *Amends:* §4 (archive layout, `index.md` columns). *Status:* folded.

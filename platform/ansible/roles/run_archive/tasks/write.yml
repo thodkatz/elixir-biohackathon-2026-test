@@ -84,11 +84,14 @@
         state: directory
         mode: "0700"
 
-    - name: The journals, untouched (hidden and deleted sessions included)
+    - name: The journals, untouched (hidden and deleted sessions included; *.jsonl only, not other files there)
       ansible.builtin.copy:
-        src: "{{ spe_output_dir }}/archive-bundle-agui/agui-journals/"
+        src: "{{ item }}"
         dest: "{{ spe_run_dir }}/agui-journals/"
         mode: "0600"
+      loop: "{{ query('ansible.builtin.fileglob', spe_output_dir ~ '/archive-bundle-agui/agui-journals/*.jsonl') }}"
+      loop_control:
+        label: "{{ item | basename }}"
 
     - name: The agent's run log, when a run reached the agent
       ansible.builtin.copy:

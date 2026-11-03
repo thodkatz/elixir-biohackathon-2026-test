@@ -149,5 +149,6 @@ in the parts it amends.
     user's request, not on the development VM's model. *Cost if wrong:* a participant who wants the literal text
     `/compact …` sent to the model cannot send it; the `/compact` bubble disappears when the run starts, which
     could read as a lost message (the early output shows it). *Amends:* §5 *Endpoints*, §13 (intro, *The run
-    route* steps 2, 4 and 5), decisions 2, 5 and 6, the README (status, decisions 31–39, early output,
+    route* steps 2, 4 and 5, *The journal*'s `run_start` row, *Rebuilding the conversation*), decisions 2–6,
+    the compaction design (decision 11, §8 *Run log*; its clarification 9), the README (status, decisions 31–39, early output,
     glossary, parts), `out-of-scope.md`, `inputs-for-plan.md`; adds §15. *Status:* folded.

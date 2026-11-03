@@ -27,7 +27,9 @@ For the plan that builds §15 (decisions 31–39).
 - Two slices. (1) The agent: decisions 35 and 36, and `fake_agent.py` scripted to answer a command with a fixed
   summary; it touches only `pydantic-ai-agent/` and `platform/dev/`. (2) `chat-ui` and the archive: decisions
   31–34, 37 and 38, Playwright, and decision 39's model-backed check. Slice 2 starts once the conversation
-  record's last slice (the live archive) has merged, since both change `lib/recorder.ts`.
+  record's last slice (the live archive) has merged, since both change `lib/recorder.ts`. Slice 2 builds the
+  early output (the README's *Early output*, `/compact`) first, before decisions 34, 37 and 38, so the user's
+  judgement of decision 33 comes while it is cheap to change.
 - Slice 1 reads how pydantic-ai's AG-UI adapter exposes `forwarded_props` and where `app.py` can answer a run
   without `adapter.run_stream`, and reuses `Compaction._compact`'s summary path rather than a copy of it.
 - Decision 39 runs on de.NBI's `qwen3.8-27b`, not on the development VM's model: an instance deployed from the

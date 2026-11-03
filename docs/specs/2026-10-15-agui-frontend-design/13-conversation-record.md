@@ -110,7 +110,7 @@ do not count as edits; the no-false-alarm check in decision 2 pins this against 
 | `type` | Fields |
 |---|---|
 | `created` | `version: 1`, `id`; first line, written with the first `run_start` |
-| `run_start` | `run_id`, `anchor` (message id or null), `messages` (the new messages), `ignored` (list of `{kind, message}`; for `deleted`, the id), `request` (`tools`, `context`, `state`, `forwardedProps` as sent), `source: "chat"` |
+| `run_start` | `run_id`, `anchor` (message id or null), `messages` (the new messages), `ignored` (list of `{kind, message}`; for `deleted`, the id), `request` (`tools`, `context`, `state`, `forwardedProps` as sent), `source: "chat"`; a command run (§15) also `command` (`{name, focus, message_id}`) |
 | `event` | `run_id`, `event` (the AG-UI event as received) |
 | `run_end` | `run_id`, `status`, `error` (message or null) |
 | `meta` | any of `title`, `tags`, `pinned`, `hidden`, `deleted_at`, as the session API sets them |
@@ -150,7 +150,8 @@ with `@ag-ui/client`'s event application, as the browser does. A run's first `ru
 be anchored at, never changes. The messages the run added are, in order of first
 appearance, chained by `parentId`: the first new message's parent is the anchor, every later message's parent
 is the one before it. A `MESSAGES_SNAPSHOT` the agent itself sends is applied like any event; the one
-`chat-ui` sends to the browser (decision 6) is not journaled, since it is derived. The rebuild lives in one module
+`chat-ui` sends to the browser (decision 6) is not journaled, since it is derived. A compaction marker whose
+`TEXT_MESSAGE_END` is not journaled is dropped (§15 *A marker cut short*, decision 37). The rebuild lives in one module
 used by the run route, the session API and the exporter (§14), so the chat and the archive cannot disagree.
 
 The session list's index (§6, *Session API*) holds, per journal, its `created`, its latest `meta` values, its

@@ -8,16 +8,23 @@ AnthropicModel would turn on its compaction beta for one.
 """
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, field, replace
 from importlib.resources import files
 from typing import Any, Literal
 
+from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
     CompactionPart, ModelMessage, ModelRequest, ModelResponse, RetryPromptPart, SystemPromptPart, TextPart,
     ToolCallPart, ToolReturnPart, UserPromptPart,
 )
+from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
+from pydantic_ai.settings import ModelSettings
+from pydantic_ai.tools import RunContext
+
+from .config import CompactionCfg
 
 MARKER_PREFIX = "spe-compaction-"
 PROVIDER_NAME = "spe-agent"
@@ -184,3 +191,103 @@ def transcript(messages: list[ModelMessage], *, max_chars: int | None = None, dr
             break
         gone.add(i)
     return text()
+
+
+EMPTY_SUMMARY = "(The model returned an empty summary.)"
+
+
+@dataclass
+class CompactionRecord:
+    trigger: Literal["threshold", "overflow"]
+    estimated_tokens: int
+    messages_cut: int
+    summary: str
+    usage: dict[str, int]
+    next_input_tokens: int | None = None
+
+
+@dataclass
+class CompactionRun:
+    """One run's compactions. The capability appends; Service._events emits `pending` as markers and
+    writes `records` to the run log."""
+
+    records: list[CompactionRecord] = field(default_factory=list)
+    pending: list[str] = field(default_factory=list)
+
+    def take_pending(self) -> list[str]:
+        taken, self.pending = self.pending, []
+        return taken
+
+
+def over_trigger(tokens: int, cfg: CompactionCfg) -> bool:
+    return cfg.context_window_tokens is not None and tokens >= cfg.trigger_ratio * cfg.context_window_tokens
+
+
+def _tool_chars(request_context: ModelRequestContext) -> int:
+    tools = request_context.model_request_parameters.function_tools
+    return sum(len(t.name) + len(t.description or "") + len(json.dumps(t.parameters_json_schema)) for t in tools)
+
+
+@dataclass
+class Compaction(AbstractCapability[Any]):
+    """Compacts before a request past the trigger."""
+
+    cfg: CompactionCfg
+    system_prompt: str
+
+    def _estimate(self, messages: list[ModelMessage], request_context: ModelRequestContext) -> int:
+        has_system = any(isinstance(p, SystemPromptPart) for p in (messages[0].parts if messages else []))
+        extra = _tool_chars(request_context) + (0 if has_system else len(self.system_prompt))
+        return estimate_tokens(messages, extra)
+
+    async def wrap_model_request(self, ctx: RunContext[Any], *, request_context: ModelRequestContext,
+                                 handler) -> ModelResponse:
+        run: CompactionRun = ctx.deps.compaction
+        sent = build_sent(list(request_context.messages))
+        if over_trigger(self._estimate(sent, request_context), self.cfg):
+            sent = await self._compact(ctx, request_context, sent, "threshold")
+        request_context.messages = sent.copy()
+        ctx.messages[:] = sent
+        response = await handler(request_context)
+        if run.records and run.records[-1].next_input_tokens is None:
+            run.records[-1].next_input_tokens = response.usage.input_tokens
+        return response
+
+    async def _compact(self, ctx: RunContext[Any], request_context: ModelRequestContext,
+                       history: list[ModelMessage], trigger: Literal["threshold", "overflow"]) -> list[ModelMessage]:
+        run: CompactionRun = ctx.deps.compaction
+        if len(run.records) >= MAX_PER_RUN:
+            raise CompactionError()
+        estimated = self._estimate(history, request_context)
+        if ctx.usage_limits is not None:
+            # The graph checked for the request being wrapped; the summary request comes before it.
+            ahead = copy.copy(ctx.usage)
+            ahead.requests += 1
+            ctx.usage_limits.check_before_request(ahead)
+        max_chars = None
+        if self.cfg.context_window_tokens is not None:
+            budget = int(self.cfg.trigger_ratio * self.cfg.context_window_tokens) * CHARS_PER_TOKEN
+            max_chars = max(budget - len(SUMMARY_PROMPT), 1000)
+        response = await self._summary_request(request_context, transcript(history, max_chars=max_chars))
+        if response is None:  # too long with no window: once more with the older half left out
+            entries = len(_entries(history))
+            response = await self._summary_request(request_context, transcript(history, drop=entries // 2), last=True)
+        ctx.usage.requests += 1
+        ctx.usage.incr(response.usage)
+        summary = "".join(p.content for p in response.parts if isinstance(p, TextPart)).strip() or EMPTY_SUMMARY
+        run.records.append(CompactionRecord(
+            trigger=trigger, estimated_tokens=estimated, messages_cut=len(history), summary=summary,
+            usage={"input_tokens": response.usage.input_tokens, "output_tokens": response.usage.output_tokens}))
+        run.pending.append(summary)
+        return compacted(history, summary)
+
+    async def _summary_request(self, request_context: ModelRequestContext, text: str,
+                               last: bool = False) -> ModelResponse | None:
+        messages: list[ModelMessage] = [ModelRequest(parts=[SystemPromptPart(SUMMARY_PROMPT), UserPromptPart(text)])]
+        try:
+            return await request_context.model.request(
+                messages, ModelSettings(max_tokens=self.cfg.summary_max_tokens), ModelRequestParameters())
+        except ModelHTTPError as error:
+            if not last and self.cfg.context_window_tokens is None and is_overflow(error):
+                return None
+            raise

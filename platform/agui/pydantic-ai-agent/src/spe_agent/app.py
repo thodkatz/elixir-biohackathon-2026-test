@@ -132,7 +132,9 @@ class Service:
         cwd = await self._client.cwd()
         sandbox_prompt = await self._client.system_prompt() if self.config.prompt.include_sandbox_prompt else None
         tools = build_tools(self._client, ops, self.config.tools.max_output_bytes, cwd=cwd)
-        return Ready(build_agent(self._model, compose_prompt(self._base_prompt, sandbox_prompt), tools), len(tools))
+        prompt = compose_prompt(self._base_prompt, sandbox_prompt)
+        agent = build_agent(self._model, prompt, tools, self.config.compaction)
+        return Ready(agent, len(tools))
 
     async def _watch(self) -> None:
         delay = self._retry_delay

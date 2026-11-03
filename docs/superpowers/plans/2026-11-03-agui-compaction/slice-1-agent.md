@@ -970,7 +970,7 @@ async def test_empty_summary_gets_placeholder(tmp_path):
     evs = await compact_run(tmp_path, script, **window(6000))
     assert terminal(evs) == ["RUN_FINISHED"]
     assert _framed(script.streamed[-1][0])
-    assert cmp.frame(cmp.EMPTY_SUMMARY) in str(script.streamed[-1][0])
+    assert any(getattr(p, "content", None) == cmp.frame(cmp.EMPTY_SUMMARY) for p in script.streamed[-1][0].parts)
 ```
 
   `Script.stream`'s condition answers once `calls` tool results are in the history or, for `calls == 1`, once a
@@ -1115,6 +1115,8 @@ class Compaction(AbstractCapability[Any]):
                 return None
             raise
 ```
+
+  Ruling (F1, slice 1 session): the reactive `except` branch is not written here; task 5 implements the reactive trigger through a wrapper model, see task 5.
 
   `RunContext.usage_limits` may be named differently in 2.56 (`grep -n "usage_limits" SITE/pydantic_ai/_run_context.py`);
   use the attribute the graph sets. `ToolDefinition` fields are `name`, `description`, `parameters_json_schema`.

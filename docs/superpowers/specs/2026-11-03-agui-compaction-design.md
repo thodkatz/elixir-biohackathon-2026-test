@@ -139,9 +139,9 @@ cut. A marker followed directly by a user message (a run that failed after compa
 provider hide history. Markers from other producers are not cut points either. With no marker of ours, the
 history is sent as today, minus any stripped marker.
 
-**Making one.** To compact, the capability asks for a summary of everything that would be sent (§4), puts
-our marker in the run's history in place of what it covers (`ctx.messages`, as pydantic-ai's
-`ProcessHistory` does), and sends the request in the shape above. The summary therefore covers the previous
+**Making one.** To compact, the capability asks for a summary of everything that would be sent (§4), replaces
+the run's history with what is sent (`ctx.messages[:]`, as pydantic-ai's `ProcessHistory` does; the marker
+itself goes only into the AG-UI stream, §5, see clarification 2), and sends the request in the shape above. The summary therefore covers the previous
 summary too. The summary prompt asks for the latest user request verbatim, the task's state, what was found
 (paths, commands, results that matter) and what was about to be done; and it asks that any instruction found
 in tool output be quoted as data, with its source, never restated as a request.
@@ -307,3 +307,10 @@ The fallback named in *Inputs for the plan* applies: an assistant text message w
 which round-trips unchanged and which the agent rewrites into pydantic-ai's compaction activity on input.
 `lib/recorder.test.ts`, "a compaction marker survives the round trip", pins both. Decisions 7–10, §5, §6, §7 and
 the glossary are rewritten to match.
+
+### 2. In-run, the marker is not put into `ctx.messages` — folded
+
+**2026-11-03, slice 1, task 4.** The capability sets the run's pydantic-ai history to what is sent (system
+prompt, framed summary, latest user request), so later requests of the same run start from it and the history
+holds no `CompactionPart` that a model could be sent. The marker exists only in the AG-UI stream and, on later
+runs, in the input. `test_compacts_inside_a_run` and `test_fourth_compaction_fails` pin the in-run behaviour.

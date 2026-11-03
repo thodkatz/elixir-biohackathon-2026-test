@@ -132,7 +132,7 @@
                   {{ agui_exits.stdout_lines | map('split') | selectattr(0, 'in', agui_running.stdout_lines)
                      | rejectattr(1, 'eq', '0') | map('join', ' ') | list }}
 
-        - name: Copy, export and fetch (in the final archive, with the services stopped)
+        - name: Copy, export and fetch (live: from the running services; final: after the stop above)
           block:
             # slice 3's: unchanged (live: from the running container; final: from the stopped one).
             - name: Copy the journals (hidden and deleted sessions included)

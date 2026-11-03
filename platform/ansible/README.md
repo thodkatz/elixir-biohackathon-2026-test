@@ -254,7 +254,7 @@ replaces one frontend with the other (its volumes, `open-webui-data` included, s
   `spe_agent_context_window_tokens`, `spe_agent_compaction_trigger_ratio` (0.8) and
   `spe_agent_compaction_summary_max_tokens` (4096), rendered as `agent.yaml`'s
   `compaction` block, which `verify.yml` shows. The window defaults to the de.NBI
-  model's (`spe_webui_model_context_tokens`, the vLLM server's `max_model_len`) while
+  model's (`spe_webui_model_context_tokens`, the gateway's `max_input_tokens`) while
   `spe_agent_model` is `spe_webui_model_id`, and to null otherwise: set it for another
   model, or only a provider's "too long" error triggers a compaction.
 - **sandbox** — the open-terminal image from role `sandbox`; publishes nothing.

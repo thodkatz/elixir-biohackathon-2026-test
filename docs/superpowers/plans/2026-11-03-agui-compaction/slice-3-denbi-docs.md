@@ -61,12 +61,14 @@ that is not here, add the task first, in its own commit.
   environment as for a deployment (`DENBI_LLM_API_KEY`):
 
 ```bash
-curl -s -H "Authorization: Bearer $DENBI_LLM_API_KEY" https://denbi-llm-api-internal.bihealth.org/v1/models \
-  | python3 -c 'import json,sys; print([(m["id"], m.get("max_model_len")) for m in json.load(sys.stdin)["data"]])'
+curl -s -H "Authorization: Bearer $DENBI_LLM_API_KEY" https://denbi-llm-api-internal.bihealth.org/v1/model/info \
+  | python3 -c 'import json,sys; print([(m["model_name"], m["model_info"].get("max_input_tokens")) for m in json.load(sys.stdin)["data"]])'
 ```
 
-  Expected: `qwen3.8-27b` with an integer `max_model_len`. Listing models is not a completion and costs nothing.
-  If the endpoint is not reachable from here, or the key is not set, or the entry has no `max_model_len`, this
+  Expected: `qwen3.8-27b` with an integer `max_input_tokens`. The gateway is LiteLLM: its `/v1/models` has no
+  `max_model_len`, and vLLM is not reachable directly (read 2026-11-03: 262144). Model info is not a completion
+  and costs nothing.
+  If the endpoint is not reachable from here, or the key is not set, or the entry has no `max_input_tokens`, this
   is a gate the loop cannot pass by guessing: open the draft PR, ask in one comment for the value (and how it
   was read), and end with `next-session.sh --end --blocked <PR>` (`development-workflow.md`, *Gates*). Do not
   put a model card's figure in: vLLM's `max_model_len` is what the server enforces, and it may be set below the
@@ -75,9 +77,9 @@ curl -s -H "Authorization: Bearer $DENBI_LLM_API_KEY" https://denbi-llm-api-inte
 - [ ] **Step 2: set it.** In `all.yml`, after `spe_webui_model_id: qwen3.8-27b`:
 
 ```yaml
-# Its context window in tokens: the vLLM server's max_model_len for it (GET /v1/models,
-# read on <YYYY-MM-DD>). Change the two together.
-spe_webui_model_context_tokens: <N>
+# Its context window in tokens: max_input_tokens from the de.NBI gateway's (LiteLLM)
+# GET /v1/model/info, read on 2026-11-03. Change the two together.
+spe_webui_model_context_tokens: 262144
 ```
 
   and replace slice 1's `spe_agent_context_window_tokens: null` (keep its comment above) with:
@@ -109,7 +111,7 @@ ansible-playbook --syntax-check playbooks/create.yml playbooks/verify.yml </dev/
 ```bash
 git add platform/ansible/inventory/group_vars/all.yml
 git commit -s -m "Set the de.NBI model's context window for the agent's compaction" \
-  -m "vLLM's max_model_len for qwen3.8-27b, read from /v1/models; the agent uses it only while its model is that one."
+  -m "qwen3.8-27b's max_input_tokens from the de.NBI gateway's /v1/model/info (LiteLLM exposes no max_model_len); the agent uses it only while its model is that one."
 ```
 
 ---
@@ -159,13 +161,13 @@ reactive trigger acts, too low and it compacts early.
   `spe_agent_context_window_tokens`, `spe_agent_compaction_trigger_ratio` (0.8) and
   `spe_agent_compaction_summary_max_tokens` (4096), rendered as `agent.yaml`'s `compaction` block, which
   `verify.yml` shows. The window defaults to the de.NBI model's (`spe_webui_model_context_tokens`, the vLLM
-  server's `max_model_len`) while `spe_agent_model` is `spe_webui_model_id`, and to null otherwise: set it for
+  gateway's `max_input_tokens`) while `spe_agent_model` is `spe_webui_model_id`, and to null otherwise: set it for
   another model, or only a provider's "too long" error triggers a compaction." Keep the bullet's line width.
 
 - [ ] **Step 3: getting-started.** In step 3's table, after the `spe_agent_model_provider, …` row, add:
 
 ```markdown
-   | `spe_agent_context_window_tokens` | only for a model other than de.NBI's `qwen3.8-27b` (whose window is already set): the model's context window in tokens, so the agent compacts a long conversation before the provider refuses it, e.g. the vLLM server's `max_model_len` (`GET <base_url>/models`) or the vendor's documented window. Unset, the agent compacts only after a "too long" error. `spe_agent_compaction_enabled: false` turns compaction off |
+   | `spe_agent_context_window_tokens` | only for a model other than de.NBI's `qwen3.8-27b` (whose window is already set): the model's context window in tokens, so the agent compacts a long conversation before the provider refuses it, e.g. a vLLM server's `max_model_len` (`GET <base_url>/models`), a LiteLLM gateway's `max_input_tokens` (`GET <base_url>/model/info`) or the vendor's documented window. Unset, the agent compacts only after a "too long" error. `spe_agent_compaction_enabled: false` turns compaction off |
 ```
 
 - [ ] **Step 4: check and commit.** `grep -rn "context_window_tokens\|compaction" AGENT/README.md ANSIBLE/README.md
@@ -213,7 +215,7 @@ Paid on de.NBI's quota: a scripted session of ordinary commands, no participant 
 
 **Moved from Haiku to qwen at the user's request (2026-11-03, slice 3's session):** "to not burn a lot of
 token on haiku let's test that on qwen". It runs on task 3's de.NBI instance, after task 3, against qwen's own
-window `W` = task 1's `spe_webui_model_context_tokens` (vLLM's `max_model_len`), on de.NBI's quota: two
+window `W` = task 1's `spe_webui_model_context_tokens` (262144, the gateway's `max_input_tokens`), on de.NBI's quota: two
 requests vLLM rejects as too long (refused before inference), one small summary request, two ordinary answers.
 Haiku makes no call in this slice. No cloud instance is created or destroyed.
 

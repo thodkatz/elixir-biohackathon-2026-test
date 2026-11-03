@@ -134,7 +134,7 @@ Inputs the spec implies that no acceptance check exercises; each line's test is 
 1. **A focus holding backticks or a fence** (```` ``` ```` or a run of four): the agent's focus section and the
    archive's line stay fenced around all of it, so the focus cannot end the fence and pose as the transcript or
    the archive's structure. Slice 1, task 1 (`focus with a fence inside stays fenced`); the archive half is
-   decision 38's check (slice 2, task 4).
+   decision 38's check (slice 2, task 5).
 2. **Several refused `/compact` bubbles kept by the browser, then a third `/compact` or a plain message**: the
    kept ones are known commands, neither new nor `fabricated`; only the last typed message counts. Slice 2,
    task 2 (`kept command bubbles are known, not new`).

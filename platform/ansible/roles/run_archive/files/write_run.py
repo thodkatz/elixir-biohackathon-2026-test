@@ -359,7 +359,7 @@ def write_agui(b, run_dir):
         index.append("- Session journals as stored (hidden and deleted included): [agui-journals/](agui-journals/)")
     if os.path.isfile(log):
         runs, titles = count_run_log(log)
-        suffix = f" + {titles} title calls" if titles else ""
+        suffix = f" + {titles} title call{'s' if titles != 1 else ''}" if titles else ""
         index.append(f"- Agent run log: [agent-runs.jsonl](agent-runs.jsonl), {runs} runs{suffix}")
     else:
         index.append("- Agent run log: none (no run reached the agent)")

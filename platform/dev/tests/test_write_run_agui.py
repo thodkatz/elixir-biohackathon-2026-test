@@ -146,7 +146,8 @@ def test_title_calls_are_reported_separately_from_runs(tmp_path):
     )
     run(src, out)
     index = (out / "index.md").read_text()
-    assert "- Agent run log: [agent-runs.jsonl](agent-runs.jsonl), 3 runs + 1 title calls" in index
+    assert "- Agent run log: [agent-runs.jsonl](agent-runs.jsonl), 3 runs + 1 title call" in index
+    assert "1 title calls" not in index  # singular: one title call, not "1 title calls"
 
 
 def test_count_run_log_tolerates_unparsable_lines_and_no_titles(tmp_path):

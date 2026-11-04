@@ -197,10 +197,16 @@ body {
 
 /* ---------- Sidebar (Open WebUI's) ---------- */
 
-.spe-sidebar { width: var(--sidebar-width); flex: none; box-sizing: border-box; display: flex; flex-direction: column;
-  padding: 8px 8px 10px; background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-edge);
-  font-size: 13px; line-height: 20px; color: var(--text); }
+.spe-sidebar { position: relative; width: var(--sidebar-width); flex: none; box-sizing: border-box; display: flex;
+  flex-direction: column; padding: 8px 8px 10px; background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-edge); font-size: 13px; line-height: 20px; color: var(--text); }
 .spe-sidebar-collapsed { width: 52px; align-items: center; gap: 4px; padding: 8px 0; }
+/* The drag handle, on the sidebar's right edge: a thin strip, wide enough to grab, that straddles
+   the border. Hidden while collapsed, since the collapsed nav never renders one. */
+.spe-sidebar-resizer { position: absolute; top: 0; bottom: 0; right: -4px; width: 8px; cursor: col-resize;
+  touch-action: none; background: transparent; transition: background-color var(--hover-transition); }
+.spe-sidebar-resizer:hover, .spe-sidebar-resizer:focus-visible { background: var(--line-strong); }
+.spe-sidebar-resizer:focus-visible { outline: none; }
 .spe-sidebar-top { display: flex; align-items: center; gap: 4px; height: 32px; padding-left: 8px; }
 .spe-brand { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 15px; font-weight: 600; color: var(--text); }

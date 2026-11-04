@@ -37,6 +37,17 @@ async def test_no_auth_is_401(tmp_path):
     assert AGENT_KEY not in r.text
 
 
+async def test_no_auth_with_a_bad_body_is_still_401(tmp_path):
+    """Auth is checked before the body is parsed: an unauthenticated request with a bad body still gets 401,
+    not 422 with the schema's errors."""
+    app, _ = build(tmp_path, model=answering('{"title": "Password Reset"}'))
+    async with running(app) as c:
+        await until_status(c, 200)
+        r = await c.post("/title", json={"messages": []})
+    assert r.status_code == 401
+    assert AGENT_KEY not in r.text
+
+
 async def test_disabled_is_404(tmp_path):
     app, _ = build(tmp_path, model=answering('{"title": "Password Reset"}'), title={"enabled": False})
     async with running(app) as c:

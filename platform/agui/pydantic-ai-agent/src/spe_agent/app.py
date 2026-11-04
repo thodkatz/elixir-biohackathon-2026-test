@@ -340,11 +340,17 @@ def create_app(config: Config, secrets: Secrets, model_override: Model | None = 
         return adapter.streaming_response(service._events(adapter))
 
     @app.post("/title")
-    async def title_endpoint(request: Request, body: TitleRequest):
+    async def title_endpoint(request: Request):
         if not service.authorized(request):
             return JSONResponse({"detail": "unauthorized"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
         if not config.title.enabled:
             return JSONResponse({"detail": "title generation is disabled"}, status_code=404)
+        try:
+            body = TitleRequest.model_validate(await request.json())
+        except ValueError as e:  # bad JSON (json.JSONDecodeError) or a schema mismatch (ValidationError)
+            errors = e.errors(include_url=False, include_input=False, include_context=False) \
+                if isinstance(e, ValidationError) else str(e)
+            return JSONResponse({"detail": errors}, status_code=422)
         title, record = await generate_title(service._model, config.title, body)
         try:
             service.runlog.write(record)

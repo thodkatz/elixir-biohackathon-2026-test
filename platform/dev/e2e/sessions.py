@@ -190,7 +190,7 @@ def check_list(r: Run) -> dict[str, str]:
 
     page.reload()
     expect(page.get_by_text("Turn 1: the command ran.")).to_be_visible(timeout=10_000)
-    expect(page.locator(".spe-tool .spe-tool-name", has_text="run_command")).to_have_count(1)
+    expect(page.locator(".spe-tool .spe-tool-title code", has_text="run_command")).to_have_count(1)
     expect(r.row("List the home directory")).to_have_class("spe-row spe-row-active")
     r.ok("reload reopens the session with its tool card")
 
@@ -727,7 +727,7 @@ def check_deleted_open(r: Run) -> None:
     "this session was deleted", and no "could not be saved" follows once the reconciliation is over."""
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.locator(".spe-header-title")).to_have_text("New chat")
+    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
     title = f"deleted while open {uuid.uuid4().hex[:8]}"
     r.send(title, 1)
     expect(r.row(title)).to_have_count(1, timeout=5_000)
@@ -784,7 +784,7 @@ def check_devtools_edit(r: Run) -> None:
     original reply again once the run starts, and the journal records the edit as ignored content."""
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.locator(".spe-header-title")).to_have_text("New chat")
+    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
     title = f"devtools edit {uuid.uuid4().hex[:8]}"
     r.send(title, 1)
     expect(r.row(title)).to_have_count(1, timeout=5_000)
@@ -842,7 +842,7 @@ def check_restore_tip(r: Run) -> None:
     """
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.locator(".spe-header-title")).to_have_text("New chat")
+    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
     title = f"branches {uuid.uuid4().hex[:8]}"
     r.send(title, 1)
     expect(r.row(title)).to_have_count(1, timeout=5_000)
@@ -899,7 +899,7 @@ def check_no_false_alarm(r: Run) -> None:
     journal holds ignored content."""
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.locator(".spe-header-title")).to_have_text("New chat")
+    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
     r.send("Count the files", 1)
     box = page.get_by_test_id("copilot-chat-textarea")
     box.fill("Now fail on purpose")
@@ -924,7 +924,7 @@ def check_compaction(r: Run) -> None:
     live and after a reload; the summary is collapsed, and expanded shows its markup as text."""
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.locator(".spe-header-title")).to_have_text("New chat")
+    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
     box = page.get_by_test_id("copilot-chat-textarea")
     box.fill(COMPACTION_XSS)
     box.press("Enter")
@@ -975,7 +975,7 @@ def check_save_failed(r: Run) -> None:
     page.on("request", lambda req: lists.append(req.url)
             if req.method == "GET" and req.url.split("?")[0].endswith("/api/sessions") else None)
     page.get_by_role("button", name="New chat").click()
-    expect(page.locator(".spe-header-title")).to_have_text("New chat")
+    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
     title = f"run that cannot be saved {uuid.uuid4().hex[:8]}"
     mode = r.sessions.stat().st_mode & 0o7777
     r.sessions.chmod(0o500)

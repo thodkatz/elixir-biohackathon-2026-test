@@ -11,12 +11,13 @@
   collapsible card per call, after Open WebUI's `ToolCallDisplay`. Its title line is a status icon (a
   spinner while the call runs, a check once done, a cross when it failed) and "Executing `<name>`…"
   (shimmering) while it runs, the bare `<name>` once done, or "`<name>` failed". Unfolded, it shows
-  the arguments as key/value rows (`run_command`'s command as a `$ <command>` line instead) and the first
-  lines of the result in a code block (`run_command`'s output parts joined, not its JSON envelope). A call
+  under Open WebUI's "Input" and "Output" labels, the arguments as key/value rows (`run_command`'s command
+  as a `$ <command>` line instead) and the first lines of the result in a code block (`run_command`'s output parts joined, not its JSON envelope). A call
   failed when its result is a JSON object with a string `error` or a nonzero `exit_code`; a failed card and
   its result are tinted with the danger colour. The calls of one assistant message (one model response)
-  sit under one group header, "Executing N tools…" or "N tools" with the number that
-  failed, set through the assistant message's `toolCallsView` slot. All of it is React text, never HTML.
+  sit under one group header worded as Open WebUI's `ConsecutiveDetailsGroup`: "Exploring" (shimmering)
+  or "Explored", then each tool's name once with its count when called more than once (`list_files,
+  2 run_command`), then the number that failed, set through the assistant message's `toolCallsView` slot. All of it is React text, never HTML.
 - No secrets in the browser. The conversation is kept on the server, in `chat-ui`, which owns it (§13);
   the browser changes only a session's metadata.
 - Exact package versions are pinned in `package-lock.json`; the image runs

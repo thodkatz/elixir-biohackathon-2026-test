@@ -60,6 +60,17 @@ test("the first message and answer are the first completed run's, from the journ
   ]);
 });
 
+test("a retry after a failed first run: the messages are the retry's, not the failed run's", async () => {
+  const journals = await tmpJournals();
+  const failed = await seedRun(journals, "first try", { status: "failed" });
+  await seedRun(journals, "second try", { id: failed.id, anchor: failed.replyId });
+  const { titler, calls } = fakeTitler();
+  await titleSession(journals, failed.id, titler);
+  assert.deepEqual(calls[0].messages, [
+    { role: "user", content: "second try" }, { role: "assistant", content: "echo: second try" },
+  ]);
+});
+
 test("renamed while the agent was writing: the rename is kept, no model title appended", async () => {
   const journals = await tmpJournals();
   const { id } = await seedRun(journals, "hello");

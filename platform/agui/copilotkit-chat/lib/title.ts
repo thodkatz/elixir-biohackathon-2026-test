@@ -23,17 +23,18 @@ export class TitleUnavailable extends Error {
   }
 }
 
-/** The first user message and the first answer: the first completed run's branch's first user message, and
- *  the text of the assistant messages that run added (compaction markers and tool calls left out; none when
- *  it has no text). null when no run completed or the user message has no text. */
+/** The first user message and the first answer: the first completed run's own user message, and the text of
+ *  the assistant messages that run added (compaction markers and tool calls left out; none when it has no
+ *  text). null when no run completed or the user message has no text. */
 export function firstExchange(conv: Conversation): TitleMessage[] | null {
   const run = conv.runs.find((r) => r.status === "completed");
   if (!run) return null;
-  const user = pathTo(conv, run.added.at(-1) ?? run.anchor).find((m) => m.role === "user");
+  const added = run.added.map((id) => conv.nodes.get(id)!.message);
+  // The run's own user message; a regenerate (no new user message) answers the last one on its path.
+  const user = added.find((m) => m.role === "user") ?? pathTo(conv, run.anchor).findLast((m) => m.role === "user");
   const question = user ? messageText(user).trim() : "";
   if (!question) return null;
-  const answer = run.added
-    .map((id) => conv.nodes.get(id)!.message)
+  const answer = added
     .filter((m: Message) => m.role === "assistant" && !isCompactionMarker(m))
     .map((m) => messageText(m).trim())
     .filter(Boolean)

@@ -1123,3 +1123,28 @@ test("the test agent answers a command with a manual marker carrying the focus",
     await server.close();
   }
 });
+
+test("decision 32: the run after /compact, with the command bubble resent, ignores nothing and sends no command", async () => {
+  const { journals, server, recorder, agent } = await setup();
+  try {
+    const id = randomUUID();
+    await drive(recorder, input(id, "hello"), agent());
+    const before = branchOfTip((await journals.load(id))!);
+    const command = input(id, "/compact keep x", before);
+    await drive(recorder, command, agent());
+    const marker = branchOfTip((await journals.load(id))!).at(-1)!;
+    // As the browser holds it: the command bubble, then the marker; the bubble's text resent with other spacing.
+    const bubble = { ...command.messages.at(-1)!, content: "  /compact  keep x " } as Message;
+    await drive(recorder, input(id, "next", [...before, bubble, marker]), agent());
+    const start = ofType(await lines(journals, id), "run_start").at(-1)!;
+    assert.equal(start.command, undefined);
+    assert.equal(start.anchor, marker.id);
+    assert.deepEqual(start.messages.map((m) => m.content), ["next"]);
+    assert.deepEqual(start.ignored, []);
+    const sent = server.requests.at(-1)!.body;
+    assert.ok(!sent.messages.some((m: Message) => m.id === bubble.id), "the command's message is never sent");
+    assert.deepEqual(sent.forwardedProps, {});
+  } finally {
+    await server.close();
+  }
+});

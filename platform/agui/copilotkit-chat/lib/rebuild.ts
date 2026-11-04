@@ -2,10 +2,12 @@
 // journal order: the path to its anchor, then its new messages, then its events applied with @ag-ui/client's
 // defaultApplyEvents, the code the browser runs. The messages a run added are chained by parentId: the first
 // under the anchor, each later one under the one before. One module for the run route, the session API and
-// the exporter, so the chat and the archive cannot disagree.
+// the exporter, so the chat and the archive cannot disagree. A command run (spec §15) sends no message: its
+// message id is recorded in `commands`, never as a node, so it is never on a path.
 import { defaultApplyEvents } from "@ag-ui/client";
 import type { AbstractAgent, BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
 import { from } from "rxjs";
+import type { Command, CommandField } from "./command.ts";
 import { parseJournal } from "./journal.ts";
 import type { Ignored, Line, MetaFields, RequestFields, RunStartLine, RunStatus } from "./journal.ts";
 
@@ -16,12 +18,14 @@ export type RunView = {
   started_at: string; ended_at: string | null; last_at: string; // last_at: run_end's, else its last event's
   added: string[]; // ids this run added, in order of first appearance (new messages first)
   events: number;
+  command: CommandField | null; // run_start's command (spec §15), or null for a plain run
 };
 export type Conversation = {
   id: string; created_at: string | null;
   meta: Required<Pick<MetaFields, "tags" | "pinned" | "hidden">> & { title: string | null; deleted_at: string | null };
   first_user_text: string | null;
   nodes: Map<string, Node>;
+  commands: Map<string, { run_id: string } & Command>; // by the command message's id; the first run with an id wins
   children: Map<string | null, string[]>; // null: the root's children
   runs: RunView[]; // journal order of run_start
   tip: string | null; // decision 9
@@ -101,7 +105,7 @@ export async function rebuild(id: string, lines: Line[]): Promise<Conversation> 
   const conv: Conversation = {
     id, created_at: null,
     meta: { title: null, tags: [], pinned: false, hidden: false, deleted_at: null },
-    first_user_text: null, nodes: new Map(), children: new Map(), runs: [], tip: null, tip_run: null,
+    first_user_text: null, nodes: new Map(), commands: new Map(), children: new Map(), runs: [], tip: null, tip_run: null,
     last_line_at: null, skipped: 0,
   };
   const pending = new Map<string, Pending>();
@@ -199,8 +203,12 @@ export async function rebuild(id: string, lines: Line[]): Promise<Conversation> 
       ignored: run.start.ignored, request: run.start.request,
       status: run.end?.status ?? "incomplete", error: run.end?.error ?? null,
       started_at: run.start.at, ended_at: run.end?.at ?? null, last_at: run.last_at,
-      added, events: run.events.length,
+      added, events: run.events.length, command: run.start.command ?? null,
     });
+    const command = run.start.command;
+    if (command && !conv.commands.has(command.message_id)) {
+      conv.commands.set(command.message_id, { run_id: run.start.run_id, name: command.name, focus: command.focus });
+    }
     // Decision 9: the tip is the last message of the run that ended (or last wrote) last, among the runs
     // that added a message; the journal's line order decides, not the clock.
     if (added.length > 0 && run.last_index > tipIndex) {

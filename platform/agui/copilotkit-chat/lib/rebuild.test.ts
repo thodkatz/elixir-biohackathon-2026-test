@@ -312,3 +312,22 @@ test("events after a run's run_end are skipped and logged: the ended run stays a
     [`journal ${ID}: event for run r1 skipped (after its run_end)`,
      `journal ${ID}: event for run r1 skipped (after its run_end)`]);
 });
+
+test("decision 32: a command run adds only its marker; its message id is a known command, never a node", async () => {
+  const conv = await rebuild(ID, [
+    created(), start("r1", null, [user("u1", "hello")]), ...reply("r1", "a1", "hi"), end("r1"),
+    { ...start("k1", "a1", []), command: { name: "compact", focus: "keep x", message_id: "cmd1" } } as Line,
+    ...reply("k1", "spe-compaction-manual-k1", "SUMMARY"), end("k1"),
+    // A later run with the same command id (a forged journal): the first run with an id wins, as for nodes.
+    { ...start("k2", "spe-compaction-manual-k1", []), command: { name: "compact", focus: null, message_id: "cmd1" } } as Line,
+    end("k2", "refused", "Nothing to compact yet."),
+  ]);
+  assert.deepEqual(shape(branchOfTip(conv)), [["user", "u1", "hello"], ["assistant", "a1", "hi"],
+    ["assistant", "spe-compaction-manual-k1", "SUMMARY"]]);
+  assert.equal(conv.nodes.has("cmd1"), false);
+  assert.deepEqual(conv.commands.get("cmd1"), { run_id: "k1", name: "compact", focus: "keep x" });
+  assert.deepEqual(conv.runs[1].command, { name: "compact", focus: "keep x", message_id: "cmd1" });
+  assert.deepEqual(conv.runs[1].added, ["spe-compaction-manual-k1"]);
+  assert.equal(conv.runs[0].command, null);
+  assert.equal(conv.first_user_text, "hello");
+});

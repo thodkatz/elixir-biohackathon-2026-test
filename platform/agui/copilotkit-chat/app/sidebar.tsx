@@ -22,6 +22,7 @@ import { Popover } from "./popover";
 import { RenameInput, RowMenu } from "./row-menu";
 import { HiddenToggle, SearchBox } from "./session-filters";
 import { TagEditor } from "./tag-editor";
+import { ThemeControl } from "./theme-control";
 
 type SidebarProps = {
   sessions: SessionMeta[];
@@ -350,7 +351,10 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
           <p className="spe-empty">{sessions.length === 0 ? "No sessions yet." : "No session matches."}</p>
         )}
       </div>
-      <HiddenToggle showHidden={filter.showHidden} onChange={(showHidden) => { end(); setFilter({ ...filter, showHidden }); }} />
+      <div className="spe-sidebar-foot">
+        <ThemeControl />
+        <HiddenToggle showHidden={filter.showHidden} onChange={(showHidden) => { end(); setFilter({ ...filter, showHidden }); }} />
+      </div>
 
       {busySession && busy?.mode === "menu" && (
         <Popover anchor={triggers.current.get(busy.id)} box={popover} key={`menu-${busy.id}`}>

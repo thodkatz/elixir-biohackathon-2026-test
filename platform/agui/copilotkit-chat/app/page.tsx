@@ -16,6 +16,7 @@ import { askTitle, fetchSession, fetchSessions, removeSession, updateSession } f
 import { TitleTrigger } from "../lib/reconcile.ts";
 import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
+import { effectiveTheme, parseTheme } from "../lib/theme.ts";
 import { ChatHeader } from "./chat-header";
 import { AssistantOrCompaction } from "./compaction-divider";
 import { ChevronRight } from "./icons";
@@ -307,14 +308,26 @@ function Chat() {
   );
 }
 
-// CopilotKit's own dark styles key on a `dark` class; this page follows the system setting.
+// CopilotKit's own dark styles key on a `dark` class; this follows the *effective* theme (the
+// sidebar's forced choice, via <html>'s data-theme attribute, or else the system setting),
+// updating when either changes. The attribute is read fresh each time rather than mirrored into
+// state, since app/theme-control.tsx (and the before-paint script in app/layout.tsx) are the
+// only writers of it.
 function useSystemColorScheme() {
   useEffect(() => {
     const query = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => document.documentElement.classList.toggle("dark", query.matches);
+    const apply = () => {
+      const choice = parseTheme(document.documentElement.getAttribute("data-theme"));
+      document.documentElement.classList.toggle("dark", effectiveTheme(choice, query.matches) === "dark");
+    };
     apply();
     query.addEventListener("change", apply);
-    return () => query.removeEventListener("change", apply);
+    const attrs = new MutationObserver(apply);
+    attrs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => {
+      query.removeEventListener("change", apply);
+      attrs.disconnect();
+    };
   }, []);
 }
 

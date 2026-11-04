@@ -370,7 +370,7 @@ test("decision 32: after a completed command the path ends in its marker, withou
   }
 });
 
-test("Review Focus 2: kept command bubbles are known, not new", async () => {
+test("spec §15: kept command bubbles are known, not new", async () => {
   const conv = await journal(r1(), r2(), r3(), refusedCompact("k1", "a3", "cmd1"), refusedCompact("k2", "a3", "cmd2"));
   const kept = [...branch(conv), user("cmd1", "/compact"), user("cmd2", "/compact")];
   const third = classify(conv, [...kept, user("cmd3", "/compact")]);
@@ -379,7 +379,7 @@ test("Review Focus 2: kept command bubbles are known, not new", async () => {
   assert.deepEqual([plain.anchor, ids(plain.newMessages), plain.ignored], ["a3", ["u4"], []]);
 });
 
-test("Review Focus 4: compact after a stopped run moves the anchor back; no dangling call on the path", async () => {
+test("spec §15: compact after a stopped run moves the anchor back; no dangling call on the path", async () => {
   const stopped: Line[] = [
     { type: "run_start", at: AT, run_id: "r4", anchor: "a3", messages: [user("u4", "list more")], ignored: [], request, source: "chat" },
     ev("r4", { type: EventType.RUN_STARTED, threadId: ID, runId: "r4" }),

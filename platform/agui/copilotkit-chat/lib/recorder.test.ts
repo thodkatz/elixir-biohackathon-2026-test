@@ -1162,7 +1162,7 @@ test("decision 34: a session ending in a marker refuses /compact; one more messa
   }
 });
 
-test("Review Focus 3: the focus length is counted in code points", async () => {
+test("spec §15: the focus length is counted in code points", async () => {
   const cases: [string, boolean][] = [["x".repeat(1000), true], ["x".repeat(1001), false], ["🧪".repeat(1000), true]];
   for (const [focus, admitted] of cases) {
     const { start, out, sent } = await commandCase(`/compact ${focus}`);

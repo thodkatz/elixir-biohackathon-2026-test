@@ -1,20 +1,21 @@
-// Test helper: a tiny AG-UI agent over SSE (node:http), scripted by the last user message.
-//   contains "hang": RUN_STARTED and one text chunk, then nothing until the client goes away
+// Test helper: a tiny AG-UI agent over SSE (node:http), scripted by the last user message. Checked in this
+// order:
+//   a body that is not JSON: HTTP 400, not kept in `requests`
+//   `headerDelayMs`: wait this long after the request is parsed, before writing any response (status line
+//   included) — for a test that must abort before the agent's response headers arrive
 //   contains "boom": HTTP 500 before any event
+//   `forwardedProps.spe_command` (checked next, before the text-based branches below): RUN_STARTED, a manual
+//   marker (id `spe-compaction-manual-<runId>`, its text naming the focus), RUN_FINISHED; a focus containing
+//   "hang" stops after RUN_STARTED until the client goes away, one containing "error" sends RUN_ERROR
+//   contains "hang": RUN_STARTED and one text chunk, then nothing until the client goes away
 //   contains "error": RUN_STARTED then RUN_ERROR
 //   contains "eof": RUN_STARTED and a text message, then the stream ends without a terminal event
 //   contains "crash": RUN_STARTED and one text chunk, then the connection is destroyed
 //   contains "compact": also sends a compaction marker (an assistant message, id `spe-compaction-<runId>`)
 //   contains "activity": also sends an ACTIVITY_SNAPSHOT (the form the spec first chose; pinned as dropped)
 //   contains "echo-input": the reply's text is the JSON of [{role, id}] for every message the agent received
-//   `forwardedProps.spe_command` (checked first): RUN_STARTED, a manual marker (id `spe-compaction-manual-<runId>`,
-//   its text naming the focus), RUN_FINISHED; a focus containing "hang" stops after RUN_STARTED until the
-//   client goes away, one containing "error" sends RUN_ERROR
-//   a body that is not JSON: HTTP 400, not kept in `requests`
 //   anything else: a text message echoing it, then RUN_FINISHED (after `delayMs`, default 0)
 // Each request is kept in `requests`; `closed` turns true when its connection closes.
-// `headerDelayMs`: wait this long after the request is parsed, before writing any response (status
-// line included) — for a test that must abort before the agent's response headers arrive.
 import { createServer } from "node:http";
 import type { IncomingMessage, Server } from "node:http";
 import type { AddressInfo } from "node:net";

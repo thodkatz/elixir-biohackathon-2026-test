@@ -20,7 +20,9 @@ and the output {"problems": [...], "paths": [...], "projects": [{name, file}]}
 names exactly what may be removed: the marker and the manifest must name this
 instance and mode, every path must be the one recorded, safe, not a symlink,
 not a mount or holding one, clear of Docker's data root and the shared paths,
-and every compose project must be recorded and built from its own file.
+and every compose project must be recorded and built from its own file. A
+project's file is the path given (a link is kept, so Compose reads the .env
+beside it); the checks use its resolved target.
 """
 from __future__ import annotations
 

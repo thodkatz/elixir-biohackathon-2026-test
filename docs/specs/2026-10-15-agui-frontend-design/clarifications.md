@@ -178,7 +178,21 @@ in the parts it amends.
     checks ran (the last on the development VM). *Amends:* README (status, *Decisions taken*), §14 *Export*.
     *Status:* folded.
 
-15. **Sessions get a model-written title, the sidebar is resizable, and the chat gets a System/Light/Dark
+15. **A manual marker's id is `spe-compaction-manual-<uuid4>`, and every compaction record has `focus`**
+    (2026-11-03; AG-UI `/compact`, slice 1/2). The agent is stateless, so the next run can only tell a manual
+    marker (whose frame says the participant asked) from an automatic one by what the chat sends back; every
+    reader still matches the prefix `spe-compaction-` (`isCompactionMarker`, `is_compaction`,
+    `_is_marker_message`), so nothing else changes. `markers_to_activities` carries the id onto the
+    `CompactionPart` (`id=`), and `build_sent` reads it back to pick the frame. Every compaction record gains
+    `focus` (null for the `threshold` and `overflow` triggers), so decision 11's records keep one shape.
+    *Reason:* rulings 1 and 2 of the `/compact` plan. *Cost if wrong:* a marker written before this slice is
+    automatic, which it was; a reader that parses the id after the prefix as a UUID breaks (none does); one more
+    null field per record. *Amends:* §15 *The agent*, item 4; the compaction design's decisions 7 and 11.
+    *Status:* folded. Added in review (#28): the focus is a user part of its own after the transcript's, not text
+    appended to it, since a tool output in the transcript could carry the heading and pose as a focus; §15 *The
+    agent*, item 3, says so.
+
+16. **Sessions get a model-written title, the sidebar is resizable, and the chat gets a System/Light/Dark
     theme toggle** (2026-11-04; the fork's PR #29). §6 *Sessions* now says the fallback title (first user
     message, 60 characters) is replaced by a title the agent writes once the session's first run completes,
     unless the user already renamed it, journaled the same way a `PATCH` is; the session API table gains

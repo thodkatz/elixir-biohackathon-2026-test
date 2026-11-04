@@ -41,7 +41,7 @@ session id) and one journal (§13).
     and answer, and journals it as a `meta` line if no title is set by then; the agent's title never
     overwrites one the user already set by `PATCH`, and a `PATCH` made after the model title still wins (the
     check for an existing title runs under the session's own append queue). Modelled on Open WebUI 0.11.3's
-    title generation (clarification 15). A later run never changes a title once one is set, by either path.
+    title generation (clarification 16). A later run never changes a title once one is set, by either path.
     Titles are at most 200 characters.
   - `tags`: each trimmed, lower-cased, matching `[a-z0-9._-]{1,32}`, at most 20, de-duplicated, kept in the
     order given. An invalid tag makes the whole `PATCH` fail with 400.

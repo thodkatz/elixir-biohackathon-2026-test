@@ -41,12 +41,13 @@ test("removeSession: 204 resolves, 404 rejects; fetchSessions returns the list",
   assert.deepEqual(await fetchSessions(fake(200, [meta(ID, "t")])), [meta(ID, "t")]);
 });
 
-test("askTitle: POST .../title, no body, the metadata back; a non-2xx rejects", async () => {
+test("askTitle: POST .../title, a JSON Content-Type (the route 415s without one), the metadata back; a non-2xx rejects", async () => {
   const seen: { url?: string; init?: RequestInit } = {};
   const out = await askTitle(ID, fake(200, meta(ID, "t", { title: "Greeting the agent" }), seen));
   assert.equal(seen.url, `/api/sessions/${ID}/title`);
   assert.equal(seen.init?.method, "POST");
-  assert.equal(seen.init?.body, undefined);
+  assert.equal((seen.init?.headers as Record<string, string>)["Content-Type"], "application/json");
+  assert.equal(seen.init?.body, "{}");
   assert.equal(out.title, "Greeting the agent");
   await assert.rejects(askTitle(ID, fake(404, { error: "no such session" })),
     (e: unknown) => e instanceof ApiError && e.status === 404);

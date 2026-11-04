@@ -23,6 +23,14 @@ const file = (j: Journals, id: string) => path.join(j.dir, `${id}.jsonl`);
 const metaLines = async (j: Journals, id: string) =>
   (await fs.readFile(file(j, id), "utf8")).trim().split("\n").map((l) => JSON.parse(l)).filter((l) => l.type === "meta");
 
+// A POST /title request: a JSON Content-Type by default, so the route's own check (below) does not get
+// in the way of tests that are about something else.
+function titleRequest(contentType: string | null = "application/json"): Request {
+  return new Request("http://chat-ui/api/sessions/x/title", {
+    method: "POST", headers: contentType === null ? {} : { "content-type": contentType }, body: "{}",
+  });
+}
+
 // A titler that answers `title` and keeps what it was asked.
 function fakeTitler(title = "Greeting the agent", before?: () => Promise<void>) {
   const calls: { threadId: string; messages: TitleMessage[] }[] = [];
@@ -38,7 +46,7 @@ test("no title yet: the agent is asked with the journal's first message and answ
   const journals = await tmpJournals();
   const { id } = await seedRun(journals, "hello there");
   const { titler, calls } = fakeTitler("  Greeting   the agent ");
-  const response = await titleSession(journals, id, titler);
+  const response = await titleSession(journals, id, titler, titleRequest());
   assert.equal(response.status, 200);
   assert.equal((await response.json()).title, "Greeting the agent");
   assert.deepEqual(calls, [{ threadId: id, messages: [
@@ -54,7 +62,7 @@ test("the first message and answer are the first completed run's, from the journ
   const done = await seedRun(journals, "second try", { id: failed.id, anchor: null });
   await seedRun(journals, "a later question", { id: failed.id, anchor: done.replyId });
   const { titler, calls } = fakeTitler();
-  await titleSession(journals, failed.id, titler);
+  await titleSession(journals, failed.id, titler, titleRequest());
   assert.deepEqual(calls[0].messages, [
     { role: "user", content: "second try" }, { role: "assistant", content: "echo: second try" },
   ]);
@@ -65,7 +73,7 @@ test("a retry after a failed first run: the messages are the retry's, not the fa
   const failed = await seedRun(journals, "first try", { status: "failed" });
   await seedRun(journals, "second try", { id: failed.id, anchor: failed.replyId });
   const { titler, calls } = fakeTitler();
-  await titleSession(journals, failed.id, titler);
+  await titleSession(journals, failed.id, titler, titleRequest());
   assert.deepEqual(calls[0].messages, [
     { role: "user", content: "second try" }, { role: "assistant", content: "echo: second try" },
   ]);
@@ -77,7 +85,7 @@ test("renamed while the agent was writing: the rename is kept, no model title ap
   const { titler, calls } = fakeTitler("Model title", async () => {
     await journals.patch(id, { title: "Mine" });
   });
-  const response = await titleSession(journals, id, titler);
+  const response = await titleSession(journals, id, titler, titleRequest());
   assert.equal(calls.length, 1);
   assert.equal(response.status, 200);
   assert.equal((await response.json()).title, "Mine");
@@ -90,16 +98,16 @@ test("already titled (a rename or an earlier model title): no agent call, the me
   await journals.patch(id, { title: "Mine" });
   const before = await fs.readFile(file(journals, id), "utf8");
   const { titler, calls } = fakeTitler();
-  const response = await titleSession(journals, id, titler);
+  const response = await titleSession(journals, id, titler, titleRequest());
   assert.equal(response.status, 200);
   assert.equal((await response.json()).title, "Mine");
   assert.equal(calls.length, 0);
   assert.equal(await fs.readFile(file(journals, id), "utf8"), before);
   // A second call after a model title: no second agent call either.
   const other = await seedRun(journals, "again");
-  await titleSession(journals, other.id, fakeTitler().titler);
+  await titleSession(journals, other.id, fakeTitler().titler, titleRequest());
   const second = fakeTitler();
-  await titleSession(journals, other.id, second.titler);
+  await titleSession(journals, other.id, second.titler, titleRequest());
   assert.equal(second.calls.length, 0);
 });
 
@@ -108,7 +116,7 @@ test("no completed run: no agent call, the metadata unchanged", async () => {
   const { id } = await seedRun(journals, "hello", { status: "cancelled" });
   const before = await fs.readFile(file(journals, id), "utf8");
   const { titler, calls } = fakeTitler();
-  const response = await titleSession(journals, id, titler);
+  const response = await titleSession(journals, id, titler, titleRequest());
   assert.equal(response.status, 200);
   assert.equal((await response.json()).title, "hello");
   assert.equal(calls.length, 0);
@@ -126,7 +134,7 @@ test("the agent failing (an error status, a throw, an unusable title): 200, unch
       () => Promise.reject(new Error("canary-in-the-message")),
       () => Promise.resolve("   "),
     ] as Titler[]) {
-      const response = await titleSession(journals, id, titler);
+      const response = await titleSession(journals, id, titler, titleRequest());
       assert.equal(response.status, 200);
       assert.equal((await response.json()).title, "hello");
     }
@@ -143,8 +151,22 @@ test("the agent failing (an error status, a throw, an unusable title): 200, unch
 test("a bad id: 400; a session not recorded: 404; neither asks the agent", async () => {
   const journals = await tmpJournals();
   const { titler, calls } = fakeTitler();
-  assert.equal((await titleSession(journals, "../x", titler)).status, 400);
-  assert.equal((await titleSession(journals, randomUUID(), titler)).status, 404);
+  assert.equal((await titleSession(journals, "../x", titler, titleRequest())).status, 400);
+  assert.equal((await titleSession(journals, randomUUID(), titler, titleRequest())).status, 404);
+  assert.equal(calls.length, 0);
+});
+
+// No body is needed, so a cross-site POST with no custom header is a CORS simple request (no preflight);
+// requiring a JSON Content-Type forces a preflight instead, without which every call would retry the
+// (paid) model request while the agent keeps failing.
+test("not application/json: 415, no agent call", async () => {
+  const journals = await tmpJournals();
+  const { id } = await seedRun(journals, "hello");
+  const { titler, calls } = fakeTitler();
+  for (const contentType of [null, "text/plain", "application/x-www-form-urlencoded"]) {
+    const response = await titleSession(journals, id, titler, titleRequest(contentType));
+    assert.equal(response.status, 415);
+  }
   assert.equal(calls.length, 0);
 });
 

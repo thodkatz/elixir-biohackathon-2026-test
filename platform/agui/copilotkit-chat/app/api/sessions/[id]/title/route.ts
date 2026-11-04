@@ -20,6 +20,6 @@ const titler: Titler = (threadId, messages) => {
   return agentTitler(url, key)(threadId, messages);
 };
 
-export async function POST(_request: Request, { params }: Context): Promise<Response> {
-  return titleSession(defaultJournals(), (await params).id, titler);
+export async function POST(request: Request, { params }: Context): Promise<Response> {
+  return titleSession(defaultJournals(), (await params).id, titler, request);
 }

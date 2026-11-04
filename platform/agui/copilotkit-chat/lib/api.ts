@@ -19,6 +19,11 @@ function serverError(what: string, error: unknown): Response {
 
 class TooLarge extends Error {}
 
+// A JSON `Content-Type`, ignoring any `; charset=...` suffix.
+function isJsonContentType(request: Request): boolean {
+  return (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase() === "application/json";
+}
+
 // Reads at most MAX_BODY bytes; a larger body is refused without reading the rest.
 async function readBody(request: Request): Promise<string> {
   const declared = Number(request.headers.get("content-length") ?? 0);
@@ -89,8 +94,12 @@ export async function deleteSession(journals: Journals, id: string): Promise<Res
 // neither a rename nor an earlier model title), the agent writes one from the first message and answer, read
 // from the journal; it is appended only if still no title is set (a rename meanwhile wins). Answers the
 // metadata, unchanged when nothing was written. The agent failing is logged, not an error for the browser.
-export async function titleSession(journals: Journals, id: string, titler: Titler): Promise<Response> {
+// No body is needed, so without this check the request would be a CORS simple request (no preflight) that
+// another site could trigger freely, each call a paid model call while the agent keeps failing; requiring a
+// JSON Content-Type forces a preflight.
+export async function titleSession(journals: Journals, id: string, titler: Titler, request: Request): Promise<Response> {
   if (!isSessionId(id)) return fail(400, "invalid session id");
+  if (!isJsonContentType(request)) return fail(415, "Content-Type must be application/json");
   let messages;
   try {
     const state = await journals.meta(id);

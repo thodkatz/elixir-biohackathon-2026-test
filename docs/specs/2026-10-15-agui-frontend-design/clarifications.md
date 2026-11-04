@@ -218,4 +218,6 @@ in the parts it amends.
     successive model steps arrive as separate messages (with reasoning between them on qwen), and grouping
     across messages would mean replacing CopilotKit's message list. *Cost if wrong:* successive single
     calls still show one card each, as before; a result whose JSON has an unrelated top-level `error` string
-    is shown as failed. *Amends:* §6 *Tool calls are rendered*. *Status:* folded.
+    is shown as failed; when a message's second call streams in, its first card moves under the new group
+    header and remounts, so a card opened while the calls stream in closes again. *Amends:* §6 *Tool calls
+    are rendered*. *Status:* folded.

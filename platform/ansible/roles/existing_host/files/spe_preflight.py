@@ -257,7 +257,9 @@ def reset_plan(cfg: dict, host) -> dict:
             problems.append(f"compose project {name} has containers from {', '.join(foreign)}, not {file}")
             continue
         if os.path.isfile(real):
-            projects.append({"name": name, "file": real})
+            # Taken down through the path given, a link included: Compose reads the .env beside it
+            # (COMPOSE_PROFILES), and the resolved file's directory has none.
+            projects.append({"name": name, "file": file})
         elif built_from or name in host.running_projects():
             problems.append(f"compose project {name} has containers but its file {file} is missing")
 

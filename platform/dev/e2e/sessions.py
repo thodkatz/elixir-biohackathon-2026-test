@@ -673,7 +673,7 @@ def check_header(r: Run, ids: dict[str, str]) -> None:
     assert r.url_session() == ids["first"]
     page.get_by_role("button", name="New chat").click()
     # A New chat has no visible title: its heading is for screen readers only.
-    expect(header.get_by_role("heading", name="New chat")).to_have_class("spe-sr-only")
+    expect(header.get_by_role("heading", name="New chat", exact=True)).to_have_class("spe-sr-only")
     expect(header.locator(".spe-header-title")).to_have_count(0)
     expect(header.get_by_role("button", name="Chat actions")).to_have_count(0)
     r.ok("header: rename by its menu (Enter saves) and double-click (Esc cancels), tags in the menu's tag editor, "
@@ -727,7 +727,7 @@ def check_deleted_open(r: Run) -> None:
     "this session was deleted", and no "could not be saved" follows once the reconciliation is over."""
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
+    expect(page.get_by_role("heading", name="New chat", exact=True)).to_have_count(1)
     title = f"deleted while open {uuid.uuid4().hex[:8]}"
     r.send(title, 1)
     expect(r.row(title)).to_have_count(1, timeout=5_000)
@@ -784,7 +784,7 @@ def check_devtools_edit(r: Run) -> None:
     original reply again once the run starts, and the journal records the edit as ignored content."""
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
+    expect(page.get_by_role("heading", name="New chat", exact=True)).to_have_count(1)
     title = f"devtools edit {uuid.uuid4().hex[:8]}"
     r.send(title, 1)
     expect(r.row(title)).to_have_count(1, timeout=5_000)
@@ -842,7 +842,7 @@ def check_restore_tip(r: Run) -> None:
     """
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
+    expect(page.get_by_role("heading", name="New chat", exact=True)).to_have_count(1)
     title = f"branches {uuid.uuid4().hex[:8]}"
     r.send(title, 1)
     expect(r.row(title)).to_have_count(1, timeout=5_000)
@@ -899,7 +899,7 @@ def check_no_false_alarm(r: Run) -> None:
     journal holds ignored content."""
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
+    expect(page.get_by_role("heading", name="New chat", exact=True)).to_have_count(1)
     r.send("Count the files", 1)
     box = page.get_by_test_id("copilot-chat-textarea")
     box.fill("Now fail on purpose")
@@ -924,7 +924,7 @@ def check_compaction(r: Run) -> None:
     live and after a reload; the summary is collapsed, and expanded shows its markup as text."""
     page = r.page
     page.get_by_role("button", name="New chat").click()
-    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
+    expect(page.get_by_role("heading", name="New chat", exact=True)).to_have_count(1)
     box = page.get_by_test_id("copilot-chat-textarea")
     box.fill(COMPACTION_XSS)
     box.press("Enter")
@@ -975,7 +975,7 @@ def check_save_failed(r: Run) -> None:
     page.on("request", lambda req: lists.append(req.url)
             if req.method == "GET" and req.url.split("?")[0].endswith("/api/sessions") else None)
     page.get_by_role("button", name="New chat").click()
-    expect(page.get_by_role("heading", name="New chat")).to_have_count(1)
+    expect(page.get_by_role("heading", name="New chat", exact=True)).to_have_count(1)
     title = f"run that cannot be saved {uuid.uuid4().hex[:8]}"
     mode = r.sessions.stat().st_mode & 0o7777
     r.sessions.chmod(0o500)

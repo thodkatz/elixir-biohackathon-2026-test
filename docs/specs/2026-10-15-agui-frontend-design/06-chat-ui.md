@@ -104,9 +104,9 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   "Delete chat?" with "This removes it from your list. It is kept in the run archive.", *Cancel* and
   *Delete*; Escape cancels, wherever focus is). The page-wide Escape handlers skip a key an earlier handler
   already took (`defaultPrevented`).
-- **Chat header:** a quiet row with the session's title (*New chat* before the first run), renamable in
-  place, and the same `⋯` menu. The note that this is the SPE agent and that every tool call is shown is
-  the muted line under the composer.
+- **Chat header:** a quiet row, no visible title before the first run (a heading for screen readers only),
+  then the session's title, renamable in place, and the same `⋯` menu. The note that this is the SPE agent
+  and that every tool call is shown is the muted line under the composer.
 - **Open session in the URL:** `?session=<id>`. Loading the page with it fetches the session; without it,
   or with an id that answers 404, the page starts a new session (and drops the parameter).
 - **Opening a session:** `GET /api/sessions/{id}`, then CopilotChat's `threadId` set to the id and

@@ -142,7 +142,7 @@ async def test_run_log_line_on_success(tmp_path):
     assert rec["title"] == "Password Reset"
     assert rec["error"] is None
     assert set(rec["usage"]) == {"input_tokens", "output_tokens"}
-    assert rec["started_at"] <= rec["ended_at"]
+    assert rec["started"] <= rec["ended"]
 
 
 async def test_model_error_detail_is_sanitized(tmp_path):

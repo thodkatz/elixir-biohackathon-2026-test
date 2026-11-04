@@ -81,7 +81,7 @@ def parse_title(raw: str) -> str:
 
 async def generate_title(model: Model, cfg: TitleCfg, body: TitleRequest) -> tuple[str | None, dict]:
     """Returns the title (or None on failure) and the run-log record for the call."""
-    started_at = time.time()
+    started = time.time()
     title: str | None = None
     usage: dict[str, int] | None = None
     error: str | None = None
@@ -97,6 +97,6 @@ async def generate_title(model: Model, cfg: TitleCfg, body: TitleRequest) -> tup
             error = "the model returned an empty title"
     except Exception as e:  # any model failure becomes a 422, not a 500
         error = str(e) or type(e).__name__
-    record = {"type": "title", "thread_id": body.thread_id, "started_at": started_at, "ended_at": time.time(),
+    record = {"type": "title", "thread_id": body.thread_id, "started": started, "ended": time.time(),
               "title": title, "usage": usage, "error": error}
     return title, record

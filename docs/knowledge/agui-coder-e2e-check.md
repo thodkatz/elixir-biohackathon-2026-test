@@ -66,5 +66,4 @@ python3 docs/knowledge/agui-archive-compare.py <snap> /data-share/runs/<run>/agu
   48 here) because it also survives earlier deploys.
 - **`destroy.yml` on an existing host left the `spe-frontend` containers** ("No containers left in this instance's
   compose projects"): the reset ran Compose on the resolved compose file, whose directory has no `.env`
-  (`COMPOSE_PROFILES`), so `down` saw no service. Fixed in #41; until a run has it, finish with
-  `-e spe_archive_skip=true` from a checkout with the fix.
+  (`COMPOSE_PROFILES`), so `down` saw no service. Fixed in #41 (`compose-symlink-env.md`).

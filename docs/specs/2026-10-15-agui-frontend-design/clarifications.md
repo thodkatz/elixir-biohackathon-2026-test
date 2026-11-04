@@ -203,7 +203,7 @@ in the parts it amends.
     *Configuration* block gains `title: {enabled, max_tokens}`, and its *Run log* now says a title call is a
     `{"type": "title", ...}` line, distinct from a run line (no `type`), which a run-log reader skips when
     counting runs. *Reason:* asked for by the user (2026-11-03): session titles and the sidebar's width were
-    the two items left on *AG-UI chat minors* (`BACKLOG.md`), and a theme toggle was asked for alongside them.
+    the two items left on the AG-UI chat minors backlog item, and a theme toggle was asked for alongside them.
     Both the title generation and the theme control are modelled on Open WebUI 0.11.3 (`ENABLE_TITLE_GENERATION`
     and its model request, and the sidebar's theme setting). *Amends:* §5 *Endpoints*, *Configuration*, *Run
     log*; §6 *Sessions*, *The sidebar*; README decision 22. *Status:* folded.

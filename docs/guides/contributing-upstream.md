@@ -123,8 +123,10 @@ it from the compare page, with the base set to upstream explicitly:
 https://github.com/kraatz/elixir-biohackathon-2026-test/compare/main...thodkatz:elixir-biohackathon-2026-test:contrib/<slug>?expand=1
 ```
 
-Write the title and body into a file for them: what changes and why, how to try it, what ran (step 4). Nothing
-fork-only: no plan, slice, backlog or fork PR links.
+Post the title and body for them as an issue on our fork (`gh issue create --repo thodkatz/elixir-biohackathon-2026-test`,
+the compare link at its top), so they copy from GitHub rather than from a file on the VM (the user, 2026-11-04);
+close it once the PR is open. The body: what changes and why, how to try it, what ran (step 4). Nothing fork-only:
+no plan, slice, backlog or fork PR links.
 
 ### 6. Track it on the fork
 

@@ -331,3 +331,24 @@ test("decision 32: a command run adds only its marker; its message id is a known
   assert.equal(conv.runs[0].command, null);
   assert.equal(conv.first_user_text, "hello");
 });
+
+// A marker whose TEXT_MESSAGE_END never came (spec §15, *A marker cut short*): automatic or manual, any status.
+// `tail` is built lazily, inside each test, so building the cases (`end()` calls `at()`) never advances the
+// file's shared clock before an earlier test runs.
+for (const name of ["run_end cancelled", "no run_end"] as const) {
+  for (const markerId of ["spe-compaction-r2", "spe-compaction-manual-r2"]) {
+    test(`decision 37: a marker cut short (${name}, ${markerId}) is not on the path`, async () => {
+      const tail: Line[] = name === "run_end cancelled" ? [end("r2", "cancelled")] : [];
+      const conv = await rebuild(ID, [
+        created(), start("r1", null, [user("u1", "hello")]), ...reply("r1", "a1", "hi"), end("r1"),
+        start("r2", "a1", [user("u2", "go on")]),
+        ev("r2", { type: EventType.RUN_STARTED, threadId: ID, runId: "r2" }),
+        ev("r2", { type: EventType.TEXT_MESSAGE_START, messageId: markerId, role: "assistant" }),
+        ev("r2", { type: EventType.TEXT_MESSAGE_CONTENT, messageId: markerId, delta: "SUMMARY so f" }),
+        ...tail,
+      ]);
+      assert.equal(conv.nodes.has(markerId), false);
+      assert.deepEqual(conv.runs[1].added, ["u2"]);
+    });
+  }
+}

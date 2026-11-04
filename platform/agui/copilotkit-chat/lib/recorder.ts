@@ -13,6 +13,7 @@ import { classify } from "./anchor.ts";
 import type { Classification } from "./anchor.ts";
 import { commandOf } from "./command.ts";
 import type { Command, CommandField } from "./command.ts";
+import { isCompactionMarker } from "./compaction.ts";
 import type { Durability, NewLine, RunStatus } from "./journal.ts";
 import { codeOf, isSessionId, shared, withSession } from "./sessions.ts";
 import type { Journals, RunHandle } from "./sessions.ts";
@@ -25,8 +26,11 @@ const NOT_SAVED = "this session could not be saved";
 const NO_NEW_MESSAGE = "this run carries no new message";
 const DUPLICATE_RUN = "this run was already recorded";
 const STOPPED = "the run was stopped";
+const NOTHING_TO_COMPACT = "Nothing to compact yet.";
+const FOCUS_TOO_LONG = "The focus after /compact is too long (1000 characters at most).";
+const MAX_FOCUS = 1000; // code points (spec §15, clarification 16)
 export const REFUSAL_MESSAGES: readonly string[] = Object.freeze([
-  INVALID, DELETED, CLOSING, NOT_SAVED, NO_NEW_MESSAGE, DUPLICATE_RUN,
+  INVALID, DELETED, CLOSING, NOT_SAVED, NO_NEW_MESSAGE, DUPLICATE_RUN, NOTHING_TO_COMPACT, FOCUS_TOO_LONG,
 ]);
 
 type Admission = { refused: string } | { refused: null; classification: Classification; command: CommandField | null };
@@ -312,11 +316,18 @@ export class SessionRecorder extends Middleware {
         // incomplete (Journals.append dropped the failed writer, so this reopens the journal).
         return runStartTried ? endHere("aborted", NOT_SAVED) : { refused: NOT_SAVED };
       }
-      if (!command && classification.newMessages.length === 0) return endHere("refused", NO_NEW_MESSAGE);
+      if (command) {
+        // Spec §15, step 4: nothing after the path's latest marker, or a focus too long. The agent backstops the first.
+        const last = classification.path.at(-1);
+        if (!last || isCompactionMarker(last)) return endHere("refused", NOTHING_TO_COMPACT);
+        if (command.focus !== null && [...command.focus].length > MAX_FOCUS) return endHere("refused", FOCUS_TOO_LONG);
+      } else if (classification.newMessages.length === 0) {
+        return endHere("refused", NO_NEW_MESSAGE);
+      }
       // Re-checked once run_start is on disk: SIGTERM may have landed during its fsync, after shutdown() took
       // its snapshot of `running`, so a run admitted now would never be cancelled and drain would time out.
-      // Its run_start already carries the new user message, so it ends cancelled, not refused (a refused run
-      // adds no message, §13).
+      // Its run_start already carries the new user message, or for a command run the command itself, so it
+      // ends cancelled, not refused (a refused run adds no message, §13).
       if (shared().closing) return endHere("cancelled", CLOSING);
       shared().running.set(runKey(id, input.runId), handle);
       return { refused: null, classification, command };

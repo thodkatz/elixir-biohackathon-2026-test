@@ -714,8 +714,9 @@ test("admission refusals: RUN_STARTED then RUN_ERROR, the agent never called, no
   }
 });
 
-test("REFUSAL_MESSAGES: the six messages a run is refused or ended with by the recorder", () => {
+test("REFUSAL_MESSAGES: the eight messages a run is refused or ended with by the recorder", () => {
   assert.deepEqual([...REFUSAL_MESSAGES].sort(), [
+    "Nothing to compact yet.", "The focus after /compact is too long (1000 characters at most).",
     "invalid session", "the chat UI is shutting down", "this run carries no new message",
     "this run was already recorded", "this session could not be saved", "this session was deleted",
   ]);
@@ -1119,6 +1120,70 @@ test("the test agent answers a command with a manual marker carrying the focus",
     const marker = branchOfTip((await journals.load(id))!).at(-1)!;
     assert.ok(marker.id.startsWith("spe-compaction-manual-"));
     assert.match(String(marker.content), /keep the canary paths/);
+  } finally {
+    await server.close();
+  }
+});
+
+const NOTHING = "Nothing to compact yet.";
+const TOO_LONG = "The focus after /compact is too long (1000 characters at most).";
+
+test("decision 34: /compact as a new session's first run is refused, journaled, and leaves no session", async () => {
+  const { journals, server, recorder, agent } = await setup();
+  try {
+    const id = randomUUID();
+    const out = await drive(recorder, input(id, "/compact"), agent());
+    assert.deepEqual([types(out), message(out, 1)], [[EventType.RUN_STARTED, EventType.RUN_ERROR], NOTHING]);
+    assert.equal(server.requests.length, 0);
+    const all = await lines(journals, id);
+    assert.deepEqual(all.map((l) => l.type), ["created", "run_start", "run_end"]);
+    assert.deepEqual([(all[2] as RunEndLine).status, (all[2] as RunEndLine).error], ["refused", NOTHING]);
+    assert.equal((await journals.list()).some((s) => s.id === id), false);
+    assert.equal(await journals.get(id), null); // GET /api/sessions/{id}: 404
+  } finally {
+    await server.close();
+  }
+});
+
+test("decision 34: a session ending in a marker refuses /compact; one more message and it compacts again", async () => {
+  const { journals, server, recorder, agent } = await setup();
+  try {
+    const id = randomUUID();
+    await drive(recorder, input(id, "hello"), agent());
+    const history = async () => branchOfTip((await journals.load(id))!);
+    await drive(recorder, input(id, "/compact", await history()), agent());
+    const again = await drive(recorder, input(id, "/compact", await history()), agent());
+    assert.equal(message(again, 1), NOTHING);
+    assert.equal(server.requests.length, 2);
+    await drive(recorder, input(id, "more", await history()), agent());
+    assert.equal(types(await drive(recorder, input(id, "/compact", await history()), agent())).at(-1), EventType.RUN_FINISHED);
+  } finally {
+    await server.close();
+  }
+});
+
+test("Review Focus 3: the focus length is counted in code points", async () => {
+  const cases: [string, boolean][] = [["x".repeat(1000), true], ["x".repeat(1001), false], ["🧪".repeat(1000), true]];
+  for (const [focus, admitted] of cases) {
+    const { start, out, sent } = await commandCase(`/compact ${focus}`);
+    assert.equal(start.command?.focus, focus);
+    assert.equal(sent !== undefined, admitted, `${[...focus].length} code points`);
+    if (!admitted) assert.equal(message(out, 1), TOO_LONG);
+  }
+});
+
+test("decision 37: a command run stopped during its summary request: cancelled, no marker", async () => {
+  const { journals, server, recorder, agent } = await setup();
+  try {
+    const id = randomUUID();
+    await drive(recorder, input(id, "hello"), agent());
+    const branch = branchOfTip((await journals.load(id))!);
+    await drive(recorder, input(id, "/compact hang", branch), agent(), (e) => e.type === EventType.MESSAGES_SNAPSHOT);
+    await settled(id);
+    assert.equal(ofType(await lines(journals, id), "run_end").at(-1)!.status, "cancelled");
+    // The stopped summary left no marker event in the journal.
+    assert.equal(ofType(await lines(journals, id), "event").some((l) => String((l.event as { messageId?: string }).messageId).startsWith("spe-compaction-")), false);
+    assert.deepEqual(branchOfTip((await journals.load(id))!).map(view), branch.map(view));
   } finally {
     await server.close();
   }

@@ -4,10 +4,11 @@
 // under the anchor, each later one under the one before. One module for the run route, the session API and
 // the exporter, so the chat and the archive cannot disagree. A command run (spec §15) sends no message: its
 // message id is recorded in `commands`, never as a node, so it is never on a path.
-import { defaultApplyEvents } from "@ag-ui/client";
+import { defaultApplyEvents, EventType } from "@ag-ui/client";
 import type { AbstractAgent, BaseEvent, Message, RunAgentInput } from "@ag-ui/client";
 import { from } from "rxjs";
 import type { Command, CommandField } from "./command.ts";
+import { MARKER_PREFIX } from "./compaction.ts";
 import { parseJournal } from "./journal.ts";
 import type { Ignored, Line, MetaFields, RequestFields, RunStartLine, RunStatus } from "./journal.ts";
 
@@ -174,6 +175,13 @@ export async function rebuild(id: string, lines: Line[]): Promise<Conversation> 
     const path = pathTo(conv, parentOfFirst);
     const pathIds = new Set(path.map((m) => m.id));
     const after = await applyEvents(id, run, [...path, ...run.start.messages]);
+    // Spec §15, *A marker cut short*: a marker counts only once its TEXT_MESSAGE_END is journaled, so the agent is
+    // never sent a truncated summary as its cut point, whatever the run's status.
+    const ended = new Set(run.events.filter((e) => e.type === EventType.TEXT_MESSAGE_END)
+      .map((e) => (e as { messageId?: string }).messageId));
+    const cutShort = new Set(run.events.filter((e) => e.type === EventType.TEXT_MESSAGE_START)
+      .map((e) => (e as { messageId?: string }).messageId)
+      .filter((mid): mid is string => typeof mid === "string" && mid.startsWith(MARKER_PREFIX) && !ended.has(mid)));
     // The run's messages: its new messages first (as sent, unless an event changed them), then every other
     // message its events added, in order of first appearance.
     const latest = new Map(after.map((m) => [m.id, m]));
@@ -182,7 +190,7 @@ export async function rebuild(id: string, lines: Line[]): Promise<Conversation> 
     let parent = parentOfFirst;
     for (const candidate of candidates) {
       const mid = candidate.id;
-      if (pathIds.has(mid) || added.includes(mid)) continue;
+      if (pathIds.has(mid) || added.includes(mid) || cutShort.has(mid)) continue;
       if (conv.nodes.has(mid)) {
         console.warn(`journal ${id}: run ${run.start.run_id}: message ${mid} already held, skipped`);
         continue;

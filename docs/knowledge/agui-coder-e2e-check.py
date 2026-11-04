@@ -119,6 +119,36 @@ def open_session(page, sid):
     page.wait_for_timeout(1500)
 
 
+# CopilotChat virtualizes its message list: only the rows near the viewport are in the DOM (`[data-index]`), so a
+# locator count on a long chat misses the rest. Scroll the list top to bottom and count each row once.
+CHAT_ROWS = """async () => {
+  const count = (el) => [el.querySelectorAll('.copilotKitUserMessage').length, el.querySelectorAll('.spe-compaction').length];
+  const first = document.querySelector('[data-index]');
+  if (!first) { const [users, compactions] = count(document); return {rows: null, users, compactions}; }  // short: all there
+  let box = first.parentElement;  // the ancestor that actually scrolls (inner overflow-y-auto ones fit their content)
+  while (box && !(/auto|scroll/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight + 1))
+    box = box.parentElement;
+  const seen = new Map(), pause = () => new Promise((r) => setTimeout(r, 250));
+  for (let top = 0; ; top += box.clientHeight / 2) {
+    box.scrollTop = top; await pause();
+    for (const row of document.querySelectorAll('[data-index]')) seen.set(row.dataset.index, count(row));
+    if (top >= box.scrollHeight - box.clientHeight) break;
+  }
+  box.scrollTop = box.scrollHeight;
+  const sum = (i) => [...seen.values()].reduce((n, v) => n + v[i], 0);
+  return {rows: seen.size, users: sum(0), compactions: sum(1)};
+}"""
+
+
+def chat_rows(page):
+    """The whole chat's rows, user messages and compaction dividers, however long it is."""
+    return page.evaluate(CHAT_ROWS)
+
+
+def compactions(page):
+    return chat_rows(page)["compactions"]
+
+
 def row(page, title):
     return page.locator(".spe-sidebar .spe-row").filter(has=page.locator(".spe-row-title", has_text=title))
 
@@ -138,7 +168,7 @@ with sync_playwright() as p:
     else:
         # 1. two sessions at once; tab B switches into A's session while A's run streams
         A.get_by_role("button", name="New chat").click()
-        submit(A, "List the files in the dataset directory, then count the lines of the two largest text files.")
+        submit(A, "List the files in /data-share, then count the lines of the two largest text files.")
         sA = session_of(A, after=0)
         B.get_by_role("button", name="New chat").click()
         sB, okB = send(B, "In two sentences: what does a GA4GH WES service do?")
@@ -152,8 +182,9 @@ with sync_playwright() as p:
         ok("A's run ended", wait_done(A, sA, 0))
         open_session(B, sA)
         st = [r["status"] for r in journal(sA)["runs"]]
-        ok("B shows A's whole run after it ended", B.locator(".copilotKitUserMessage").count() == 1 and st == ["completed"],
-           f"user messages={B.locator('.copilotKitUserMessage').count()} runs={st} errors={errors(B)}")
+        shown = chat_rows(B)["users"]
+        ok("B shows A's whole run after it ended", shown == 1 and st == ["completed"],
+           f"user messages={shown} runs={st} errors={errors(B)}")
 
         # 2. stop mid-run and send again at once
         before = len(done_runs(sA))
@@ -194,14 +225,14 @@ with sync_playwright() as p:
     # 4. long conversations in A and C: several compactions each, /compact with and without a focus
     for page, sid, cmd in ((A, sA, "/compact"), (B, sC, "/compact keep the line counts and file names")):
         open_session(page, sid)
-        if page.locator(".spe-compaction").count() >= args.compactions + 1:
-            ok(f"{sid[:8]}: already {page.locator('.spe-compaction').count()} compactions", True)
+        if (n := compactions(page)) >= args.compactions + 1:
+            ok(f"{sid[:8]}: already {n} compactions", True)
             continue
         _, okc = send(page, cmd)
-        ok(f"{cmd!r} in {sid[:8]} ran", okc and page.locator(".spe-compaction").count() >= 1,
-           f"dividers={page.locator('.spe-compaction').count()}")
+        n = compactions(page)
+        ok(f"{cmd!r} in {sid[:8]} ran", okc and n >= 1, f"dividers={n}")
         turn = 0
-        while page.locator(".spe-compaction").count() < args.compactions + 1 and turn < args.turns:
+        while n < args.compactions + 1 and turn < args.turns:
             turn += 1
             _, okt = send(page, f"Turn {turn}: run `seq 1 3000` exactly as written, without pipes, filters or "
                                 "redirection, then read its whole output and tell me only the last line it printed.")
@@ -209,7 +240,7 @@ with sync_playwright() as p:
                 ok(f"turn {turn} in {sid[:8]} ended", False); break
             if errors(page):
                 ok(f"turn {turn} in {sid[:8]}: no error in the chat", False, "; ".join(errors(page))); break
-        n = page.locator(".spe-compaction").count()
+            n = compactions(page)
         ok(f"{sid[:8]}: {n} compactions after {turn} turns", n >= args.compactions + 1)
         page.screenshot(path=str(OUT / f"4-long-{sid[:8]}.png"), full_page=True)
 
@@ -218,7 +249,7 @@ with sync_playwright() as p:
     for sid in (sA, sB, sC):
         open_session(A, sid)
         users = [m for r in rec[sid]["runs"] for m in r["messages"] if m["role"] == "user"]
-        shown = A.locator(".copilotKitUserMessage").count()
+        shown = chat_rows(A)["users"]
         ok(f"reopened {sid[:8]}: user messages shown = journaled", shown == len(users), f"{shown} vs {len(users)}")
         ok(f"reopened {sid[:8]}: no error", not errors(A), "; ".join(errors(A)))
     A.screenshot(path=str(OUT / "5-reopened.png"), full_page=True)

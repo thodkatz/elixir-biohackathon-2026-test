@@ -12,7 +12,7 @@ platform/dev/fake_agent.py (with uv, in platform/agui/pydantic-ai-agent) and the
 with its own sessions directory, walks the sidebar (list, open, New chat, ?session=, the row menu's
 close and focus rules, the row menu, the open session deleted elsewhere) and checks the journals after each step. It ends with three sessions: one tagged and pinned, one hidden, one
 deleted, and checks that a run whose tab is closed is still journaled whole, and that no run of any journal holds ignored content. It also edits a reply in the page's copy of a session and checks the server undoes
-it, and makes two branches from two tabs and checks a reopened session lands on the newer one. Needs Python Playwright with Chromium
+it, groups two tool calls of one response under one header that shows a failure, and makes two branches from two tabs and checks a reopened session lands on the newer one. Needs Python Playwright with Chromium
 (`pip install playwright` and `playwright install chromium`). Exits nonzero on the first failed check.
 """
 from __future__ import annotations
@@ -745,6 +745,28 @@ def check_deleted_open(r: Run) -> None:
     r.ok("open session deleted elsewhere: a message says it was deleted, never that it could not be saved")
 
 
+def check_tool_group(r: Run) -> None:
+    """Two calls in one model response (fake agent: "multi-tool", the second exiting 1) sit under one group
+    header that says one failed, with both cards inside it, the failed one titled so; again after a reload.
+    Its own New chat, after the checks that count sessions."""
+    page = r.page
+    page.get_by_role("button", name="New chat").click()
+    expect(page.get_by_role("heading", name="New chat", exact=True)).to_have_count(1)
+    r.send(f"multi-tool {uuid.uuid4().hex[:8]}", 1)
+    for when in ("live", "reloaded"):
+        group = page.locator(".spe-tool-group.spe-tool-failed")
+        expect(group).to_have_count(1, timeout=10_000)
+        expect(group.locator("> summary .spe-tool-title")).to_have_text("View Results from 2 tools · 1 failed")
+        expect(group.locator(".spe-tool")).to_have_count(2)
+        expect(group.locator(".spe-tool.spe-tool-done")).to_have_count(1)
+        expect(group.locator(".spe-tool.spe-tool-failed .spe-tool-title")).to_have_text("run_command failed")
+        if when == "live":
+            group.locator("> summary").click()
+            r.shot("tool-group")
+            page.reload()
+    r.ok("two calls in one response: one group header, \"1 failed\", both cards inside it; also after a reload")
+
+
 # --- devtools-edit (decision 6) and restore-tip (decisions 9, 13): helpers the checks below read through,
 # beyond what summary() and Run.wait_runs()/files() already give (run_text and session_meta/session_by_title
 # are genuinely new; the run's anchor, new messages and ignored content are summary()'s own, extended above) -
@@ -1206,6 +1228,7 @@ def main() -> None:
                 check_view(r)
                 check_header(r, ids)
                 check_deleted_open(r)
+                check_tool_group(r)
                 check_compaction(r)
                 check_no_false_alarm(r)
                 check_stop(r)

@@ -241,9 +241,13 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
     setWidth(clamped);
     writeStoredWidth(clamped);
   };
+  // The rendered width (the CSS cap can show less than `width` on a narrow viewport): a drag or a
+  // key step starts from what is actually on screen, not the stored value, or the first presses do
+  // nothing until the pointer or the steps catch up to it.
+  const shownWidth = Math.min(width, viewportMax);
   const onResizerPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { pointerId: e.pointerId, startX: e.clientX, startWidth: width };
+    drag.current = { pointerId: e.pointerId, startX: e.clientX, startWidth: shownWidth };
   };
   const onResizerPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId !== e.pointerId) return;
@@ -253,8 +257,8 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
     if (drag.current?.pointerId === e.pointerId) drag.current = null;
   };
   const onResizerKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "ArrowLeft") { e.preventDefault(); resizeTo(stepWidth(width, -1)); }
-    else if (e.key === "ArrowRight") { e.preventDefault(); resizeTo(stepWidth(width, 1)); }
+    if (e.key === "ArrowLeft") { e.preventDefault(); resizeTo(stepWidth(shownWidth, -1)); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); resizeTo(stepWidth(shownWidth, 1)); }
   };
 
   if (collapsed) {
@@ -324,7 +328,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize sidebar"
-        aria-valuenow={Math.min(width, viewportMax)}
+        aria-valuenow={shownWidth}
         aria-valuemin={MIN_WIDTH}
         aria-valuemax={viewportMax}
         tabIndex={0}

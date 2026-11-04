@@ -34,10 +34,6 @@ start reads this section; keep it short.
   workspace counts; stop it before step 3's `create.yml`), destroyed when done. Fixes are part of the test: an
   issue found here (or in the thorough chat-minors test) is fixed by the session of the unit that owns the failing
   piece, in its own PR, which merges before this item completes and before the upstream PR opens.
-- de.NBI: redeploy `denbi-agui-01` from `main` once `change/agui-title-max-tokens` merges, and check that a new
-  session gets a model title (its `type: "title"` run-log line has a title, no error). Redeployed from `8ac8da2` on
-  2026-11-04 (approved by the user): theme without a flash, sidebar drag, rename, tool-call cards and `/compact`
-  passed, but every title came back empty (`title.max_tokens: 64`, all spent on qwen's reasoning) — due: next.
 - Upstream PR for the AG-UI package (sessions, conversation record, compaction, `/compact`, chat minors) as its
   final state, not each fork commit replayed — needs a *package port* path in `docs/guides/contributing-upstream.md`
   (the user's choice of one coherent upstream package, 2026-11-03, PR #19). Prepared by a session as one

@@ -10,7 +10,7 @@ Next.js 16.4.1 + CopilotKit 1.79.0 (v2 API), a thin client for the SPE agent.
   first request, so the build needs neither.
 - `app/page.tsx`: `CopilotChat` (`@copilotkit/react-core/v2`) beside the sidebar; every tool call is
   a collapsible card (`useDefaultRenderTool`, `app/tool-calls.tsx`, after Open WebUI's `ToolCallDisplay`):
-  a status icon and "Executing `<name>`…" / "View Result from `<name>`" / "`<name>` failed", then the
+  a status icon and "Executing `<name>`…" / "`<name>`" / "`<name>` failed", then the
   arguments as rows (`run_command`'s as a `$ <command>` line) and the first 40 lines or 4000 characters
   of the result, rendered as text (`lib/tool-card.ts`). Several calls in one assistant message share a
   group header. Run errors appear in a bar above the chat. A

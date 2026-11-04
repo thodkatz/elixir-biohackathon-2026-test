@@ -1,7 +1,7 @@
 "use client";
 // Tool-call cards, after Open WebUI's ToolCallDisplay: a status icon, "Executing <name>…" while the call
-// runs and "View Result from <name>" once it is done, and, unfolded, the arguments and the result. The
-// calls of one model response sit under one group header. All of it is React text, never HTML.
+// runs and the bare name once it is done (the check already says so), and, unfolded, the arguments and the
+// result. The calls of one model response sit under one group header. All of it is React text, never HTML.
 import { contentToText } from "@ag-ui/client";
 import { CopilotChatToolCallsView, type CopilotChatToolCallsViewProps } from "@copilotkit/react-core/v2";
 import {
@@ -19,7 +19,7 @@ function ToolStatus({ state }: { state: CardState }) {
 function ToolTitle({ state, name }: { state: CardState; name: string }) {
   const code = <code>{name}</code>;
   if (state === "running") return <>Executing {code}…</>;
-  return state === "failed" ? <>{code} failed</> : <>View Result from {code}</>;
+  return state === "failed" ? <>{code} failed</> : code;
 }
 
 // Arguments as key/value rows; run_command's command as a `$ <command>` line above them instead.
@@ -64,7 +64,7 @@ export function ToolCallsView({ message, messages = [] }: CopilotChatToolCallsVi
       <summary>
         <ToolStatus state={state} />
         <span className="spe-tool-title">
-          {state === "running" ? `Executing ${calls.length} tools…` : `View Results from ${calls.length} tools`}
+          {state === "running" ? `Executing ${calls.length} tools…` : `${calls.length} tools`}
           {failed > 0 && state !== "running" && <span className="spe-tool-group-failed"> · {failed} failed</span>}
         </span>
         <span className="spe-tool-names">{names}</span>

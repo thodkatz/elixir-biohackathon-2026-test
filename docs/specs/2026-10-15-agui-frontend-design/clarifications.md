@@ -246,3 +246,11 @@ in the parts it amends.
     *Reason:* asked for by the user on #30 (2026-11-04): the command was undiscoverable and looked like a
     message until sent. *Cost if wrong:* the menu's entry sends `/compact` with no focus, so a participant who
     wanted one has to type it after the command. *Amends:* §15, out-of-scope. *Status:* folded.
+
+20. **A finished tool card is titled by the tool's name alone** (2026-11-04). §6 *Tool calls are rendered* now titles a
+    finished card `<name>` instead of "View Result from `<name>`", and a finished group "N tools" instead of "View
+    Results from N tools"; "Executing `<name>`…" and "`<name>` failed" stay. *Reason:* asked for by the user while
+    testing #32 on de.NBI (2026-11-04): the check icon already says the call is done, so the words repeated it, and
+    Open WebUI's own card shows just the name. *Cost if wrong:* a finished card no longer says in words that it
+    can be opened; the chevron is the only cue. *Amends:* §6 *Tool calls are rendered*; clarification 17's
+    wording of the done title. *Status:* folded.

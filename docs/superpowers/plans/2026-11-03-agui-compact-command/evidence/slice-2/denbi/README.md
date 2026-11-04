@@ -1,7 +1,7 @@
 # Slice 2, task 5, step 8: decision 39 on de.NBI (2026-11-04)
 
 Instance `denbi-agui-01` (`agent-service-1`), model `qwen3.8-27b`, agent and chat UI from
-`impl/agui-compact-command-2-chat` at `91de8cf` (the slice merged with `main` after #29), deployed with
+`impl/agui-compact-command-2-chat` at `fa18ce8` (the slice merged with `main` after #29), deployed with
 `create.yml -i <worktree>/platform/ansible/inventory/hosts.yml -e spe_agui_source_dir=<worktree>/platform/agui`.
 Approved by the user on #30. The instance was not destroyed afterwards, at the user's request (ruling in the PR).
 

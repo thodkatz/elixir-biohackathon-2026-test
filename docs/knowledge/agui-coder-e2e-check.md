@@ -29,6 +29,9 @@ SPE_URL=http://127.0.0.1:13001/ SPE_WS=theo/agui-e2e python3 docs/knowledge/agui
   scroller (the inner `overflow-y-auto` divs fit their content) top to bottom and counts each row once; a short
   chat has no `[data-index]` rows and is counted directly. A vague prompt ("the dataset directory") can also end
   in pydantic-ai's `request_limit of 50` (run `failed`): name the path.
+- **A run can go in past the trigger without compacting**: the threshold is checked before every request, but a
+  run's first request estimates the history at characters / 3 (no usage carried across runs), and `seq` output is
+  about one token per character on qwen. Not a test failure while the request fits; `BACKLOG.md` has the fix.
 - **`/compact` is a run with no user message** (`run_start` with `messages: []`): count user messages without it.
 - **Port 13000 may be taken** by another session's SSH tunnel to `agent-service-1`: use another port, never kill it.
 - **`pkill -f agui-coder-e2e-check.py` kills its own shell** (`pkill-self-match.md`): kill by the PID.

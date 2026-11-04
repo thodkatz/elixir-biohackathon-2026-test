@@ -37,11 +37,12 @@ def vm(cmd):
 
 
 def journal(sid, tries=5):
-    """One session's journal, read whole: `coder ssh` can cut a large output short, so the byte count is checked.
+    """One session's journal, read whole: `coder ssh` can cut a large output short, so the byte count is checked
+    (`head -c` of the counted size: a live run appends between the count and the read).
     A session with no journal yet (its first run not started) reads as no runs."""
     for _ in range(tries):
         out = subprocess.run(["coder", "ssh", WS, "--", "cd ~/spe-frontend && docker compose exec -T chat-ui sh -c "
-                              f"'f=/data/sessions/{sid}.jsonl; [ -f $f ] || {{ echo none; exit; }}; wc -c < $f; cat $f'"],
+                              f"'f=/data/sessions/{sid}.jsonl; [ -f $f ] || {{ echo none; exit; }}; n=$(wc -c < $f); echo $n; head -c $n $f'"],
                              capture_output=True).stdout
         head, _, body = out.partition(b"\n")
         if head.strip() == b"none":
@@ -128,8 +129,9 @@ CHAT_ROWS = """async () => {
   let box = first.parentElement;  // the ancestor that actually scrolls (inner overflow-y-auto ones fit their content)
   while (box && !(/auto|scroll/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight + 1))
     box = box.parentElement;
+  if (!box || box.clientHeight < 1) { const [users, compactions] = count(document); return {rows: null, users, compactions}; }
   const seen = new Map(), pause = () => new Promise((r) => setTimeout(r, 250));
-  for (let top = 0; ; top += box.clientHeight / 2) {
+  for (let top = 0, step = 0; step < 2000; top += box.clientHeight / 2, step++) {
     box.scrollTop = top; await pause();
     for (const row of document.querySelectorAll('[data-index]')) seen.set(row.dataset.index, count(row));
     if (top >= box.scrollHeight - box.clientHeight) break;
@@ -172,13 +174,15 @@ with sync_playwright() as p:
         sA = session_of(A, after=0)
         B.get_by_role("button", name="New chat").click()
         sB, okB = send(B, "In two sentences: what does a GA4GH WES service do?")
-        ok("two sessions at once: B's run ended while A's ran", okB and sA != sB, f"A={sA} B={sB}")
         still = [r["status"] for r in journal(sA)["runs"]] == ["incomplete"]
+        ok("two sessions at once: B's run ended while A's ran", okB and sA != sB and still, f"A={sA} B={sB} A running={still}")
         B.goto(URL); B.wait_for_load_state("networkidle")
         open_session(B, sA)
+        still = [r["status"] for r in journal(sA)["runs"]] == ["incomplete"]
         B.screenshot(path=str(OUT / "1-switch-mid-run.png"), full_page=True)
-        ok("tab B opened A's session" + (" mid-run" if still else " (A had already ended)"),
-           session_of(B, 2) == sA and not errors(B), "; ".join(errors(B)))
+        shown = chat_rows(B)["users"]
+        ok("tab B opened A's session" + (" mid-run" if still else " (A had already ended)") + ": A's message shown",
+           session_of(B, 2) == sA and shown == 1 and not errors(B), f"user messages={shown} {errors(B)}")
         ok("A's run ended", wait_done(A, sA, 0))
         open_session(B, sA)
         st = [r["status"] for r in journal(sA)["runs"]]
@@ -198,6 +202,8 @@ with sync_playwright() as p:
         errs = errors(A)
         ok("stop then send at once: no 'Thread already running'", not any("already running" in e for e in errs), "; ".join(errs))
         ok("resent run ended", wait_done(A, sA, before + 1))
+        errs = errors(A)
+        ok("no error in the chat after the resent run", not errs, "; ".join(errs))
         st = [r["status"] for r in journal(sA)["runs"]]
         ok("journal: cancelled then completed", st[-2:] == ["cancelled", "completed"], str(st))
 
@@ -229,8 +235,8 @@ with sync_playwright() as p:
             ok(f"{sid[:8]}: already {n} compactions", True)
             continue
         _, okc = send(page, cmd)
-        n = compactions(page)
-        ok(f"{cmd!r} in {sid[:8]} ran", okc and n >= 1, f"dividers={n}")
+        n0, n = n, compactions(page)
+        ok(f"{cmd!r} in {sid[:8]} ran", okc and n > n0, f"dividers {n0} -> {n}")
         turn = 0
         while n < args.compactions + 1 and turn < args.turns:
             turn += 1

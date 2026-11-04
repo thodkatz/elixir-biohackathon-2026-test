@@ -47,13 +47,18 @@ on denbi-agui-01 with `create.yml`/`destroy.yml` from our main checkout and `spe
 (2026-11-04, #40: 2 Open WebUI chats and 17 AG-UI sessions, 8 with compactions, all agreed).
 
 ```bash
+# from the repository root of the main checkout
 ssh -F ~/.ssh/config -f -N -L 18080:127.0.0.1:8080 -L 13000:127.0.0.1:3000 agent-service-1
 python3 docs/knowledge/owui-e2e-chats.py <out>                     # Open WebUI: two chats, one with tools
 SPE_HOST=agent-service-1 python3 docs/knowledge/agui-all-features-check.py <out>   # AG-UI: tool run, /compact
 # before destroy.yml: what the chat shows (GET /api/sessions/<id>) and the raw journals
-curl -s http://127.0.0.1:13000/api/sessions > <snap>/sessions.json   # then per id: <snap>/api/<id>.json and
-#   <snap>/journals/<id>.jsonl (docker exec spe-frontend-chat-ui-1 cat /data/sessions/<id>.jsonl)
-ansible-playbook playbooks/destroy.yml -e @instances/denbi-agui-01.yml -e spe_confirm_reset=denbi-agui-01 </dev/null
+mkdir -p <snap>/api <snap>/journals
+curl -s http://127.0.0.1:13000/api/sessions > <snap>/sessions.json
+for id in $(python3 -c 'import json,sys; print(*[s["id"] for s in json.load(open(sys.argv[1]))])' <snap>/sessions.json); do
+  curl -s http://127.0.0.1:13000/api/sessions/$id > <snap>/api/$id.json
+  ssh -F ~/.ssh/config agent-service-1 docker exec spe-frontend-chat-ui-1 cat /data/sessions/$id.jsonl > <snap>/journals/$id.jsonl
+done
+(cd platform/ansible && ansible-playbook playbooks/destroy.yml -e @instances/denbi-agui-01.yml -e spe_confirm_reset=denbi-agui-01 </dev/null)
 python3 docs/knowledge/agui-archive-compare.py <snap> /data-share/runs/<run>/agui    # mismatches: 0
 ```
 
@@ -61,6 +66,9 @@ python3 docs/knowledge/agui-archive-compare.py <snap> /data-share/runs/<run>/agu
   events`, the click retried until the timeout): the driver dismisses it ("Okay, Let's Go!" or Escape).
 - **A compaction's summary is in the archived message's `output`**, not its `content` (which is empty); the Markdown
   shows it under `## Compacted`. A comparison of `content` alone reports every compacted session as a mismatch.
+  The script compares the `output` message parts (`content` joins them) with the chat's assistant texts, exactly
+  and in order; one archived turn holds the several API messages around its tool calls. A substring match
+  passes a dropped one-word reply that a later compaction summary quotes.
 - **Sessions from earlier deploys stay**: `create.yml` on an existing host keeps the chat's volume, so the archive
   holds them too (17 sessions where this run made 2); the agent's run log counts more runs than the journals (78 vs
   48 here) because it also survives earlier deploys.

@@ -12,13 +12,17 @@ PROMPTS = [
 
 
 def wait_done(page, timeout=600):
-    # the send button is replaced by a stop button while a response streams
-    page.wait_for_timeout(3000)
+    # the send button is replaced by a stop button while a response streams: wait for it to come, then to go
+    stop = page.locator("button[aria-label='Stop'], #stop-response-button")
+    try:
+        stop.first.wait_for(state="visible", timeout=60_000)
+    except Exception:
+        return False
     t0 = time.time()
     while time.time() - t0 < timeout:
-        if page.locator("button[aria-label='Stop'], #stop-response-button").count() == 0:
+        if stop.count() == 0:
             page.wait_for_timeout(3000)
-            if page.locator("button[aria-label='Stop'], #stop-response-button").count() == 0:
+            if stop.count() == 0:
                 return True
         time.sleep(3)
     return False

@@ -32,7 +32,8 @@ task 4, 2026-11-03). Whether vLLM's own `max_model_len` is the same figure is st
 stopped, the `coder ssh … printenv` above hung past the Bash tool's 2-minute timeout, and `coder list` showed
 the workspace `Starting`. It is a full portal build (about 12 minutes), `coder stop` refuses it meanwhile ("A
 workspace build is already active"), and it counts against "one instance at a time". Check `coder list` first.
-With every workspace stopped, reuse the key the last deploy wrote on the VM instead, after checking it on a
+With every workspace stopped, reuse the key the last deploy wrote on the VM instead (only while an instance is
+deployed there: a `destroy.yml` reset removes `~/spe-frontend` and its `agent.env`), after checking it on a
 de.NBI VM (prints only the status, 200 or 401):
 
 ```bash

@@ -988,6 +988,9 @@ def check_compact_command(r: Run) -> None:
     page.reload()
     expect(page.locator(".spe-compaction")).to_have_count(1, timeout=10_000)
     expect(page.get_by_text("/compact keep the canary paths", exact=True)).to_have_count(0)
+    # A reload does not scroll a restored session to its newest content (BACKLOG.md), unlike a live send:
+    # bring the divider into view so the shot shows it, not an earlier turn.
+    page.locator(".spe-compaction").scroll_into_view_if_needed()
     r.shot("compact-command-reload")
     # Turn numbering restarts after a compaction (see check_compaction), so this answer is "Turn 1" again, as the
     # first question's still on the page is: r.send would hit a strict-mode double match. Count the answers.

@@ -25,6 +25,7 @@ TITLE_PROMPT = files("spe_agent").joinpath("title_prompt.md").read_text()
 MAX_CONTENT_CHARS = 2000  # each message's content, before it reaches the prompt
 MAX_TITLE_CHARS = 80
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+_TITLE_FIELD = re.compile(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)')
 
 
 class TitleMessage(BaseModel):
@@ -59,7 +60,8 @@ def _clean(text: str) -> str:
 
 
 def parse_title(raw: str) -> str:
-    """The model's answer: JSON `{"title": ...}`, in a ``` fence or not, else the bare text."""
+    """The model's answer: JSON `{"title": ...}`, in a ``` fence or not, prose around the JSON, JSON cut off
+    mid-string, or else the bare text. JSON-ish with no usable title in it answers "" (422), not the raw JSON."""
     text = raw.strip()
     fence = _FENCE.search(text)
     body = fence.group(1).strip() if fence else text
@@ -69,7 +71,12 @@ def parse_title(raw: str) -> str:
         data = None
     if isinstance(data, dict) and isinstance(data.get("title"), str):
         return _clean(data["title"])
-    return _clean(text)
+    field = _TITLE_FIELD.search(body)  # JSON inside prose, or cut off mid-string
+    if field:
+        return _clean(field.group(1))
+    if "{" in body:  # JSON-ish but no title in it: no usable title (422)
+        return ""
+    return _clean(body)
 
 
 async def generate_title(model: Model, cfg: TitleCfg, body: TitleRequest) -> tuple[str | None, dict]:

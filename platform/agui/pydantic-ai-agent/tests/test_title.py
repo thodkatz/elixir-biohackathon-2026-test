@@ -102,12 +102,18 @@ async def test_model_error_is_422(tmp_path):
     ('"Password   Reset"', "Password Reset"),
     ('Password Reset', "Password Reset"),
     ("x" * 200, "x" * 80),
+    # prose around JSON, or JSON cut off mid-string: the title field, not the whole raw text
+    ('Sure! {"title": "Password Reset"}', "Password Reset"),
+    ('{"title": "Password Re', "Password Re"),
+    # a fenced non-JSON body: the fenced text, not the fence markers or language tag
+    ('```\nPassword Reset\n```', "Password Reset"),
 ])
 def test_parse_title_cases(raw, title):
     assert parse_title(raw) == title
 
 
-@pytest.mark.parametrize("raw", ["", "   ", '{"title": ""}', '{"title": "   "}'])
+@pytest.mark.parametrize("raw", ["", "   ", '{"title": ""}', '{"title": "   "}',
+                                  '{"name": "x"}'])  # JSON-ish but no usable title: no title, not the raw JSON
 def test_parse_title_empty(raw):
     assert parse_title(raw) == ""
 

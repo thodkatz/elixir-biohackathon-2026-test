@@ -80,7 +80,7 @@ export function classify(conv: Conversation | null, client: Message[]): Classifi
     const command = id !== null && !known(id) ? conv?.commands.get(id) : undefined;
     if (command) {
       // A command's message (spec §15, step 2): known for this purpose only, never the anchor, new or on the
-      // path. Unchanged means a user message that parses to the same command (spec §15, clarification 16).
+      // path. Unchanged means a user message that parses to the same command (spec §15, clarification 17).
       const parsed = message.role === "user" ? parseCommand(message.content) : null;
       if (!parsed || !sameCommand(parsed, command)) ignored.push({ kind: "edited", message });
       seen.add(id!); // id !== null: that's what made `command` lookup possible above

@@ -1094,7 +1094,7 @@ test("decision 31: a client's spe_command is removed on every run and kept in ru
   assert.deepEqual(command.sent.forwardedProps, { other: 1, spe_command: { name: "compact", focus: "mine" } });
 });
 
-test("clarification 16: forwardedProps that is not an object: {} plus the command on a command run, as sent otherwise", async () => {
+test("clarification 17: forwardedProps that is not an object: {} plus the command on a command run, as sent otherwise", async () => {
   for (const props of [null, [1], "x"]) {
     assert.deepEqual((await commandCase("/compact", props)).sent.forwardedProps,
       { spe_command: { name: "compact", focus: null } }, JSON.stringify(props));

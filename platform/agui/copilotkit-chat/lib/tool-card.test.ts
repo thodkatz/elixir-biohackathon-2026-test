@@ -51,6 +51,25 @@ test("readResult: any other JSON is pretty-printed; text that is not JSON is sho
   assert.deepEqual(readResult("run_command", truncated), { failed: false, body: truncated });
 });
 
+test("readResult: a result the agent truncated still fails on a nonzero exit_code or a leading error", () => {
+  const cutOk = '{"id":"1","command":"make","status":"done","exit_code":0,"output":[{"data":"ok\n[truncated: 5 of 9 bytes shown]';
+  assert.equal(readResult("run_command", cutOk).failed, false);
+  const cutBad = '{"id":"1","command":"make","status":"done","exit_code":2,"output":[{"data":"boom\n[truncated: 5 of 9 bytes shown]';
+  assert.equal(readResult("run_command", cutBad).failed, true);
+  assert.equal(readResult("x", '{"error": "HTTP error 500: ' + "x".repeat(50) + "\n[truncated: 10 of 99 bytes shown]").failed, true);
+});
+
+test("readResult: a command still running when the call returned is not a failure, and says so", () => {
+  const r = JSON.stringify({ id: "p9", status: "running", exit_code: null, output: [{ type: "output", data: "partial" }] });
+  assert.deepEqual(readResult("run_command", r), { failed: false, body: "partial\n[still running: process p9]" });
+});
+
+test("readResult: the exit code note survives the cut", () => {
+  const long = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
+  const r = JSON.stringify({ status: "done", exit_code: 3, output: long });
+  assert.match(readResult("run_command", r).body, /more characters\)\n\[exit code 3\]$/);
+});
+
 test("readResult: a long body is cut to its first lines, saying how much is left out", () => {
   const text = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
   const { body } = readResult("x", text);

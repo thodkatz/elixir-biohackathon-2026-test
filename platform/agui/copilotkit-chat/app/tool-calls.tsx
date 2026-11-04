@@ -2,6 +2,7 @@
 // Tool-call cards, after Open WebUI's ToolCallDisplay: a status icon, "Executing <name>…" while the call
 // runs and "View Result from <name>" once it is done, and, unfolded, the arguments and the result. The
 // calls of one model response sit under one group header. All of it is React text, never HTML.
+import { contentToText } from "@ag-ui/client";
 import { CopilotChatToolCallsView, type CopilotChatToolCallsViewProps } from "@copilotkit/react-core/v2";
 import {
   argumentRows, cardState, commandOf, groupState, readResult, type CallStatus, type CardState,
@@ -53,8 +54,7 @@ export function ToolCallsView({ message, messages = [] }: CopilotChatToolCallsVi
   if (calls.length < 2) return <CopilotChatToolCallsView message={message} messages={messages} />;
   const states = calls.map((call) => {
     const reply = messages.find((m) => m.role === "tool" && m.toolCallId === call.id);
-    return reply ? cardState("complete", typeof reply.content === "string" ? reply.content : "", call.function.name)
-      : "running";
+    return reply ? cardState("complete", contentToText(reply.content as Parameters<typeof contentToText>[0]), call.function.name) : "running";
   });
   const state = groupState(states);
   const failed = states.filter((s) => s === "failed").length;

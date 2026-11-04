@@ -40,14 +40,16 @@ function outputOf(output: unknown): string | null {
 }
 
 // A call failed when its result is a JSON object with a string `error` (the agent's own failures and the
-// sandbox's HTTP errors) or a nonzero `exit_code` (a command that ran and failed). A result that is not
-// JSON, such as one the agent truncated, is shown as is and counts as done.
+// sandbox's HTTP errors) or a nonzero `exit_code` (a command that ran and failed). A result the agent cut to
+// its output cap is not JSON: it is shown as is, and its leading `{"error":` or its `"exit_code"` still tell.
+// A command still running when the call returned (`status: "running"`) is not a failure; its body says so.
 export function readResult(name: string, result: string): { failed: boolean; body: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(result);
   } catch {
-    return { failed: false, body: cut(result) };
+    const exit = /"exit_code"\s*:\s*(-?\d+)/.exec(result);
+    return { failed: /^\s*\{\s*"error"\s*:/.test(result) || (exit !== null && Number(exit[1]) !== 0), body: cut(result) };
   }
   if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     const r = parsed as Record<string, unknown>;
@@ -55,7 +57,9 @@ export function readResult(name: string, result: string): { failed: boolean; bod
     const exit = typeof r.exit_code === "number" ? r.exit_code : 0;
     const output = name === "run_command" ? outputOf(r.output) : null;
     if (output !== null) {
-      return { failed: exit !== 0, body: cut(exit !== 0 ? `${output}\n[exit code ${exit}]` : output) };
+      const note = exit !== 0 ? `\n[exit code ${exit}]`
+        : r.status === "running" ? `\n[still running: process ${text(r.id)}]` : "";
+      return { failed: exit !== 0, body: cut(output) + note };
     }
     if (exit !== 0) return { failed: true, body: cut(JSON.stringify(parsed, null, 2)) };
   }

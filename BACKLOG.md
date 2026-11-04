@@ -39,14 +39,6 @@ start reads this section; keep it short.
   reasoning), a rename sticks, the sidebar drags, the theme toggles without a flash on reload. From #29's *Checks*;
   waits on the user: an OK for the redeploy and its paid calls (#29's handoff said it was approved here, but no
   approval was recorded).
-- AG-UI chat: tool-call cards like Open WebUI's `ToolCallDisplay` — chat UI only (`ToolCard`,
-  `app/page.tsx:73`, and its CSS): a status icon (spinner + shimmer while running, check when done, ✕ on
-  error) instead of the "preparing…/running…/done" text; "Executing `<name>`…" while running and "View
-  Result from `<name>`" once done, in place of the brief/status spans; the arguments shown as key/value
-  rows instead of a raw JSON dump; the result in a code block; consecutive tool calls grouped under one
-  header; `run_command` shown as a `$ <command>` line; and a distinct error state for a failed call. Asked
-  for by the user (2026-11-03), alongside the model-written titles, resizable sidebar and theme toggle built
-  in PR #29. Due: the next Change after #29.
 - Upstream PR for the AG-UI package (sessions, conversation record, compaction, `/compact`, chat minors) as its
   final state, not each fork commit replayed — needs a *package port* path in `docs/guides/contributing-upstream.md`
   (the user's choice of one coherent upstream package, 2026-11-03, PR #19). Prepared by a session as one

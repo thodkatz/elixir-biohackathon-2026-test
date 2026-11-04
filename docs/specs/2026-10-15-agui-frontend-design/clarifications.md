@@ -254,3 +254,13 @@ in the parts it amends.
     Open WebUI's own card shows just the name. *Cost if wrong:* a finished card no longer says in words that it
     can be opened; the chevron is the only cue. *Amends:* §6 *Tool calls are rendered*; clarification 17's
     wording of the done title. *Status:* folded.
+
+21. **The theme control becomes a toggle at the chat pane's top right** (2026-11-04). §6 *Look* and *Layout*: the
+    sidebar footer's System / Light / Dark select is replaced by a pill switch (sun, moon, a sliding knob) pinned
+    to the chat pane's top right. The stored values stay `system` / `light` / `dark` under `spe.theme`, and the
+    before-paint script is unchanged: a click flips the rendered theme, stored as `light` or `dark`, or as
+    `system` when the system already prefers the new theme. *Reason:* asked for by the user while testing #32 on
+    de.NBI (2026-11-04): the footer select looked dated and was hard to find. *Cost if wrong:* there is no
+    explicit "System" option; a participant whose system theme changes while a forced theme is stored keeps the
+    forced one until they flip the toggle to the system's theme. *Amends:* §6 *Look*, *Layout*; clarification
+    16's footer control. *Status:* folded.

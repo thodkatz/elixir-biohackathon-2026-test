@@ -62,8 +62,7 @@ The journals hold whatever participants typed and tools returned, canary values 
 volume like the agent's run log.
 
 **Sidebar.** `app/sidebar.tsx`, in Open WebUI's layout and colours: *New chat*,
-the sessions by title only, grouped and filtered by `lib/sidebar-view.ts` (below), a theme control in the
-footer (System / Light / Dark), and a button that collapses the sidebar. Each row has a `⋯` menu
+the sessions by title only, grouped and filtered by `lib/sidebar-view.ts` (below), and a button that collapses the sidebar. Each row has a `⋯` menu
 (`app/row-menu.tsx`): rename (also a double-click on the
 title; Enter, Tab or a click outside saves, Escape cancels), pin, tags, hide, and delete after a confirmation
 (`app/delete-dialog.tsx`; the journal is kept and archived). The menu closes on a click outside, Escape or a choice;

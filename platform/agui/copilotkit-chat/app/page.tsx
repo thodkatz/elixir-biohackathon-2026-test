@@ -137,27 +137,6 @@ function Chat() {
     const id = activeRef.current;
     if (id && list.some((s) => s.id === id)) showInUrl(id);
   }, []);
-  // A New chat's first finished run, once recorded: one call for its model-written title (the server writes
-  // one only if the session has no title of its own); until it answers, or if it fails, the list shows the
-  // first message as the title.
-  const titles = useRef(new TitleTrigger());
-  const onRecorded = useCallback((id: string, finished: boolean) => {
-    if (!titles.current.take(id, finished)) return;
-    askTitle(id)
-      .then((meta) => setSessions((list) => list.map((s) => (s.id === id ? meta : s))))
-      .catch((e: unknown) => console.warn(`session ${id}: no model title: ${messageOf(e)}`));
-  }, []);
-  const { busy, noteRunError } = useRunReconcile({ openId: active ?? "", onList, onError: setError, onRecorded });
-
-  // The history goes onto the agent first, then CopilotChat remounts on the new thread
-  // (key={id}): a freshly mounted chat on a non-explicit thread keeps the agent's messages,
-  // and makes no connect request that would clear them (README, Sessions).
-  const select = useCallback((id: string, messages: Message[]) => {
-    agent.setMessages(messages);
-    activeRef.current = id;
-    setActive(id);
-  }, [agent]);
-
   const refresh = useCallback(async (): Promise<SessionMeta[] | null> => {
     try {
       const list = await fetchSessions();
@@ -168,6 +147,28 @@ function Chat() {
       return null;
     }
   }, []);
+
+  // A New chat's first finished run, once recorded: one call for its model-written title (the server writes
+  // one only if the session has no title of its own); until it answers, or if it fails, the list shows the
+  // first message as the title. The list is refetched rather than patched with the answer, so a rename
+  // that lands while the title call is in flight is not overwritten by it.
+  const titles = useRef(new TitleTrigger());
+  const onRecorded = useCallback((id: string, finished: boolean) => {
+    if (!titles.current.take(id, finished)) return;
+    askTitle(id)
+      .then(() => refresh())
+      .catch((e: unknown) => console.warn(`session ${id}: no model title: ${messageOf(e)}`));
+  }, [refresh]);
+  const { busy, noteRunError } = useRunReconcile({ openId: active ?? "", onList, onError: setError, onRecorded });
+
+  // The history goes onto the agent first, then CopilotChat remounts on the new thread
+  // (key={id}): a freshly mounted chat on a non-explicit thread keeps the agent's messages,
+  // and makes no connect request that would clear them (README, Sessions).
+  const select = useCallback((id: string, messages: Message[]) => {
+    agent.setMessages(messages);
+    activeRef.current = id;
+    setActive(id);
+  }, [agent]);
 
   // New chat: a fresh thread id and an empty history; it joins the list once its first run is recorded.
   const startNew = useCallback(() => {

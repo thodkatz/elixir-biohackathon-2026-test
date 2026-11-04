@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT, MAX, MIN, STEP, clampWidth, parseWidth, stepWidth } from "./sidebar-width.ts";
+import { DEFAULT, MAX, MIN, STEP, VIEWPORT_MARGIN, clampWidth, maxFor, parseWidth, stepWidth } from "./sidebar-width.ts";
 
 test("clampWidth keeps a value inside [MIN, MAX], clamps outside it", () => {
   assert.equal(clampWidth(MIN), MIN);
@@ -25,4 +25,12 @@ test("stepWidth moves by STEP and clamps at the bounds", () => {
   assert.equal(stepWidth(260, -1), 260 - STEP);
   assert.equal(stepWidth(MAX, 1), MAX);
   assert.equal(stepWidth(MIN, -1), MIN);
+});
+
+test("maxFor: the viewport's width minus the margin, never above MAX, never below 0", () => {
+  assert.equal(maxFor(375), 375 - VIEWPORT_MARGIN); // a phone: well under MAX
+  assert.equal(maxFor(1200), MAX); // a desktop: the margin would allow more than MAX
+  assert.equal(maxFor(MAX + VIEWPORT_MARGIN), MAX); // exactly at the MAX boundary
+  assert.equal(maxFor(VIEWPORT_MARGIN), 0); // viewport no wider than the margin itself
+  assert.equal(maxFor(10), 0); // narrower still: never negative
 });

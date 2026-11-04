@@ -197,9 +197,15 @@ body {
 
 /* ---------- Sidebar (Open WebUI's) ---------- */
 
-.spe-sidebar { position: relative; width: var(--sidebar-width); flex: none; box-sizing: border-box; display: flex;
-  flex-direction: column; padding: 8px 8px 10px; background: var(--sidebar-bg);
-  border-right: 1px solid var(--sidebar-edge); font-size: 13px; line-height: 20px; color: var(--text); }
+/* min() caps the rendered width at the viewport minus a 48px margin for the chat pane, so neither a
+   stored desktop width nor a drag toward MAX causes horizontal page scroll on a phone-width
+   viewport (there is no narrow-screen collapse or overlay here to rely on instead). The margin must
+   match VIEWPORT_MARGIN in lib/sidebar-width.ts, which the resize handle's own cap (aria-valuemax,
+   drag, keyboard) is computed from, so the two never disagree. */
+.spe-sidebar { position: relative; width: min(var(--sidebar-width), calc(100vw - 48px)); flex: none;
+  box-sizing: border-box; display: flex; flex-direction: column; padding: 8px 8px 10px;
+  background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-edge); font-size: 13px;
+  line-height: 20px; color: var(--text); }
 .spe-sidebar-collapsed { width: 52px; align-items: center; gap: 4px; padding: 8px 0; }
 /* The drag handle, on the sidebar's right edge: a thin strip, wide enough to grab, that straddles
    the border. Hidden while collapsed, since the collapsed nav never renders one. */

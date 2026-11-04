@@ -13,7 +13,7 @@ import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } 
 import type { MouseEvent } from "react";
 import { removeSession, renamePatch, tagSuggestions, updateSession, withTag, withoutTag } from "../lib/client.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
-import { DEFAULT as DEFAULT_WIDTH, MAX as MAX_WIDTH, MIN as MIN_WIDTH, clampWidth, parseWidth, stepWidth } from "../lib/sidebar-width.ts";
+import { DEFAULT as DEFAULT_WIDTH, MAX as MAX_WIDTH, MIN as MIN_WIDTH, clampWidth, maxFor, parseWidth, stepWidth } from "../lib/sidebar-width.ts";
 import { filterSessions, sections } from "../lib/sidebar-view.ts";
 import type { ViewFilter } from "../lib/sidebar-view.ts";
 import { DeleteDialog } from "./delete-dialog";
@@ -74,10 +74,22 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   const [busy, setBusy] = useState<Busy | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   // DEFAULT_WIDTH on the server and on the first client render (so there is no hydration
-  // mismatch); the stored width, if any, loads right after in an effect.
+  // mismatch); the stored width, if any, loads right after in an effect. The stored value itself
+  // is never put through the viewport cap below, so a desktop width survives a visit from a phone.
   const [width, setWidth] = useState(DEFAULT_WIDTH);
+  // MAX_WIDTH until the viewport is known (effect: there is no window during SSR), then kept live
+  // across a resize. Only used to report and limit the *live* range (aria, drag, keyboard); the
+  // CSS `min(var(--sidebar-width), calc(100vw - 48px))` on `.spe-sidebar` is what actually stops a
+  // wider `--sidebar-width` from causing horizontal page scroll.
+  const [viewportMax, setViewportMax] = useState(MAX_WIDTH);
   const drag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   useEffect(() => setWidth(readStoredWidth()), []);
+  useEffect(() => {
+    const update = () => setViewportMax(maxFor(window.innerWidth));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
   const triggers = useRef(new Map<string, HTMLButtonElement>());
   const popover = useRef<HTMLDivElement>(null);
   // The session id whose tag change is in flight, until the list is fetched again: each patch is
@@ -220,9 +232,11 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   const newChat = () => { end(); onNew(); };
 
   // The resize handle: pointer drag (with pointer capture, so leaving the handle mid-drag still
-  // tracks), Left/Right to step, double-click to reset. Every change is clamped and persisted.
+  // tracks), Left/Right to step, double-click to reset. Every change is clamped (including to the
+  // current viewport, read fresh here rather than trusted from state, in case a resize landed
+  // between renders) and persisted.
   const resizeTo = (next: number) => {
-    const clamped = clampWidth(next);
+    const clamped = Math.min(clampWidth(next), maxFor(window.innerWidth));
     setWidth(clamped);
     writeStoredWidth(clamped);
   };
@@ -296,6 +310,8 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   };
   return (
     <nav className="spe-sidebar" aria-label="Sessions"
+      // Scoped to this nav on purpose, not a shared ancestor: `.spe-sidebar`'s own CSS caps it
+      // against the viewport (globals.css), so setting it anywhere else would need that cap too.
       style={{ "--sidebar-width": `${width}px` } as CSSProperties}>
       <div className="spe-sidebar-top">
         <span className="spe-brand">SPE agent</span>
@@ -307,9 +323,9 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize sidebar"
-        aria-valuenow={width}
+        aria-valuenow={Math.min(width, viewportMax)}
         aria-valuemin={MIN_WIDTH}
-        aria-valuemax={MAX_WIDTH}
+        aria-valuemax={viewportMax}
         tabIndex={0}
         onPointerDown={onResizerPointerDown}
         onPointerMove={onResizerPointerMove}

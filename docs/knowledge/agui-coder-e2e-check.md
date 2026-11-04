@@ -33,5 +33,11 @@ SPE_URL=http://127.0.0.1:13001/ SPE_WS=theo/agui-e2e python3 docs/knowledge/agui
   run's first request estimates the history at characters / 3 (no usage carried across runs), and `seq` output is
   about one token per character on qwen. Not a test failure while the request fits; `BACKLOG.md` has the fix.
 - **`/compact` is a run with no user message** (`run_start` with `messages: []`): count user messages without it.
+- **The live archive from inside the workspace** needs the creation hand-off, which lives on the portal VM
+  (`archive.yml` says "output/cw-…/hosts.yml missing" and archives nothing). Write a local one first:
+  `cd ~/sperange/platform/ansible && printf 'ssh_target: localhost\nssh_args: ""\n' > output/cw-<user>-<ws>/hosts.yml
+  && ansible-playbook playbooks/archive.yml -e @instances/local.yml </dev/null`; the run lands in
+  `/data-share/runs/<time>_cw-<user>-<ws>/agui/` (journals in `agui-journals/`). Its task list shows the final
+  archive's "Stop the chat UI" tasks too: they are skipped in a live archive.
 - **Port 13000 may be taken** by another session's SSH tunnel to `agent-service-1`: use another port, never kill it.
 - **`pkill -f agui-coder-e2e-check.py` kills its own shell** (`pkill-self-match.md`): kill by the PID.

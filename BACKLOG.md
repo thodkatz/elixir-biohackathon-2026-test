@@ -28,7 +28,9 @@ start reads this section; keep it short.
   airlock when `openwebui` is in `spe_frontends`; due: before slice 2.
 - AG-UI via Coder, before any upstream PR (`upstream/main`, with its clone-on-VM layout, merged in #35): (1) done
   (#36, 2026-11-04: `denbi-agui-01` on the clone-on-VM layout from `main`, all-features check 17/17, live archive
-  agrees; needed #37); (2) test end to end in a workspace from the
+  agrees; needed #37); (2) done (#38, 2026-11-04: workspace `theo/agui-e2e` from `spe-ga4gh-baseline`, both frontends,
+  `~/sperange` at `62f8458`; driver runs 3 and 4 plus a live archive, every check passed, no chat fix needed)
+  — it tested end to end in a workspace from the
   portal's main template: `~/sperange` fetches our fork's branch, `spe-apply all`, then in the chat: several sessions open at once, switching between them (also
   mid-run), new / rename / delete, reload and reopen, automatic compaction, `/compact` with and without a focus,
   stop mid-run and send again at once (no "Thread already running"), the live archive; (3) the archive on stop runs from the portal's upstream checkout, so test it with

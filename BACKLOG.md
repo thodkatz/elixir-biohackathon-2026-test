@@ -16,7 +16,6 @@ start reads this section; keep it short.
   and plan as 0014's findings were (clarifications, tasks rewritten) — from the user's comment on #3
   (2026-10-23, "check 0015 review point as well"); waits on the user: 0015 is `proposed`, accept it first;
   due: before the ladder's slice 5 (agent suite), whose plan 0015 reviews.
-- Dev VM: redeploy `dev-local` (`create.yml -e @instances/dev-local.yml`, no model call) and run `verify.yml`, so the agent there compacts at Haiku's window: the private instance file already says `spe_agent_context_window_tokens: 1000000`, but `/` had 4.5 GB free on 2026-11-03, under the preflight's 5 — from the compaction plan, slice 3/3, task 4, step 5; waits on the user, who decides whether to prune the dev VM's Docker build cache (12 GB, `docker builder prune -af`, see `docs/knowledge/denbi-disk-full.md`).
 - AG-UI `/compact`: plan merged (#27, `docs/superpowers/plans/2026-11-03-agui-compact-command/`) — asked for by the user (2026-11-03, PR #21); due: slice 2/2 (`impl/agui-compact-command-2-chat`), next (slice 1/2 merged, #28).
 - AG-UI via Coder, before any upstream PR: (1) merge `upstream/main` into our `main`, moving our AG-UI work onto
   its clone-on-VM layout (`platform/instance/compose.yml`, `spe-apply`; `roles/agui/templates/docker-compose.yml.j2`

@@ -1003,6 +1003,7 @@ def check_compact_command(r: Run) -> None:
     box.fill("/co")
     expect(menu.get_by_role("option", name=re.compile(r"^compact"))).to_be_visible()
     expect(marked).to_have_count(0)
+    expect(page.get_by_test_id("copilot-add-menu-button")).to_be_disabled()
     r.shot("compact-menu")
     box.fill("/compact keep the canary paths")
     expect(menu).to_have_count(0)

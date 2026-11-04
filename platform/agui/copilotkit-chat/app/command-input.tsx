@@ -9,6 +9,9 @@ import { offersCompact, parseCommand } from "../lib/command.ts";
 // "compact" first, so the menu's filter (label starts with what follows the `/`) puts it on top.
 const COMPACT_LABEL = "compact · summarise the conversation so far (/compact <focus> to say what to keep)";
 
+// The "+" button shows `toolsMenu` too; attachments are off, so it stays disabled rather than holding the entry.
+const NO_ADD_MENU = { toolsMenu: [] };
+
 function render(props: ComponentProps<typeof CopilotChatInput>) {
   const { value = "", onSubmitMessage } = props;
   // Picking the entry (a click, or Enter while it is highlighted) clears the input and sends a bare `/compact`:
@@ -21,6 +24,7 @@ function render(props: ComponentProps<typeof CopilotChatInput>) {
     <CopilotChatInput
       {...props}
       toolsMenu={toolsMenu}
+      addMenuButton={NO_ADD_MENU}
       data-command={command ? "compact" : undefined}
     />
   );

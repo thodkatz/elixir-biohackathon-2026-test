@@ -35,9 +35,10 @@ test("sameCommand compares name and focus", () => {
   assert.ok(!sameCommand({ name: "compact", focus: "a" }, { name: "compact", focus: null }));
 });
 
-test("offersCompact: while the first line is a prefix of /compact, and only then", () => {
-  for (const value of ["/", "/c", "/comp", "/compact", "/compact\n"]) assert.equal(offersCompact(value), true, value);
-  for (const value of ["", "c", " /compact", "/compact ", "/compact keep x", "/compacted", "/x", "/COMPACT", "hi\n/compact"]) {
+test("offersCompact: while the whole text is a prefix of /compact, and only then", () => {
+  for (const value of ["/", "/c", "/comp", "/compact"]) assert.equal(offersCompact(value), true, value);
+  for (const value of ["", "c", " /compact", "/compact ", "/compact keep x", "/compact\n", "/compact\nkeep x", "/\nhello",
+    "/compacted", "/x", "/COMPACT", "hi\n/compact"]) {
     assert.equal(offersCompact(value), false, value);
   }
 });

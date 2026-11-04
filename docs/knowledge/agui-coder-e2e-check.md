@@ -1,0 +1,28 @@
+# The AG-UI end-to-end check in a Coder workspace
+
+`agui-coder-e2e-check.py` (next to this note) drives the AG-UI chat of a Coder workspace in two headless tabs:
+two sessions at once, the other tab opening a session mid-run, stop and send again at once, new / rename /
+delete, long conversations until each has several compactions, `/compact` with and without a focus, then
+reload and reopen every session and compare the chat with its journal. Paid model calls: a few dozen.
+
+```bash
+coder port-forward theo/agui-e2e --tcp 13001:3000 &        # run_in_background in Claude Code
+SPE_URL=http://127.0.0.1:13001/ SPE_WS=theo/agui-e2e python3 docs/knowledge/agui-coder-e2e-check.py <out> --turns 16
+# after a crash past step 3: --resume <A>,<B>,<C>,<D> skips steps 1-3 and sessions that already compacted enough
+```
+
+- **Lower the window first, in the workspace only**: `sed -i 's/context_window_tokens: 262144/context_window_tokens:
+  48000/' ~/spe-frontend/agent.yaml && docker compose -p spe-frontend restart agent`. 24000 is too small: one
+  tool-heavy run (about 5.5k tokens of system prompt and tools per request) compacts three times and fails "The
+  conversation is still too long after compacting it. Start a new chat." (the guard, not a bug). At 48000 a
+  `seq 1 3000` turn compacts about every second turn. `spe-apply all` writes the real window back.
+- **`coder ssh` cuts a large output short**: one JSON of every journal (3 MB) came back truncated
+  (`JSONDecodeError: Unterminated string`). Read one journal at a time and check `wc -c` against the bytes
+  received (`journal()` does), or a cut copy silently loses runs (`read_journal` skips a torn last line).
+- **The session id is in the URL only once a run has ended**: mid-run, `?session=` is absent. Take it from the
+  `threadId` of the page's `POST …/agent/spe/run` (`track()`), as `platform/dev/e2e/sessions.py`'s `live_run` does.
+- **A tab cannot switch sessions during its own run** (New chat and the rows are disabled): "switching mid-run"
+  means another tab opening the running session.
+- **`/compact` is a run with no user message** (`run_start` with `messages: []`): count user messages without it.
+- **Port 13000 may be taken** by another session's SSH tunnel to `agent-service-1`: use another port, never kill it.
+- **`pkill -f agui-coder-e2e-check.py` kills its own shell** (`pkill-self-match.md`): kill by the PID.

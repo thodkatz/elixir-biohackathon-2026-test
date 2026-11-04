@@ -15,12 +15,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "platform" / "dev" 
 from sessions import read_journal, summary  # noqa: E402
 from playwright.sync_api import expect, sync_playwright  # noqa: E402
 
-URL = "http://127.0.0.1:13000/"
+URL = os.environ.get("SPE_URL", "http://127.0.0.1:13000/")
 WS = os.environ.get("SPE_WS", "theo/agui-e2e")
 ap = argparse.ArgumentParser()
 ap.add_argument("out")
 ap.add_argument("--turns", type=int, default=14)
 ap.add_argument("--compactions", type=int, default=2)
+ap.add_argument("--resume", help="A,B,C,D session ids of an earlier run: skip steps 1-3")
 args = ap.parse_args()
 OUT = Path(args.out); OUT.mkdir(parents=True, exist_ok=True)
 results = []
@@ -35,24 +36,47 @@ def vm(cmd):
     return subprocess.run(["coder", "ssh", WS, "--", cmd], capture_output=True, text=True).stdout
 
 
-def journals():
-    script = ("const fs=require('fs');const d='/data/sessions';const o={};"
-              "for(const f of fs.readdirSync(d))if(f.endsWith('.jsonl'))o[f.slice(0,-6)]=fs.readFileSync(d+'/'+f,'utf8');"
-              "process.stdout.write(JSON.stringify(o))")
-    out = vm(f"cd ~/spe-frontend && docker compose exec -T chat-ui node -e \"{script}\"")
-    return {sid: summary(read_journal(text)) for sid, text in json.loads(out or "{}").items()}
+def journal(sid, tries=5):
+    """One session's journal, read whole: `coder ssh` can cut a large output short, so the byte count is checked.
+    A session with no journal yet (its first run not started) reads as no runs."""
+    for _ in range(tries):
+        out = subprocess.run(["coder", "ssh", WS, "--", "cd ~/spe-frontend && docker compose exec -T chat-ui sh -c "
+                              f"'f=/data/sessions/{sid}.jsonl; [ -f $f ] || {{ echo none; exit; }}; wc -c < $f; cat $f'"],
+                             capture_output=True).stdout
+        head, _, body = out.partition(b"\n")
+        if head.strip() == b"none":
+            return {"runs": [], "title": None, "deleted_at": None}
+        if head.strip().isdigit() and len(body) == int(head):
+            return summary(read_journal(body.decode()))
+        time.sleep(3)
+    raise RuntimeError(f"journal {sid}: no complete copy in {tries} tries")
+
+
+def journals(*sids):
+    return {sid: journal(sid) for sid in sids}
 
 
 def done_runs(sid):
-    rec = journals().get(sid)
-    return [r for r in rec["runs"] if r["status"] != "incomplete"] if rec else []
+    return [r for r in journal(sid)["runs"] if r["status"] != "incomplete"]
 
 
-def session_of(page, seconds=30):
+THREADS = {}  # page -> the threadIds of its runs, in order: the URL gets ?session= only once a run has ended
+
+
+def track(page):
+    THREADS[page] = []
+    page.on("request", lambda req: THREADS[page].append(json.loads(req.post_data or "{}").get("threadId"))
+            if req.method == "POST" and req.url.endswith("/agent/spe/run") else None)
+
+
+def session_of(page, seconds=30, after=None):
+    """The page's session: from its URL, or (after a submit) the threadId of its newest run request."""
     t0 = time.time()
     while time.time() - t0 < seconds:
+        if after is not None and len(THREADS[page]) > after:
+            return THREADS[page][-1]
         m = re.search(r"[?&]session=([^&]+)", page.url)
-        if m:
+        if m and after is None:
             return m.group(1)
         page.wait_for_timeout(500)
     return None
@@ -83,8 +107,9 @@ def send(page, text, timeout=900):
     """Send in the page's session (a new one if none yet); True when its journal has the run ended."""
     sid = session_of(page, 0.1)
     before = len(done_runs(sid)) if sid else 0
+    n = len(THREADS[page])
     submit(page, text)
-    sid = sid or session_of(page)
+    sid = sid or session_of(page, after=n)
     return sid, wait_done(page, sid, before, timeout)
 
 
@@ -105,64 +130,73 @@ with sync_playwright() as p:
     perr = []
     for pg in (A, B):
         pg.on("pageerror", lambda e: perr.append(str(e)))
+        track(pg)
         pg.goto(URL); pg.wait_for_load_state("networkidle")
 
-    # 1. two sessions at once; tab B switches into A's session while A's run streams
-    A.get_by_role("button", name="New chat").click()
-    submit(A, "List the files in the dataset directory, then count the lines of the two largest text files.")
-    sA = session_of(A)
-    B.get_by_role("button", name="New chat").click()
-    sB, okB = send(B, "In two sentences: what does a GA4GH WES service do?")
-    ok("two sessions at once: B's run ended while A's ran", okB and sA != sB, f"A={sA} B={sB}")
-    still = [r["status"] for r in journals()[sA]["runs"]] == ["incomplete"]
-    B.goto(URL); B.wait_for_load_state("networkidle")
-    open_session(B, sA)
-    B.screenshot(path=str(OUT / "1-switch-mid-run.png"), full_page=True)
-    ok("tab B opened A's session" + (" mid-run" if still else " (A had already ended)"),
-       session_of(B, 2) == sA and not errors(B), "; ".join(errors(B)))
-    ok("A's run ended", wait_done(A, sA, 0))
-    open_session(B, sA)
-    ok("B shows A's whole run after it ended", B.locator(".copilotKitUserMessage").count() == 1)
+    if args.resume:
+        sA, sB, sC, sD = args.resume.split(",")
+    else:
+        # 1. two sessions at once; tab B switches into A's session while A's run streams
+        A.get_by_role("button", name="New chat").click()
+        submit(A, "List the files in the dataset directory, then count the lines of the two largest text files.")
+        sA = session_of(A, after=0)
+        B.get_by_role("button", name="New chat").click()
+        sB, okB = send(B, "In two sentences: what does a GA4GH WES service do?")
+        ok("two sessions at once: B's run ended while A's ran", okB and sA != sB, f"A={sA} B={sB}")
+        still = [r["status"] for r in journal(sA)["runs"]] == ["incomplete"]
+        B.goto(URL); B.wait_for_load_state("networkidle")
+        open_session(B, sA)
+        B.screenshot(path=str(OUT / "1-switch-mid-run.png"), full_page=True)
+        ok("tab B opened A's session" + (" mid-run" if still else " (A had already ended)"),
+           session_of(B, 2) == sA and not errors(B), "; ".join(errors(B)))
+        ok("A's run ended", wait_done(A, sA, 0))
+        open_session(B, sA)
+        st = [r["status"] for r in journal(sA)["runs"]]
+        ok("B shows A's whole run after it ended", B.locator(".copilotKitUserMessage").count() == 1 and st == ["completed"],
+           f"user messages={B.locator('.copilotKitUserMessage').count()} runs={st} errors={errors(B)}")
 
-    # 2. stop mid-run and send again at once
-    before = len(done_runs(sA))
-    submit(A, "Run `sleep 30` in the sandbox, then list /data-share and summarise what is there.")
-    expect(A.get_by_role("button", name="New chat")).to_be_disabled(timeout=10_000)
-    A.wait_for_timeout(4000)
-    A.get_by_test_id("copilot-send-button").click()  # stop
-    expect(A.get_by_role("button", name="New chat")).to_be_enabled(timeout=30_000)
-    submit(A, "Say OK and nothing else.")
-    A.wait_for_timeout(3000)
-    errs = errors(A)
-    ok("stop then send at once: no 'Thread already running'", not any("already running" in e for e in errs), "; ".join(errs))
-    ok("resent run ended", wait_done(A, sA, before + 1))
-    st = [r["status"] for r in journals()[sA]["runs"]]
-    ok("journal: cancelled then completed", st[-2:] == ["cancelled", "completed"], str(st))
+        # 2. stop mid-run and send again at once
+        before = len(done_runs(sA))
+        submit(A, "Run `sleep 30` in the sandbox, then list /data-share and summarise what is there.")
+        expect(A.get_by_role("button", name="New chat")).to_be_disabled(timeout=10_000)
+        A.wait_for_timeout(4000)
+        A.get_by_test_id("copilot-send-button").click()  # stop
+        expect(A.get_by_role("button", name="New chat")).to_be_enabled(timeout=30_000)
+        submit(A, "Say OK and nothing else.")
+        A.wait_for_timeout(3000)
+        errs = errors(A)
+        ok("stop then send at once: no 'Thread already running'", not any("already running" in e for e in errs), "; ".join(errs))
+        ok("resent run ended", wait_done(A, sA, before + 1))
+        st = [r["status"] for r in journal(sA)["runs"]]
+        ok("journal: cancelled then completed", st[-2:] == ["cancelled", "completed"], str(st))
 
-    # 3. new, rename, delete
-    B.goto(URL); B.wait_for_load_state("networkidle")
-    B.get_by_role("button", name="New chat").click()
-    sC, okC = send(B, "Say hi in three words.")
-    B.wait_for_timeout(3000)
-    ok("third session ran", okC)
-    B.get_by_role("button", name="Chat actions").click()
-    B.get_by_role("menuitem", name="Rename").click()
-    B.get_by_label("Chat title").fill("E2E long C"); B.get_by_label("Chat title").press("Enter")
-    expect(row(B, "E2E long C")).to_have_count(1, timeout=10_000)
-    ok("rename kept in the journal", journals()[sC]["title"] == "E2E long C", journals()[sC]["title"])
-    B.get_by_role("button", name="New chat").click()
-    sD, okD = send(B, "Say bye in three words.")
-    B.wait_for_timeout(3000)
-    title_d = journals()[sD]["title"]
-    row(B, title_d).first.locator(".spe-row-menu").click()
-    B.get_by_role("menuitem", name="Delete").click()
-    B.get_by_role("alertdialog").get_by_role("button", name="Delete").click()
-    expect(row(B, title_d)).to_have_count(0, timeout=10_000)
-    ok("delete: row gone, journal kept with deleted_at", journals()[sD]["deleted_at"] is not None)
+        # 3. new, rename, delete
+        B.goto(URL); B.wait_for_load_state("networkidle")
+        B.get_by_role("button", name="New chat").click()
+        sC, okC = send(B, "Say hi in three words.")
+        B.wait_for_timeout(3000)
+        ok("third session ran", okC)
+        B.get_by_role("button", name="Chat actions").click()
+        B.get_by_role("menuitem", name="Rename").click()
+        B.get_by_label("Chat title").fill("E2E long C"); B.get_by_label("Chat title").press("Enter")
+        expect(row(B, "E2E long C")).to_have_count(1, timeout=10_000)
+        ok("rename kept in the journal", journal(sC)["title"] == "E2E long C", journal(sC)["title"])
+        B.get_by_role("button", name="New chat").click()
+        sD, okD = send(B, "Say bye in three words.")
+        B.wait_for_timeout(3000)
+        title_d = journal(sD)["title"]
+        row(B, title_d).first.locator(".spe-row-menu").click()
+        B.get_by_role("menuitem", name="Delete").click()
+        B.get_by_role("alertdialog").get_by_role("button", name="Delete").click()
+        expect(row(B, title_d)).to_have_count(0, timeout=10_000)
+        ok("delete: row gone, journal kept with deleted_at", journal(sD)["deleted_at"] is not None)
 
     # 4. long conversations in A and C: several compactions each, /compact with and without a focus
     for page, sid, cmd in ((A, sA, "/compact"), (B, sC, "/compact keep the line counts and file names")):
         open_session(page, sid)
+        if page.locator(".spe-compaction").count() >= args.compactions + 1:
+            ok(f"{sid[:8]}: already {page.locator('.spe-compaction').count()} compactions", True)
+            continue
         _, okc = send(page, cmd)
         ok(f"{cmd!r} in {sid[:8]} ran", okc and page.locator(".spe-compaction").count() >= 1,
            f"dividers={page.locator('.spe-compaction').count()}")
@@ -180,7 +214,7 @@ with sync_playwright() as p:
         page.screenshot(path=str(OUT / f"4-long-{sid[:8]}.png"), full_page=True)
 
     # 5. reload and reopen each session: the chat agrees with its journal
-    rec = journals()
+    rec = journals(sA, sB, sC)
     for sid in (sA, sB, sC):
         open_session(A, sid)
         users = [m for r in rec[sid]["runs"] for m in r["messages"] if m["role"] == "user"]

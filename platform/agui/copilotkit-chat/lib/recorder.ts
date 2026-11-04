@@ -28,7 +28,7 @@ const DUPLICATE_RUN = "this run was already recorded";
 const STOPPED = "the run was stopped";
 const NOTHING_TO_COMPACT = "Nothing to compact yet.";
 const FOCUS_TOO_LONG = "The focus after /compact is too long (1000 characters at most).";
-const MAX_FOCUS = 1000; // code points (spec §15, clarification 17)
+const MAX_FOCUS = 1000; // code points (spec §15, clarification 18)
 export const REFUSAL_MESSAGES: readonly string[] = Object.freeze([
   INVALID, DELETED, CLOSING, NOT_SAVED, NO_NEW_MESSAGE, DUPLICATE_RUN, NOTHING_TO_COMPACT, FOCUS_TOO_LONG,
 ]);
@@ -37,7 +37,7 @@ type Admission = { refused: string } | { refused: null; classification: Classifi
 
 // spe_command is chat-ui's to set (spec §15, *The run route*, step 5): a client's is removed on every run, so
 // only a typed /compact makes a command run. forwardedProps that is not a plain object is sent as sent on a
-// plain run, and replaced by one holding only the command on a command run (spec §15, clarification 17).
+// plain run, and replaced by one holding only the command on a command run (spec §15, clarification 18).
 function forwardedFor(sent: unknown, command: Command | null): unknown {
   const spe_command = command && { name: command.name, focus: command.focus };
   if (typeof sent !== "object" || sent === null || Array.isArray(sent)) return spe_command ? { spe_command } : sent;

@@ -208,7 +208,21 @@ in the parts it amends.
     and its model request, and the sidebar's theme setting). *Amends:* §5 *Endpoints*, *Configuration*, *Run
     log*; §6 *Sessions*, *The sidebar*; README decision 22. *Status:* folded.
 
-17. **A resent command message is compared by its parsed command, not its raw text; `forwardedProps` that is not
+17. **Tool-call cards after Open WebUI's `ToolCallDisplay`** (2026-11-04; the fork's PR #31). §6 *Tool calls
+    are rendered* now gives the card a status icon and an "Executing `<name>`…" / "View Result from
+    `<name>`" / "`<name>` failed" title in place of the tool name, the command and the
+    "preparing…/running…/done" text; the arguments as key/value rows instead of a JSON dump, `run_command`'s
+    command as a `$ <command>` line; a failed state (a string `error` or a nonzero `exit_code` in the
+    result); and a group header over the calls of one assistant message. *Reason:* asked for by the user
+    (2026-11-03). Grouping covers one assistant message only, i.e. one model response's calls: calls from
+    successive model steps arrive as separate messages (with reasoning between them on qwen), and grouping
+    across messages would mean replacing CopilotKit's message list. *Cost if wrong:* successive single
+    calls still show one card each, as before; a result whose JSON has an unrelated top-level `error` string
+    is shown as failed; when a message's second call streams in, its first card moves under the new group
+    header and remounts, so a card opened while the calls stream in closes again. *Amends:* §6 *Tool calls
+    are rendered*. *Status:* folded.
+
+18. **A resent command message is compared by its parsed command, not its raw text; `forwardedProps` that is not
     a plain object is normalized before the command key is set; the focus limit counts code points; and step 4's
     two refusals are checked in that order** (2026-11-04; AG-UI `/compact`, slice 2/2). §15 *The run route* now
     says: a resent command message stays unedited when its role is `user` and its content parses to the same

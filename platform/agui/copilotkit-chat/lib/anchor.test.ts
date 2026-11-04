@@ -333,7 +333,7 @@ const refusedCompact = (id: string, anchor: string, messageId: string, focus: st
 
 test("decision 32: a command message sent back unchanged ignores nothing and is never the anchor", async () => {
   const conv = await journal(r1(), r2(), r3(), refusedCompact("k1", "a3", "cmd1", "keep x"));
-  // Spec §15, clarification 17: unchanged is compared on the parsed command, not the raw text.
+  // Spec §15, clarification 18: unchanged is compared on the parsed command, not the raw text.
   for (const content of ["/compact keep x", "  /compact   keep x "]) {
     const c = classify(conv, [...branch(conv), user("cmd1", content), user("u4", "next")]);
     assert.equal(c.anchor, "a3", content);

@@ -16,6 +16,9 @@ SPE_HOST=agent-service-1 python3 docs/knowledge/agui-all-features-check.py <scra
   is started and `goto` fails with `ERR_CONNECTION_REFUSED` (`pkill-self-match.md`).
 - **Selectors that misled**: the header's rename field is labelled "Chat title" (the sidebar's is "Session
   title"); a tool group's own header is `:scope > summary` (each card inside has a `summary` too).
+- **The run wait is global**: `send()` returns when the `run_end` count across *all* journals rises, so a run
+  ending in another session passes it. Fine for one session at a time; for the multi-session and mid-run
+  switching checks, count in the tested session's journal (`/data/sessions/<id>.jsonl`) only.
 - **Screenshots show canary names** (e.g. a file the model names in an answer): keep them out of anything
   public, such as an upstream PR.
 - **The archive is on the controller**: `archive.yml` says "Run saved to /data-share/runs/…", a path on the

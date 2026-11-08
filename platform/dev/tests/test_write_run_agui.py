@@ -422,10 +422,22 @@ def test_a_non_numeric_timestamp_does_not_abort_the_render(tmp_path):
     m = {"id": "x", "parentId": None, "role": "user", "content": "hi", "timestamp": "yesterday"}
     bundle = {"exported_at": "now", "spe_archive_mode": "final", "tags": [], "notes": [], "chats": [
         {"id": "t", "title": "times", "created_at": "early", "updated_at": "late", "archived": False,
-         "meta": {"tags": []}, "chat": {"history": {"currentId": "x", "messages": {"x": m}}}}]}
+         "meta": {"tags": []}, "chat": {"history": {"currentId": "x", "messages": {"x": m}}}},
+        # a readable time beside the unreadable one: the sessions still sort, readable times first
+        {"id": "n", "title": "numbers", "created_at": 1793700000, "updated_at": 1793700000, "archived": False,
+         "meta": {"tags": []}, "chat": {"history": {"currentId": None, "messages": {}}}}]}
     (tmp_path / "bundle.json").write_text(json.dumps(bundle))
     run(tmp_path / "bundle.json", tmp_path / "run")
-    md = (tmp_path / "run" / "chats" / "01-times.md").read_text()
+    assert sorted(p.name for p in (tmp_path / "run" / "chats").glob("*.md")) == ["01-numbers.md", "02-times.md"]
+    md = (tmp_path / "run" / "chats" / "02-times.md").read_text()
     assert "## user · yesterday" in md and "- Created: early" in md and "- Updated: late" in md
     index = (tmp_path / "run" / "index.md").read_text()
     assert "| early |" in index and "- Exported: now" in index
+
+
+def test_an_openwebui_bundle_with_an_unreadable_created_at_still_renders(tmp_path):
+    bundle = json.loads((OWUI / "bundle.json").read_text())
+    bundle["chats"][0]["created_at"] = "early"
+    (tmp_path / "bundle.json").write_text(json.dumps(bundle))
+    run(tmp_path / "bundle.json", tmp_path / "run")
+    assert "early" in (tmp_path / "run" / "index.md").read_text()

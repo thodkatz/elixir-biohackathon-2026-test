@@ -49,6 +49,16 @@ def when(t):
         return md_inline(t)
 
 
+def time_key(t):
+    """A sort key for a raw timestamp: readable ones by value (none as 0), unreadable ones after them, so a
+    hand-edited bundle mixing the two still sorts."""
+    try:
+        s = float(t or 0)
+    except (TypeError, ValueError, OverflowError):
+        return (1, 0.0)
+    return (0, s) if math.isfinite(s) else (1, 0.0)
+
+
 def active_branch(chat):
     """Messages along the branch the participant last looked at."""
     hist = chat.get("history") or {}
@@ -141,8 +151,8 @@ def one_line(s):
 def md_inline(s):
     """Untrusted text as one line of Markdown text: every character that could start markup is escaped, and the
     `:` of `://` and the `.` of `www.` too, so GFM makes no autolink of a bare URL (a backslash before
-    punctuation renders as the character alone). A bare e-mail address still links (`mailto:`): GFM finds those
-    after escapes are resolved, so no escape breaks them."""
+    punctuation renders as the character alone). A bare e-mail or `xmpp:` address still links: GFM finds those
+    after escapes are resolved, so no escape breaks them, and a link needing an `@` forges no structure."""
     s = re.sub(r"([\\`*_\[\]<>|#&])", r"\\\1", one_line(s))
     return re.sub(r"(?i)(www)\.", r"\1\\.", s.replace("://", "\\://"))
 
@@ -368,7 +378,7 @@ def render_agui_chat(c):
 
 def write_agui(b, run_dir):
     chats = sorted((c for c in b.get("chats") or [] if isinstance(c, dict)),
-                   key=lambda c: (c.get("created_at") or 0, str(c.get("id") or "")))
+                   key=lambda c: (time_key(c.get("created_at")), str(c.get("id") or "")))
     chats_dir = os.path.join(run_dir, "chats")
     # A re-render starts chats/ afresh, so no chat is left under an old title.
     if os.path.islink(chats_dir):
@@ -458,7 +468,7 @@ def main(argv):
 
     # Chats, oldest first.
     rows = []
-    chats = sorted(b.get("chats") or [], key=lambda c: c.get("created_at") or 0)
+    chats = sorted(b.get("chats") or [], key=lambda c: time_key(c.get("created_at")))
     for i, c in enumerate(chats, 1):
         msgs = active_branch(c.get("chat") or {})
         tags = [tag_names.get(t, t) for t in (c.get("meta") or {}).get("tags") or []]

@@ -43,8 +43,8 @@ and rewrites the task text it changes.
    (2026-11-08). *Cost if wrong:* none expected; slice 1's check runs on 1.84.1 either way.
 2. **The rejoin check's page and script are throwaway**: built and run in slice 1, the page removed before the PR
    merges; the script, its output and the verdict stay under `evidence/slice-1/` and in `progress.md`. *Cost if
-   wrong:* re-running the check after a CopilotKit upgrade means restoring the page from slice 1's branch history
-   (the PR's commits).
+   wrong:* re-running the check after a CopilotKit upgrade means restoring the page from
+   `658ba7b:platform/agui/copilotkit-chat/app/rejoin-check/page.tsx` (the squash merge keeps only the PR's ref).
 3. **`running` is part of `SessionMeta`**, so the list, `GET` one, `PATCH` and `POST …/title` all answer it (§6:
    "the metadata … `running` included"); `SessionView` keeps it. *Cost if wrong:* none: one boolean per item.
 4. **A session gone from the list is "gone" only if this page saw it listed before** (`LiveSessions.listed`): a

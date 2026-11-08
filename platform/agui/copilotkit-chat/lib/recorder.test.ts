@@ -210,6 +210,7 @@ test("running: true in the list and GET between run_start and run_end, false bef
     // A failed run: not running once it ends.
     await drive(recorder, input(id, "error please"), agent());
     await settled(id);
+    assert.equal((await journals.list()).find((m) => m.id === id)?.running, false);
     assert.equal((await journals.get(id))?.running, false);
     assert.equal(ofType(await lines(journals, id), "run_end").at(-1)?.status, "failed");
 

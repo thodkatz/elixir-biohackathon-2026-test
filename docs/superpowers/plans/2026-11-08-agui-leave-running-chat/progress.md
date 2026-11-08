@@ -18,7 +18,7 @@ CopilotKit 1.84.1, `@ag-ui/client` 1.0.2, the fake agent; script and output in
 
   A (two private agents streaming at once) and D (stop in a rejoined chat journals `cancelled`) PASS too.
 - **Without a layer, C1–C3 and E FAIL, on one thing only**: the first id list React commits after the connect is
-  empty (`lengths in order: [0, 12, 12, …]`, at ms 0, for about 25–55 ms). No duplicate, the stream whole, the
+  empty (`lengths in order: [0, 12, 12, …]`, at ms 0, for 31–51 ms with no layer, 21–53 ms with the `wait` layer). No duplicate, the stream whole, the
   ids equal to `GET`'s at the end:
 
       FAIL C1: connects 1; duplicates 0; ids missing at some tick 0; committed lists with a duplicate 0, lacking a history id 1 of 14; slow steps shown at the end 10 of 10 (exactly 10: streamed whole, none repeated); equal to GET at the end True; runs ['completed', 'completed', 'completed']
@@ -81,3 +81,11 @@ CopilotKit 1.84.1, `@ag-ui/client` 1.0.2, the fake agent; script and output in
   `parentMessageId` alone keeps the history's copy over it; all ids, because the snapshot is the run's own branch
   as the server holds it, never older than the history's, and replacing an equal copy changes nothing. *Cost if
   wrong:* none found: a snapshot id the history holds unchanged is replaced by an equal copy.
+- **The collector also takes a `TOOL_CALL_START`'s `toolCallId`, and shares one subscription with the merge**
+  (slice 1's review, 2026-11-08). *Why:* `@ag-ui/client` creates the assistant message with id `toolCallId` when the
+  event names no parent; one `agent.subscribe` made before `connectAgent` is what the passing page did. *Cost if
+  wrong:* an extra id in `inProgress` only swaps a copy for an equal one.
+- **`recorder.test.ts` keeps its own `sessionOf`** (slice 1, task 1), against task 1 step 3's "drops its own
+  `sessionOf`/`isRunning`": `isRunning` went, but the test's `handleOf` still needs a run key's session id to find a
+  handle to cancel, and `sessions.ts` exports no parser for it. *Cost if wrong:* a one-line helper drifts from
+  `runKey`'s format; the `running` tests then fail at once.

@@ -143,7 +143,10 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   tool-call messages, and the chat opens on its newest content, without scrolling through the history first, as
   after a reload (clarification 24). If that answer says `running` (a run started before a reload, or from
   another tab), the agent rejoins the run through the runtime's `connect` and streams the rest of it live, each
-  message shown once. **New chat:** a fresh `crypto.randomUUID()`, a new agent and an empty history; the session
+  message shown once: a message the runtime's replay repeats (it replays the thread's runs since the process
+  started) is matched by id against the journal's history, not shown again. Only a session answered `running`
+  connects; any other opens from the journal alone, with no `connect`. The rejoined chat is the session's own
+  chat: its stop button ends the run, and while the run lasts its composer is as in any running chat. **New chat:** a fresh `crypto.randomUUID()`, a new agent and an empty history; the session
   joins the list once its first run has started.
 - **Leaving a running chat:** switching session and *New chat* stay enabled during a run. The run goes on in its
   session's agent, which stays mounted until the run ends; then, unless the session is open, the agent is

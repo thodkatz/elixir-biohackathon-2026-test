@@ -55,7 +55,19 @@ For the plan that builds clarification 27 (decisions 26 and 40–44).
   verdict is recorded in the plan's progress file, and decision 42's fallback is built only if it says so.
   What to look at: whether `CopilotChat` on a thread-scoped agent makes a `connect` request on mount (today's
   page relies on it making none, so the history it set is kept), and whether the runtime's replay of past runs
-  (`InMemoryAgentRunner.connect`) adds messages the journal's history already holds.
+  (`InMemoryAgentRunner.connect`) adds messages the journal's history already holds. `CopilotChat` connects on
+  mount only for a thread it is told is explicit (`hasExplicitThreadId`), and then on every mount.
+- **What "made to" allows** (decision 42; the builder check's question, settled in the spec stage as the agent's
+  call): our own small layer is in scope: connecting only for a session answered `running` (by calling
+  `connectAgent` ourselves or setting the explicit flag per session) and dropping replayed messages whose id the
+  journal's history already holds. Clearing the history and trusting the replay is not: the replay holds only the
+  runs since the runtime's process started. The fallback is built when that layer still cannot show each message
+  once.
+- **A stop point:** if the check finds that a private agent loses or repeats messages on an ordinary open (no run,
+  no `connect`), decisions 40 and 41 are at risk, which the fallback does not cover: that is a clarification that
+  changes the spec's intent, and the track stops for the user there.
+- **The screenshot does not hold the slices after it:** a mark for a reply that finished while away stays out of
+  scope; if the user asks for it at the screenshot, it is added as a new task.
 - One owner of the page's live sessions (the open one and each one with a run streaming), so the sidebar's
   mark, the Delete rule and the polling all read one set; `use-run-reconcile.ts`'s end-of-run fetch and the title
   trigger (`lib/reconcile.ts`) move from the one agent to each session's.

@@ -15,7 +15,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { HTMLAttributes } from "react";
 import { askTitle, fetchSession, fetchSessions, removeSession, updateSession } from "../lib/client.ts";
-import { TitleTrigger } from "../lib/reconcile.ts";
+import { TitleTrigger, fetchSessionList, waitListed } from "../lib/reconcile.ts";
 import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
 import { effectiveTheme, parseTheme } from "../lib/theme.ts";
@@ -101,18 +101,27 @@ function Chat() {
     }
   }, []);
 
-  // A New chat's first finished run, once recorded: one call for its model-written title (the server writes
-  // one only if the session has no title of its own); until it answers, or if it fails, the list shows the
-  // first message as the title. The list is refetched rather than patched with the answer, so a rename
-  // that lands while the title call is in flight is not overwritten by it.
+  // A New chat's first run, as it starts: the list is fetched until it has the session (the server lists it
+  // once the run's question is on disk, before the agent answers), so the sidebar and header show the first
+  // message as the title at once; then one call for its model-written title, from that question (the server
+  // writes one only if the session has no title of its own), which can land before the answer ends. The list
+  // is refetched rather than patched with the answer, so a rename that lands while the title call is in
+  // flight is not overwritten by it. A run never listed (refused) re-arms the session for its next run.
   const titles = useRef(new TitleTrigger());
-  const onRecorded = useCallback((id: string, finished: boolean) => {
-    if (!titles.current.take(id, finished)) return;
-    askTitle(id)
-      .then(() => refresh())
+  const onStarted = useCallback((id: string) => {
+    if (!titles.current.take(id)) return;
+    waitListed(fetchSessionList, id)
+      .then(({ list, listed }) => {
+        setSessions(list);
+        if (!listed) {
+          titles.current.started(id);
+          return;
+        }
+        return askTitle(id).then(() => refresh());
+      })
       .catch((e: unknown) => console.warn(`session ${id}: no model title: ${messageOf(e)}`));
   }, [refresh]);
-  const { busy, noteRunError } = useRunReconcile({ openId: active ?? "", onList, onError: setError, onRecorded });
+  const { busy, noteRunError } = useRunReconcile({ openId: active ?? "", onList, onError: setError, onStarted });
 
   // The history goes onto the agent first, then CopilotChat remounts on the new thread
   // (key={id}): a freshly mounted chat on a non-explicit thread keeps the agent's messages,
@@ -123,7 +132,7 @@ function Chat() {
     setActive(id);
   }, [agent]);
 
-  // New chat: a fresh thread id and an empty history; it joins the list once its first run is recorded.
+  // New chat: a fresh thread id and an empty history; it joins the list once its first run starts.
   const startNew = useCallback(() => {
     requestRef.current += 1;
     const id = crypto.randomUUID();

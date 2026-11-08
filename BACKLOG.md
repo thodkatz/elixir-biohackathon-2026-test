@@ -37,7 +37,8 @@ start reads this section; keep it short.
   `git rev-parse --show-toplevel` from the main worktree, or `core.worktree`) — from #50's review; waits because it
   is another repository's change.
 - AG-UI e2e: `platform/dev/e2e` checks tool grouping for two calls in one response only; add a fake-agent case with
-  calls across two model steps (no text between them) that must form one group, so a CopilotKit upgrade that
+  calls across two model steps (no text between them) that must form one group, its header saying "Exploring"
+  while the run lasts, so a CopilotKit upgrade that
   changes the rule fails a free check (spec clarification 25) — from #50's review; waits because only the paid
   all-features check covers it today.
 - The AG-UI `ui-dev` profile (`spe_agui_ui_dev: true`, `chat-ui-dev`, upstream's hot-reload chat) has no archive:

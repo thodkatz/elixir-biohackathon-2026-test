@@ -5,8 +5,8 @@ Chromium and prints one PASS/FAIL line per feature: theme (dark at `DOMContentLo
 width kept over a reload, New chat, a tool-using run (cards grouped under "Explored …"), the model title, rename
 from the header, `/compact <focus>` (one divider), and all of it again after a reload. It waits for each run on
 the `run_end` lines of the `chat-ui` journals over SSH. About five paid model calls. 17/17 on denbi-agui-01,
-2026-11-04 (#36). On Anthropic `claude-haiku-5-5` (2026-11-08) every line passes. "Tool calls grouped" requires a run of two
-or more calls to be grouped (calls are grouped across model steps since #50): `groups=1 cards=5 grouped=2`, header
+2026-11-04 (#36). On Anthropic `claude-haiku-5-5` (2026-11-08) every line passes. "Tool calls grouped" fails on two cards outside a
+group with no text between them (calls are grouped across model steps since #50): `groups=1 cards=5 grouped=2`, header
 "Explored run_command, get_process_status"; Haiku narrates before most later steps, so those calls stay single
 cards. It is the only check of grouping across steps (`platform/dev/e2e` tests one response's calls).
 

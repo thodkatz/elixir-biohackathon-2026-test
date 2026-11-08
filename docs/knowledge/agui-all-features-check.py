@@ -72,8 +72,12 @@ with sync_playwright() as p:
     ok("tool run ended", done)
     page.screenshot(path=f"{SHOTS}/1-tools.png", full_page=True)
     groups = page.locator(".spe-tool-group")
-    ok("tool calls grouped", groups.count() > 0 or page.locator(".spe-tool").count() > 0,
-       f"groups={groups.count()} cards={page.locator('.spe-tool').count()}")
+    # Calls made in a row group across model steps (Haiku makes one call per step): two or more cards with no
+    # text between them sit under one group, so some card must be inside a group.
+    cards = page.locator(".spe-tool").count()
+    grouped = page.locator(".spe-tool-group .spe-tool").count()
+    ok("tool calls grouped", cards > 0 and (cards < 2 or grouped >= 2),
+       f"groups={groups.count()} cards={cards} grouped={grouped}")
     if groups.count():
         summ = groups.first.locator(":scope > summary").inner_text()
         ok("group header says Explored", "Explored" in summ, summ.replace("\n", " "))

@@ -6,8 +6,8 @@ records what implementation verified and changed). §6's sessions and sidebar: i
 live archive (decision 30, since clarification 2): approved 2026-11-03 (the fork's PR #19), built in the fork's PRs #22, #23, #24 and #25 (clarification 14).
 `/compact` (§15, decisions 31–39): approved 2026-11-03 (the fork's PR #26), built in the fork's PRs #28 and #30 (clarification 18; decision 39 checked on de.NBI `qwen3.8-27b`); its slash-menu entry and marked composer in #32 (clarification 19). The history before this
 directory is that of the single file it replaced: `git log -- docs/specs/2026-10-15-agui-frontend-design.md`.
-Leaving a running chat (§6 *A session's agent* to *Refresh*, decisions 26 and 40–44, clarification 27): proposed
-2026-11-08 in the fork's PR #55.
+Leaving a running chat (§6 *A session's agent* to *Refresh*, decisions 26 and 40–44, clarification 27): approved
+2026-11-08 (the fork's PR #55).
 **Latest clarification:** 27.
 PR numbers here and in the clarifications are those of the fork where this was developed and reviewed,
 `thodkatz/elixir-biohackathon-2026-test`; `kraatz #N` is a pull request of this repository.

@@ -258,7 +258,15 @@ def check_focus(r: Run, ids: dict[str, str]) -> None:
     assert r.row(b).bounding_box() == before, "the popover moved the rows"
     page.locator(".spe-note").click()
     expect(menus).to_have_count(0)
-    r.ok("menu: floats over the list; a click on empty sidebar space closes it")
+    expect(r.row(a).locator(".spe-row-menu")).to_be_focused()
+    r.ok("menu: floats over the list; a click on empty sidebar space closes it and focus is back on its ⋯")
+
+    r.row(a).locator(".spe-row-menu").click()
+    search = page.get_by_placeholder("Search")
+    search.click()
+    expect(menus).to_have_count(0)
+    expect(search).to_be_focused()
+    r.ok("menu: a click outside on a field closes it and leaves focus on that field")
 
     r.row(a).locator(".spe-row-menu").click()
     page.keyboard.press("Escape")
@@ -1027,9 +1035,8 @@ def check_compact_command(r: Run) -> None:
     page.reload()
     expect(page.locator(".spe-compaction")).to_have_count(1, timeout=10_000)
     expect(page.get_by_text("/compact keep the canary paths", exact=True)).to_have_count(0)
-    # A reload does not scroll a restored session to its newest content, unlike a live send:
-    # bring the divider into view so the shot shows it, not an earlier turn.
-    page.locator(".spe-compaction").scroll_into_view_if_needed()
+    # A reload lands on the newest content: the divider, the session's last message, is in view without scrolling.
+    expect(page.locator(".spe-compaction")).to_be_in_viewport(timeout=2_000)
     r.shot("compact-command-reload")
     # Turn numbering restarts after a compaction (see check_compaction), so this answer is "Turn 1" again, as the
     # first question's still on the page is: r.send would hit a strict-mode double match. Count the answers.
@@ -1049,7 +1056,7 @@ def check_compact_command(r: Run) -> None:
     r.wait_runs(sid, 5)
     starts = [x for x in read_journal((r.sessions / f"{sid}.jsonl").read_text()) if x["type"] == "run_start"]
     assert starts[-1]["command"] == {**starts[-1]["command"], "name": "compact", "focus": None}, starts[-1]
-    r.ok("compact-command: bubble gone, divider in place live and after a reload, run_start holds the command; "
+    r.ok("compact-command: bubble gone, divider in place live and after a reload (in view), run_start holds the command; "
          "the slash menu offers /compact and sends it, the composer marks a command")
 
 

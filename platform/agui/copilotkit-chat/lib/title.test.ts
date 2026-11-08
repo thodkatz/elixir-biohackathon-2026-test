@@ -57,6 +57,7 @@ test("no title yet: the agent is asked with the journal's first question alone, 
 test("while the first run is still going: titled from its question, before any answer", async () => {
   const journals = await tmpJournals();
   const { id } = await seedRun(journals, "list the files", { running: true });
+  assert.equal((await journals.list())[0].title, "list the files"); // listed, with the fallback title, mid-run
   const { titler, calls } = fakeTitler("Listing files");
   const response = await titleSession(journals, id, titler, titleRequest());
   assert.equal(response.status, 200);

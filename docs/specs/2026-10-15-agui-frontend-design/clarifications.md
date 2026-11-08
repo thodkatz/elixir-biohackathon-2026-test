@@ -349,7 +349,7 @@ in the parts it amends.
     component kept mounted while its run lasts: leaving a chat neither ends nor hides its run, and going back
     shows it still streaming. A session whose run no agent in the page streams (a reload, another tab) rejoins it
     through the runtime's `connect`. The list and `GET` one answer `running`, the sidebar marks running sessions,
-    Delete is disabled for them, and the list is fetched every 2 s while it shows a run the page is not
+    Delete is disabled for them, and the list is fetched on regaining focus and every 2 s while it shows a run the page is not
     streaming. *Approaches:* (1, the user's choice) an agent per session, kept in the page; (2) one shared agent
     that lets go of the stream on a switch and rejoins through `connect` on every return: one mechanism, closest
     to the old page, but every switch would depend on `connect`, whose replay of the past runs the runtime holds

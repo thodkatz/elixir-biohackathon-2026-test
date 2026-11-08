@@ -36,6 +36,10 @@ start reads this section; keep it short.
   (`docs/knowledge/methodology-worktree-submodule.md`). Carry a fix to agent-methodology (resolve the checkout with
   `git rev-parse --show-toplevel` from the main worktree, or `core.worktree`) — from #50's review; waits because it
   is another repository's change.
+- agent-methodology: `forge.sh` calls `gh pr view <n>` (and `gh api repos/{owner}/{repo}/…`) without `--repo`; on
+  this fork, whose parent is now in an organization, that fails (`methodology gate approve`: "could not read #N's
+  labels") even with `gh repo set-default` (`docs/knowledge/gh-pr-create-token.md`). Carry a fix (pass the origin's
+  repo explicitly) — from #55; waits because it is another repository's change.
 - AG-UI e2e: `platform/dev/e2e` checks tool grouping for two calls in one response only; add a fake-agent case with
   calls across two model steps (no text between them) that must form one group, its header saying "Exploring"
   while the run lasts, so a CopilotKit upgrade that

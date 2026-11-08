@@ -85,7 +85,8 @@ Routes under `app/api/sessions/`, beside `/api/copilotkit`. The browser changes 
 The list is served from an index in memory, built at startup with one pass over the journals and updated
 on every append (§13). An id that is not a UUID gets `400`. Bodies over 16 KB get `413`. Error bodies are
 `{"error": "<generic message>"}` and never contain paths or stack traces; details go to the server log. No
-route changes a message.
+route changes a message. "The metadata" that `PATCH` and `POST …/title` answer is a list item's fields,
+`running` included.
 
 **No authentication of its own.** The chat UI has none: it is reached only through the SSH tunnel to
 `127.0.0.1:{{ spe_agui_ui_port }}` or the Coder proxy, one participant per instance. The session API sits
@@ -136,25 +137,34 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
 - **A session's agent:** each session the page shows or is streaming has a CopilotKit agent of its own, a private
   one (CopilotKit 1.79's thread-scoped `useAgent({ agentId: "spe-<id>", runtimeAgentId: "spe", threadId: <id> })`),
   held by a component the page keeps mounted while it is needed: the agent, its messages and its run last only as
-  long as that component (clarification 27). The chat (`CopilotChat`) is on the open session's agent.
+  long as that component (clarification 27). The chat (`CopilotChat`) is on the open session's agent, remounted per session (keyed by its id) and never
+  told its thread is explicit (`hasExplicitThreadId` false): an explicit `CopilotChat` connects on every mount and
+  detaches the agent's run when it unmounts, which would cut a rejoined run's stream on a switch.
 - **Opening a session:** a session that has an agent in this page is shown as it is, its run still streaming if
   it is: no fetch, since the agent's messages are newer than the journal's. Otherwise `GET /api/sessions/{id}`,
   then a new agent for it with `agent.setMessages(messages)`; the tool cards render again from the stored
   tool-call messages, and the chat opens on its newest content, without scrolling through the history first, as
   after a reload (clarification 24). If that answer says `running` (a run started before a reload, or from
-  another tab), the agent rejoins the run through the runtime's `connect` and streams the rest of it live, each
-  message shown once: a message the runtime's replay repeats (it replays the thread's runs since the process
-  started) is matched by id against the journal's history, not shown again. Only a session answered `running`
+  another tab), the session's holder component rejoins the run by calling the runtime's `connect` itself
+  (`connectAgent`, not through `CopilotChat`) and streams the rest of it live, each message shown once: a message
+  the runtime's replay repeats (the thread's past runs it still holds in memory, then the current run from its
+  start) is matched by id against the journal's history, not shown again. Only a session answered `running`
   connects; any other opens from the journal alone, with no `connect`. The rejoined chat is the session's own
-  chat: its stop button ends the run, and while the run lasts its composer is as in any running chat. **New chat:** a fresh `crypto.randomUUID()`, a new agent and an empty history; the session
+  chat: its stop button ends the run, and while the run lasts its composer is as in any running chat. An open session with no run in this page that a list fetch shows
+  `running` (a run started on it from another tab) is rejoined the same way, so its composer is never offered
+  for a send the runtime would refuse. **New chat:** a fresh `crypto.randomUUID()`, a new agent and an empty history; the session
   joins the list once its first run has started.
 - **Leaving a running chat:** switching session and *New chat* stay enabled during a run. The run goes on in its
   session's agent, which stays mounted until the run ends; then, unless the session is open, the agent is
   dropped, and the session's next opening reads the journal. Only CopilotChat's stop button, in the session's own
   chat, ends a run (recorded `cancelled`); leaving it never does. Delete, in the row and the header, is disabled
-  for a session with a run in progress. Runs in several sessions at once are allowed, with no limit; a second run
+  for a session with a run in progress; only in the page: `DELETE` still accepts a running session (§6
+  *Sessions*: its run goes on), so another tab's stale list can delete one. A session this page streams that
+  leaves the list keeps its agent until its run ends, then the agent is dropped and, if it was open, the page
+  starts a new session. Runs in several sessions at once are allowed, with no limit; a second run
   on one session from two tabs is still refused by the runtime (§13).
-- **Refresh:** the list is fetched on load, after each run ends (any session's, open or not), after each
+- **Refresh:** the list is fetched on load, when the page becomes visible again or its window regains focus
+  (`visibilitychange`, `focus`), after each run ends (any session's, open or not), after each
   metadata change, and every 2 s while it shows a session `running` that no agent in this page is streaming (a
   run from another tab or from before a reload), until it shows none.
   A run that ends with a terminal event or a stream error, the stop button's included, has its `run_end`
@@ -162,10 +172,13 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   whose stream to the browser ends early (the connection dropped while the detached run goes on, §13) ends
   after the browser's run has ended, and so can land after that fetch: after a run ends, until the list
   shows its session with a `last_run_at` not older than the run's start, the page fetches it again, up
-  to 5 times at 500 ms. If it still does not, the error bar says "this session could not be saved".
+  to 5 times at 500 ms; a rejoined run, whose start this page does not know, instead until the list shows its
+  session no longer `running`. If it still does not, the error bar says "this session could not be saved".
 - **Errors:** a failed API call shows in the existing error bar; the open chat is never cleared. A run
   refused by `chat-ui` (§13) shows its `RUN_ERROR` there; a run error in a session that is not open shows
-  there too, with that session's title first (`“<title>”: <message>`). If the runtime is still not ready after 15 s, the
+  there too, with that session's title first (`“<title>”: <message>`, "New chat" for one with no title yet).
+  Only the open session's chat is mounted, and `CopilotChat`'s `onError` hears only its own agent, so each
+  holder component subscribes to its own agent's errors. If the runtime is still not ready after 15 s, the
   bar says "The agent runtime is unreachable; reload the page.", and the message goes once it is ready.
 
 ### Security and limits

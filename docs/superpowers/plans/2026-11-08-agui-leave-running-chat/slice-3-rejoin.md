@@ -99,7 +99,9 @@ holder with its messages.
   verified or changed, with any `progress.md` rulings that touch the spec; a clarification (`folded`) for each spec text
   that changes.
 - [ ] **Step 3:** `AGENTS.md`, *Current work*: remove the track's line (the last slice); this plan's README:
-  status column.
+  status column; `docs/README.md`: the plan's row says done. Anything still open on the track (an answer to
+  slice 2's screenshot question not acted on, a ruling's follow-up) goes to `BACKLOG.md` with its pointer, so the
+  track closes with nothing pending.
 - [ ] **Step 4:** grep the repo for the locked-page wording (`switching is disabled`, `disabled during a run`,
   `agent.isRunning`) and rewrite each current-design text left (history stays).
 - [ ] **Step 5: Commit** `Docs: leaving a running chat is built`.

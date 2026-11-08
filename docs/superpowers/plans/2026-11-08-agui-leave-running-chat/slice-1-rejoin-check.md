@@ -52,10 +52,15 @@ inputs-for-plan *Leaving a running chat*.
 **Interfaces:**
 - Consumes: task 1's `running` in `GET /api/sessions/{id}`.
 - The page reads `?a=<id>&b=<id>&mode=stream|open|rejoin`. For each id it mounts a holder: thread-scoped
-  `useAgent({ agentId: "spe-" + id, runtimeAgentId: "spe", threadId: id })`; `mode=open` and `mode=rejoin` first
-  `agent.setMessages(GET.messages)`; `mode=rejoin` then calls `useCopilotKit().copilotkit.connectAgent({ agent })`
-  when `GET` answers `running`. Each holder renders `<CopilotChatConfigurationProvider agentId={"spe-"+id}
-  threadId={id} hasExplicitThreadId={false}><CopilotChat key={id} agentId={"spe-"+id} /></…>` and a
+  `useAgent({ agentId: "spe-" + id, runtimeAgentId: "spe", threadId: id })`. In 1.84.1 that hook first returns a
+  provisional agent (`isReady: false`) and registers the real one in an effect, returning it on a later render
+  (`react-core` `useAgent`); messages set on the provisional one are lost (`page.tsx`'s comment at the first-load
+  effect). So `mode=open` and `mode=rejoin` call `agent.setMessages(GET.messages)` once `isReady` is true, in an
+  effect keyed on the agent object; `mode=rejoin` then calls `useCopilotKit().copilotkit.connectAgent({ agent })`
+  when `GET` answers `running`. Each holder renders, only once `isReady` is true (`CopilotChat` looks its agent up
+  by `agentId` and throws "Agent … not found after runtime sync" before it is registered),
+  `<CopilotChatConfigurationProvider agentId={"spe-"+id} threadId={id} hasExplicitThreadId={false}><CopilotChat
+  key={id} agentId={"spe-"+id} /></…>` and a
   `<pre data-testid="ids-<id>">` with `agent.messages.map(m => m.id)` as JSON, updated on change. A button per
   holder unmounts and remounts it (check B's re-registration).
 
@@ -72,7 +77,9 @@ inputs-for-plan *Leaving a running chat*.
   - **C. Rejoin after a reload:** a "slow" run in A, reload mid-run with `mode=rejoin`: one `connect` request;
     record every id shown more than once, and every journal id not shown, at 1 s intervals until the run ends;
     at the end compare with `GET`'s ids. Run it once on a session with earlier runs (the runtime's replay of past
-    runs) and once on a fresh one.
+    runs) and once on a fresh one. The earlier runs are sent through the same server process, by the script,
+    before the slow run: `InMemoryAgentRunner` replays only runs made since the server started, so a session
+    seeded from journal files alone would have nothing to replay and C would not exercise duplicates.
   - **D. Stop in the rejoined chat:** as C, then CopilotChat's stop button; the journal's last `run_end` is
     `cancelled`.
   - **E. Second tab:** as C, with the reload replaced by a second browser context opening A with `mode=rejoin`.
@@ -91,9 +98,11 @@ inputs-for-plan *Leaving a running chat*.
   **live** (C and E show each id once with the layer, or without it) or **fallback**; the mechanism slice 3
   builds (no layer, the layer of task 2 step 4, or another found here); what `connect` requests cost (one per
   rejoin). Quote the lines of `rejoin-check.txt` it rests on.
-- [ ] **Step 2: If B failed** (an ordinary open loses or repeats messages): stop. Post one comment on the PR with
-  the evidence and what it puts at risk (decisions 40 and 41), then `methodology gate open <PR> <comment file>`
-  and `methodology gate wait <PR>` in the background, and end the session. Do not merge.
+- [ ] **Step 2: If B failed** (an ordinary open loses or repeats messages, the holder's `isReady` handling of
+  task 2 in place): stop, as `development-workflow.md`, *Gates*, says: write the handoff (`methodology handoff new
+  docs/superpowers/plans/2026-11-08-agui-leave-running-chat/handoffs <slug>`), commit and push; write one comment
+  file with the evidence and what it puts at risk (decisions 40 and 41); `methodology gate open <PR> <comment
+  file>`, then `methodology gate wait <PR>` in the background, and end the session. Do not merge.
 - [ ] **Step 3: If the verdict changes the spec** (fallback, or a mechanism other than "matched by id"): add
   clarification 28 (`folded`), rewrite decision 42's line and §6 *Opening a session*, and rewrite slice 3,
   task 2's text to the branch it builds. Otherwise only `progress.md` changes.

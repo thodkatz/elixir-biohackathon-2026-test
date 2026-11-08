@@ -67,7 +67,8 @@ at once), in `check_leave_running` (task 4 writes it; this task runs the unit te
   // app/session-agent.tsx: renders nothing itself; the page mounts one per held(live) id, keyed by id.
   export function SessionAgent(props: {
     id: string;
-    initialMessages: Message[];            // set once, on mount (the GET's messages, or [] for a New chat)
+    initialMessages: Message[];            // set once the agent is ready (the GET's messages, or [] for a New chat)
+    onReady: (id: string) => void;         // its registered agent exists: the page may draw CopilotChat on it
     onRunStarted: (id: string) => void;    // → runStarted, the title trigger
     onRunEnded: (id: string) => void;      // → runEnded (after the reconcile below has its list)
     onList: (list: SessionMeta[]) => void;
@@ -80,16 +81,24 @@ at once), in `check_leave_running` (task 4 writes it; this task runs the unit te
   ```
 
 - [ ] **Step 1: `SessionAgent`**: `useAgent({ agentId: agentIdOf(id), runtimeAgentId: "spe", threadId: id,
-  updates: [UseAgentUpdate.OnRunStatusChanged] })`; `agent.setMessages(initialMessages)` once, in a mount effect;
+  updates: [UseAgentUpdate.OnRunStatusChanged] })`. The hook first returns a provisional agent (`isReady: false`)
+  and the registered one on a later render; messages set on the provisional one are lost. So, in an effect keyed
+  on the agent object, once `isReady`: `agent.setMessages(initialMessages)` (once per holder) and `onReady(id)`.
   `useRunReconcile(agent, …)` with `id` fixed (a run's session is the holder's, no longer "the open one when it
-  started"); `agent.subscribe({ onRunErrorEvent })` passes errors to `onError(id, …)` and `noteRunError`.
+  started"); it and `agent.subscribe({ onRunErrorEvent })` (errors to `onError(id, …)` and `noteRunError`)
+  re-subscribe when the agent object changes.
 - [ ] **Step 2: `page.tsx`**: drop the page-level `useAgent({ agentId: "spe" })` and `busy`; keep `live` in state
   and a `Map<string, Message[]>` ref of initial messages. `open(id)`: if `isHeld(live, id)`, `openSession` with
   no fetch and bump `requestRef` (decision 41; a late `GET` for an earlier click is ignored as today); else
   `fetchSession`, store its messages, `openSession`. `startNew()`: a fresh UUID, `[]`, `openSession`. Render
-  `held(live).map(id => <SessionAgent key={id} …/>)` and `CopilotChat` with `agentId={agentIdOf(active)}`,
-  `key={active}`, inside `CopilotChatConfigurationProvider agentId={agentIdOf(active)} threadId={active}
-  hasExplicitThreadId={false}`. `ready` waits for the open session's holder to be mounted (as `isReady` did).
+  `held(live).map(id => <SessionAgent key={id} …/>)`; keep a `ready: Set<string>` from `onReady` (an id leaves it
+  when its holder unmounts). Draw `CopilotChat` with `agentId={agentIdOf(active)}`, `key={active}`, inside
+  `CopilotChatConfigurationProvider agentId={agentIdOf(active)} threadId={active} hasExplicitThreadId={false}`,
+  only once `ready.has(active)`: `CopilotChat` looks its agent up by `agentId` and throws "Agent … not found after
+  runtime sync" before the holder's effect has registered it; until then the chat area shows the loading state.
+  The first-load effect and the 15 s "runtime unreachable" message, which waited on the page-level agent's
+  `isReady`, wait on `useCopilotKit().copilotkit.runtimeConnectionStatus` instead (a holder's agent is registered
+  while the runtime is still pending, so its `isReady` does not say the runtime answered).
   Every list fetch goes through `listed()`; a `startNew` it returns starts a new session.
 - [ ] **Step 3: Enable switching**: the sidebar's `onNew`/`onOpen` lose their `agent.isRunning` guards;
   `running` no longer disables *New chat* or the rows. Remove the comments in `app/sidebar.tsx`,
@@ -129,7 +138,9 @@ end; their Delete items are disabled.
 - [ ] **Step 1: Replace the locked-page expectations**: `check_stop` (around lines 693–711) no longer expects
   *New chat* and the rows disabled during the run; it expects the open row's mark instead. The waits at
   `two_turn` (around 1168) and `slow_loop` (around 1240) wait for a run's end with a helper
-  `wait_run(r, title)`: the row with `title` shows `.spe-row-running`, then no longer does (timeouts as today).
+  `wait_run(r, session_id)`: the open row (found by the session id, not its title, which a model-written title
+  can replace mid-wait) has no `.spe-row-running`; seeing the mark first is not required, since a quick run can
+  end before the first check (timeouts as today).
 - [ ] **Step 2: Add `check_leave_running(r)`** and scenario `leave-running` (in `LOCAL` and `all`):
   1. New chat A, send "slow A"; at once *New chat* and A's sibling rows are enabled (26).
   2. New chat B, send "slow B"; both rows show the mark; their Delete items (row and header) are disabled (44).

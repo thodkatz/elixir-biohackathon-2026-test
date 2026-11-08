@@ -98,7 +98,9 @@ Every task's requirements include these.
 ## PR slices
 
 N = 3, sequential: each starts from `main` after the previous merged. The session merges each PR itself once the
-checks in `AGENTS.md`, *Overrides*, pass; the status column then reads `merged #<n>`.
+checks in `AGENTS.md`, *Overrides*, pass. Each slice's PR also sets its row's status (`merged #<n>`, written in
+its after-merge state), adds its handoff to [`handoffs/`](handoffs/) and moves `AGENTS.md`'s *Current work* line
+to the next slice; slice 3 closes the track (its task 4).
 
 | n/N | Branch | Tasks | Delivers | Est. LOC | Reviewer checks | File | Status |
 |---|---|---|---|---|---|---|---|
@@ -138,7 +140,8 @@ updated in the same commit.
 
 - **Slice 1, task 3: decision 42's verdict**, only if it changes the spec: the fallback chosen, or a rejoin
   mechanism other than §6's (replayed messages matched by id).
-- **Slice 3, task 4: leaving a running chat is built**: the spec README's status line and §12's findings.
+- **Slice 3, task 4: leaving a running chat is built**: the spec README's status line and §12's findings, and
+  ruling 1: §6's "1.79" thread-scoped `useAgent` reads 1.84.1, the version built on.
 
 ## Progress and handoffs
 

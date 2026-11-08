@@ -46,3 +46,19 @@ For the plan that builds §15 (decisions 31–39).
   the compaction command plan's slice 2 handoff) and guards a request type with a bare `assert` (slice 1);
   `copilotkit-chat/app/compaction-divider.tsx` casts `message.content as string` where `typeof` would narrow
   (slice 2).
+
+## Leaving a running chat
+
+For the plan that builds clarification 27 (decisions 26 and 40–44).
+
+- Build decision 42's rejoin check first, in the first slice, as a throwaway page (README, *Early output*); its
+  verdict is recorded in the plan's progress file, and decision 42's fallback is built only if it says so.
+  What to look at: whether `CopilotChat` on a thread-scoped agent makes a `connect` request on mount (today's
+  page relies on it making none, so the history it set is kept), and whether the runtime's replay of past runs
+  (`InMemoryAgentRunner.connect`) adds messages the journal's history already holds.
+- One owner of the page's live sessions (the open one and each one with a run streaming), so the sidebar's
+  mark, the Delete rule and the polling all read one set; `use-run-reconcile.ts`'s end-of-run fetch and the title
+  trigger (`lib/reconcile.ts`) move from the one agent to each session's.
+- `running` comes from `Shared.running`, keyed by `runKey(threadId, runId)` (`lib/sessions.ts`): a lookup by
+  session id, not a new store.
+

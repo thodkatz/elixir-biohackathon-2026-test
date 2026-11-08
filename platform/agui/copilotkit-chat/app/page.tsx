@@ -106,22 +106,28 @@ function Chat() {
   // message as the title at once; then one call for its model-written title, from that question (the server
   // writes one only if the session has no title of its own), which can land before the answer ends. The list
   // is refetched rather than patched with the answer, so a rename that lands while the title call is in
-  // flight is not overwritten by it. A run never listed (refused) re-arms the session for its next run.
+  // flight is not overwritten by it. Not listed in time, or the list failing, re-arms the session: the call is
+  // then made once its run is recorded (onRecorded), or at its next run.
   const titles = useRef(new TitleTrigger());
+  const askFor = useCallback((id: string) => {
+    askTitle(id)
+      .then(() => refresh())
+      .catch((e: unknown) => console.warn(`session ${id}: no model title: ${messageOf(e)}`));
+  }, [refresh]);
   const onStarted = useCallback((id: string) => {
     if (!titles.current.take(id)) return;
     waitListed(fetchSessionList, id)
       .then(({ list, listed }) => {
         setSessions(list);
-        if (!listed) {
-          titles.current.started(id);
-          return;
-        }
-        return askTitle(id).then(() => refresh());
+        if (listed) askFor(id);
+        else titles.current.started(id);
       })
-      .catch((e: unknown) => console.warn(`session ${id}: no model title: ${messageOf(e)}`));
-  }, [refresh]);
-  const { busy, noteRunError } = useRunReconcile({ openId: active ?? "", onList, onError: setError, onStarted });
+      .catch(() => titles.current.started(id));
+  }, [askFor]);
+  const onRecorded = useCallback((id: string) => {
+    if (titles.current.take(id)) askFor(id);
+  }, [askFor]);
+  const { busy, noteRunError } = useRunReconcile({ openId: active ?? "", onList, onError: setError, onStarted, onRecorded });
 
   // The history goes onto the agent first, then CopilotChat remounts on the new thread
   // (key={id}): a freshly mounted chat on a non-explicit thread keeps the agent's messages,

@@ -53,7 +53,8 @@ session id) and one journal (§13).
     starts (its `run_start` line, which carries the user message, is written before the agent is called), and
     the browser fetches the list then rather than after the run. At that point the browser asks `chat-ui`
     (`POST /api/sessions/{id}/title`, below) for a short model-written title from the session's first question
-    alone, in parallel with the run, so the title usually lands before the answer ends; it is journaled as a
+    alone, in parallel with the run (or once the run is recorded, if the list did not show the session in time), so
+    the title usually lands before the answer ends; it is journaled as a
     `meta` line if no title is set by then (clarification 26); the agent's title never
     overwrites one the user already set by `PATCH`, and a `PATCH` made after the model title still wins (the
     check for an existing title runs under the session's own append queue). Modelled on Open WebUI 0.11.3's

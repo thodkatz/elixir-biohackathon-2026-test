@@ -331,10 +331,12 @@ in the parts it amends.
     sidebar and header show the fallback title (first message, 60 characters) within a second of sending, and ask
     for the model title at once; `POST /api/sessions/{id}/title` titles from the first run that added a user
     message, whatever its status (running, finished, failed or stopped), with that question alone, instead of the
-    first completed run's message and answer. The URL still names the session only once its first run is
-    recorded. *Reason:* the user, testing on de.NBI, saw no title until the answer had finished and expected one
+    first completed run's message and answer. A session not listed in time (or a list fetch that fails) is asked
+    for once that run is recorded instead. The URL still names the session only once its first run is recorded;
+    the header's rename, tags, pin and hide now work on it while that run streams (delete stays disabled). *Reason:* the user, testing on de.NBI, saw no title until the answer had finished and expected one
     while it streamed, as chatgpt.com shows. *Cost if wrong:* a title from the question alone can be less apt than
     one that saw the answer; a first run the server refuses is never listed, so its title waits for the next run;
-    still one paid call per New chat. *Amends:* §6 *Sessions*, *Session API*, *Chat header*; §5 *Endpoints*
+    still one paid call per New chat, now made alongside the run, so a single shared model endpoint (de.NBI's) may
+    answer the first message slightly later. *Amends:* §6 *Sessions*, *Session API*, *Chat header*; §5 *Endpoints*
     (`POST /title`'s caller sends one message); README decision 22; supersedes clarification 16's timing.
     *Status:* folded.

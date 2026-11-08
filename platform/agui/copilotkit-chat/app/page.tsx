@@ -36,7 +36,8 @@ const MESSAGE_VIEW = { assistantMessage: AssistantOrCompaction };
 // 1.79.0, `CopilotChatView.ScrollView`'s `...props`), but its type leaves `initial` out, hence the cast; an upgrade
 // that stops passing it through brings the animation back, which a reload of a long session shows. Stable for the
 // same reason as MESSAGE_VIEW.
-const SCROLL_VIEW = { initial: "instant" } as HTMLAttributes<HTMLDivElement>;
+const SCROLL_VIEW = ({ initial: "instant" } satisfies { initial: "instant" | "smooth" | boolean }) as
+  HTMLAttributes<HTMLDivElement>;
 
 // Under the composer, where claude.ai and chatgpt.com keep their notice; the header holds the title only.
 const LABELS = {

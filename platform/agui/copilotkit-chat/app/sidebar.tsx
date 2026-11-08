@@ -148,7 +148,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
       if (popover.current?.contains(target) || trigger?.contains(target)) return;
       end();
       const id = busy.id;
-      refocusIfLost(document, () => triggers.current.get(id));
+      if (e.pointerType !== "touch") refocusIfLost(document, () => triggers.current.get(id));
     };
     document.addEventListener("pointerdown", onDown, true);
     return () => document.removeEventListener("pointerdown", onDown, true);

@@ -83,7 +83,7 @@ export function ChatHeader({ session, knownTags, running, ready, onPatch, onDele
       }
       if (popover.current?.contains(target) || trigger.current?.contains(target)) return;
       end();
-      refocusIfLost(document, () => trigger.current);
+      if (e.pointerType !== "touch") refocusIfLost(document, () => trigger.current);
     };
     document.addEventListener("pointerdown", onDown, true);
     return () => document.removeEventListener("pointerdown", onDown, true);

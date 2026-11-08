@@ -55,7 +55,8 @@ export function focusLost(active: object | null, page: Pick<FocusPage, "body" | 
 // After a press outside an open menu has closed it: gives focus back to the menu's `⋯`, as Escape and a
 // choice do, but only if the press left focus nowhere, so a press on a field, a button or a link keeps the
 // focus it gave. The check waits a task, for the press's own focus change (the `mousedown` after the
-// `pointerdown` that closed the menu) to have happened.
+// `pointerdown` that closed the menu) to have happened. Callers skip it for touch: a tap's compatibility
+// `mousedown` comes after `touchend`, later than the check, and touch has no keyboard focus to keep.
 export function refocusIfLost(
   page: FocusPage,
   trigger: () => { focus: (options?: { preventScroll?: boolean }) => void } | undefined | null,

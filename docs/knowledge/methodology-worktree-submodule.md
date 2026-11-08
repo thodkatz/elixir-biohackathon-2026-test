@@ -12,9 +12,11 @@ directory, not under this checkout:
 
 and opened no draft PR: its `gh pr create` stops on the organization token error (`gh-pr-create-token.md`).
 
-**Cause.** In a submodule, `git rev-parse --git-common-dir` is `<parent>/.git/modules/<name>`, not
-`<checkout>/.git`, so taking its parent as the main checkout lands inside the parent's `.git/modules/`. The path the
-workflow expects is `<main checkout>/.claude/worktrees/<branch, / as ->` (`AGENTS.md`, *Claim before you work*).
+**Cause.** The script (`shared/claude/worktree.sh`) takes the main checkout from the first line of
+`git worktree list --porcelain`. In a submodule whose git directory lives in the parent, that line is the git
+directory, `worktree /workspace/biohackathon/.git/modules/elixir-biohackathon-2026-test`, not the checkout. The
+path the workflow expects is `<main checkout>/.claude/worktrees/<branch, / as ->` (`AGENTS.md`, *Claim before you
+work*).
 
 **Fix: claim by hand.** Remove the misplaced worktree, then from the main checkout:
 
@@ -29,5 +31,4 @@ gh api repos/thodkatz/elixir-biohackathon-2026-test/pulls -f title='…' -f head
 ```
 
 Copy the `.methodology` link target from the main checkout's own link (`readlink .methodology`). Until
-`methodology worktree` resolves the main checkout with `git rev-parse --show-toplevel` (an agent-methodology change),
-use these commands for every claim in this repo.
+`methodology worktree` resolves the main checkout another way (an agent-methodology change), use these commands for every claim in this repo.

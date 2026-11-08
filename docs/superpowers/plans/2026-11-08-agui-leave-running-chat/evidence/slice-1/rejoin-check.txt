@@ -1,0 +1,134 @@
+fake agent on http://127.0.0.1:18108/agent, run log /var/tmp/fake-agent-84s0vim3/runs.jsonl
+▲ Next.js 16.4.5
+- Local:         http://127.0.0.1:3108
+- Network:       http://127.0.0.1:3108
+✓ Ready in 0ms
+✓ Running next.config took 72ms
+rejoin check, 2026-11-08 20:45:17, dedupe layer off, CopilotKit 1.84.1
+== A. Two private agents at once
+  slow steps shown (A, B) at 1 s intervals: [(0, 0), (0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (7, 6), (8, 8), (9, 9), (10, 10)]
+  journal A runs: ['completed']; journal B runs: ['completed']
+  A at the end: shown 4 ids, journal 4; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  B at the end: shown 4 ids, journal 4; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  request [A] GET /api/copilotkit/info
+  request [A] POST /api/copilotkit/agent/spe/run
+  request [A] POST /api/copilotkit/agent/spe/run
+PASS A: both growing at once=True; A ['completed'], B ['completed']; ids equal to GET at the end: A True, B True
+== B. Ordinary open (the stop point)
+  seeded: ['completed', 'completed', 'completed']
+  after open: shown 12 ids, journal 12; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  request [B] GET /api/copilotkit/info
+  connect requests on open: 0
+  after unmount and remount: shown 12 ids, journal 12; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  connect requests on remount: 0; 'already registered' console lines: []
+  after a send: shown 16 ids, journal 16; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  request [B] POST /api/copilotkit/agent/spe/run
+  journal runs: ['completed', 'completed', 'completed', 'completed']
+PASS B: no connect (open 0, remount 0); ids equal and once: open True, remount True, after send True; journal runs 4
+== C. Rejoin after a reload (C1: with earlier runs through this server process)
+  session 6ede0b00-5d5f-489f-94f6-f69035ff9eee, 2 earlier run(s); journal before the reload: 12 ids, runs ['completed', 'completed', 'incomplete']
+  [C1-1] t= 0.0s running=True status='connecting' steps=2 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t= 1.1s running=True status='connecting' steps=3 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t= 2.1s running=True status='connecting' steps=4 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t= 3.1s running=True status='connecting' steps=5 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t= 4.1s running=True status='connecting' steps=6 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t= 5.2s running=True status='connecting' steps=7 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t= 6.2s running=True status='connecting' steps=8 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t= 7.2s running=True status='connecting' steps=9 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t= 8.2s running=False status='connect-resolved' steps=10 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t= 9.3s running=False status='connect-resolved' steps=10 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C1-1] t=10.3s running=False status='connect-resolved' steps=10 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  committed id lists from the connect on: 12; with a duplicate: 0; lacking one of the 12 ids the journal held at the rejoin: 1 (lengths [0], at ms [0]); lengths in order: [0, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12], the first five at ms [0, 34, 457, 1450, 2452]
+  C1 at the end: shown 12 ids, journal 12; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  request [C1-1] GET /api/copilotkit/info
+  request [C1-1] POST /api/copilotkit/agent/spe/connect
+  connect requests from the rejoining page: 1; journal runs ['completed', 'completed', 'completed']; slow steps shown at rejoin 0, at the end 10
+  every id shown more than once: []; every journal id not shown at some tick: []
+FAIL C1: connects 1; duplicates 0; ids missing at some tick 0; committed lists with a duplicate 0, lacking a history id 1 of 12; slow steps shown at the end 10 of 10 (exactly 10: streamed whole, none repeated); equal to GET at the end True; runs ['completed', 'completed', 'completed']
+== C. Rejoin after a reload (C2: a fresh session)
+  session 60a0844f-b6c3-4f1e-b63e-77a1a883202a, 0 earlier run(s); journal before the reload: 4 ids, runs ['incomplete']
+  [C2-1] t= 0.0s running=True status='connecting' steps=2 shown=0 journal=4 dups=[] journal-not-shown=['fa6f92d7-fc96-4ef2-83e8-db5e140b3ebc', '9d141718-3a24-41cd-9ece-0a97a5295600', '800735b9-f3e3-45d9-956a-8dbb3861f00c', 'd4674bfd-7691-4fb2-a76c-e850fb95666e'] shown-not-in-journal=[]
+  [C2-1] t= 1.1s running=True status='connecting' steps=3 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C2-1] t= 2.1s running=True status='connecting' steps=4 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C2-1] t= 3.1s running=True status='connecting' steps=5 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C2-1] t= 4.1s running=True status='connecting' steps=6 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C2-1] t= 5.1s running=True status='connecting' steps=7 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C2-1] t= 6.1s running=True status='connecting' steps=8 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C2-1] t= 7.2s running=True status='connecting' steps=9 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C2-1] t= 8.2s running=False status='connect-resolved' steps=10 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C2-1] t= 9.2s running=False status='connect-resolved' steps=10 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C2-1] t=10.2s running=False status='connect-resolved' steps=10 shown=4 journal=4 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  committed id lists from the connect on: 14; with a duplicate: 0; lacking one of the 4 ids the journal held at the rejoin: 1 (lengths [0], at ms [0]); lengths in order: [0, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4], the first five at ms [0, 24, 500, 1500, 2500]
+  C2 at the end: shown 4 ids, journal 4; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  request [C2-1] GET /api/copilotkit/info
+  request [C2-1] POST /api/copilotkit/agent/spe/connect
+  connect requests from the rejoining page: 1; journal runs ['completed']; slow steps shown at rejoin 0, at the end 10
+  every id shown more than once: []; every journal id not shown at some tick: ['800735b9-f3e3-45d9-956a-8dbb3861f00c', '9d141718-3a24-41cd-9ece-0a97a5295600', 'd4674bfd-7691-4fb2-a76c-e850fb95666e', 'fa6f92d7-fc96-4ef2-83e8-db5e140b3ebc']
+FAIL C2: connects 1; duplicates 0; ids missing at some tick 4; committed lists with a duplicate 0, lacking a history id 1 of 14; slow steps shown at the end 10 of 10 (exactly 10: streamed whole, none repeated); equal to GET at the end True; runs ['completed']
+== C. Rejoin after a reload (C3: earlier runs made before a chat UI restart: only the journal holds them)
+shutdown: 0 run(s) cancelled, journals written
+▲ Next.js 16.4.5
+- Local:         http://127.0.0.1:3108
+- Network:       http://127.0.0.1:3108
+✓ Ready in 0ms
+✓ Running next.config took 45ms
+  session 8f2356fc-104a-4b32-b4ac-f856df6246f6, 2 earlier run(s) before a chat UI restart; journal before the reload: 12 ids, runs ['completed', 'completed', 'incomplete']
+  [C3-1] t= 0.0s running=True status='connecting' steps=0 shown=0 journal=12 dups=[] journal-not-shown=['a0ca9353-fd0b-4988-8e0e-96f52179adfc', 'ff39a9c1-7de9-4893-8b54-7d93153011ef', 'c5ba9154-7309-4a26-a376-6f35c486a3ca', '9388fe45-cc00-4f96-acd8-c90b4cbc8c31', 'de4d09ae-cf11-4bce-860f-9eeb6e02df38', 'c962eee3-c94c-4025-97e8-dd25be31e20a', 'a7e1ddf3-ab76-4484-ab50-de434895c540', 'f8310908-8d86-4eb2-b727-8e283c89e0bb', 'e216b61f-806e-441f-9a54-051c3e36a833', 'c000bd0f-85e4-4741-a30a-b6698838e2c9', '38e35106-c965-409d-89cc-6ca3c849613f', 'a907c6af-d5d8-4e1f-8694-04c4b5093a32'] shown-not-in-journal=[]
+  [C3-1] t= 1.1s running=True status='connecting' steps=3 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C3-1] t= 2.1s running=True status='connecting' steps=4 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C3-1] t= 3.1s running=True status='connecting' steps=5 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C3-1] t= 4.2s running=True status='connecting' steps=6 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C3-1] t= 5.2s running=True status='connecting' steps=7 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C3-1] t= 6.2s running=True status='connecting' steps=8 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C3-1] t= 7.2s running=True status='connecting' steps=9 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C3-1] t= 8.2s running=False status='connect-resolved' steps=10 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C3-1] t= 9.3s running=False status='connect-resolved' steps=10 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [C3-1] t=10.3s running=False status='connect-resolved' steps=10 shown=12 journal=12 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  committed id lists from the connect on: 15; with a duplicate: 0; lacking one of the 12 ids the journal held at the rejoin: 1 (lengths [0], at ms [0]); lengths in order: [0, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12], the first five at ms [0, 39, 480, 1480, 2488]
+  C3 at the end: shown 12 ids, journal 12; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  request [C3-1] GET /api/copilotkit/info
+  request [C3-1] POST /api/copilotkit/agent/spe/connect
+  connect requests from the rejoining page: 1; journal runs ['completed', 'completed', 'completed']; slow steps shown at rejoin 0, at the end 10
+  every id shown more than once: []; every journal id not shown at some tick: ['38e35106-c965-409d-89cc-6ca3c849613f', '9388fe45-cc00-4f96-acd8-c90b4cbc8c31', 'a0ca9353-fd0b-4988-8e0e-96f52179adfc', 'a7e1ddf3-ab76-4484-ab50-de434895c540', 'a907c6af-d5d8-4e1f-8694-04c4b5093a32', 'c000bd0f-85e4-4741-a30a-b6698838e2c9', 'c5ba9154-7309-4a26-a376-6f35c486a3ca', 'c962eee3-c94c-4025-97e8-dd25be31e20a', 'de4d09ae-cf11-4bce-860f-9eeb6e02df38', 'e216b61f-806e-441f-9a54-051c3e36a833', 'f8310908-8d86-4eb2-b727-8e283c89e0bb', 'ff39a9c1-7de9-4893-8b54-7d93153011ef']
+FAIL C3: connects 1; duplicates 0; ids missing at some tick 12; committed lists with a duplicate 0, lacking a history id 1 of 15; slow steps shown at the end 10 of 10 (exactly 10: streamed whole, none repeated); equal to GET at the end True; runs ['completed', 'completed', 'completed']
+== D. Stop in the rejoined chat
+  session 4efd4470-8ee2-435b-aa77-fabe8e23caee, 1 earlier run(s); journal before the reload: 8 ids, runs ['completed', 'incomplete']
+  [D-1] t= 0.0s running=True status='connecting' steps=0 shown=0 journal=8 dups=[] journal-not-shown=['dd8056a8-708a-424e-98c2-c497d9cea9fa', 'a751ad42-92e5-47d6-ae09-c6f9131fbb2e', 'defa207d-8756-496a-94f2-7bd95e019fec', '530b87b3-bce4-4bb2-b439-8dffceaee80b', 'e27a3feb-2123-4b67-acc9-15af04194fb7', 'ade82707-2aac-4d6c-b9fc-36bce45cda9a', '7904b502-085a-4599-a821-a20499ec485e', 'edbb3d01-835a-4442-9497-0749e0e013a4'] shown-not-in-journal=[]
+  [D-1] t= 1.1s running=True status='connecting' steps=3 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [D-1] t= 2.1s running=True status='connecting' steps=4 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [D-1] clicking the stop button (aria-label 'Stop')
+  [D-1] t= 3.2s running=False status='connect-resolved' steps=4 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [D-1] t= 4.2s running=False status='connect-resolved' steps=4 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [D-1] t= 5.2s running=False status='connect-resolved' steps=4 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  committed id lists from the connect on: 5; with a duplicate: 0; lacking one of the 8 ids the journal held at the rejoin: 1 (lengths [0], at ms [0]); lengths in order: [0, 8, 8, 8, 8], the first five at ms [0, 33, 490, 1492, 2285]
+  D at the end: shown 8 ids, journal 8; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  request [D-1] GET /api/copilotkit/info
+  request [D-1] POST /api/copilotkit/agent/spe/connect
+  request [D-1] POST /api/copilotkit/agent/spe/stop/4efd4470-8ee2-435b-aa77-fabe8e23caee
+  connect requests from the rejoining page: 1; journal runs ['completed', 'cancelled']; slow steps shown at rejoin 0, at the end 4
+  every id shown more than once: []; every journal id not shown at some tick: ['530b87b3-bce4-4bb2-b439-8dffceaee80b', '7904b502-085a-4599-a821-a20499ec485e', 'a751ad42-92e5-47d6-ae09-c6f9131fbb2e', 'ade82707-2aac-4d6c-b9fc-36bce45cda9a', 'dd8056a8-708a-424e-98c2-c497d9cea9fa', 'defa207d-8756-496a-94f2-7bd95e019fec', 'e27a3feb-2123-4b67-acc9-15af04194fb7', 'edbb3d01-835a-4442-9497-0749e0e013a4']
+  stop requests: 1
+PASS D: last run_end 'cancelled'; runs ['completed', 'cancelled']; stop requests 1
+== E. Second tab
+  session 269fc6a6-a612-47bf-8fa4-11aab0568999, 1 earlier run(s); journal before the second-tab: 8 ids, runs ['completed', 'incomplete']
+  [E-2] t= 0.0s running=True status='connecting' steps=3 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [E-2] t= 1.1s running=True status='connecting' steps=4 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [E-2] t= 2.1s running=True status='connecting' steps=5 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [E-2] t= 3.1s running=True status='connecting' steps=6 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [E-2] t= 4.1s running=True status='connecting' steps=7 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [E-2] t= 5.1s running=True status='connecting' steps=8 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [E-2] t= 6.2s running=True status='connecting' steps=9 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [E-2] t= 7.2s running=False status='connect-resolved' steps=10 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [E-2] t= 8.2s running=False status='connect-resolved' steps=10 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  [E-2] t= 9.2s running=False status='connect-resolved' steps=10 shown=8 journal=8 dups=[] journal-not-shown=[] shown-not-in-journal=[]
+  committed id lists from the connect on: 13; with a duplicate: 0; lacking one of the 8 ids the journal held at the rejoin: 1 (lengths [0], at ms [0]); lengths in order: [0, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8], the first five at ms [0, 56, 130, 1116, 2117]
+  E at the end: shown 8 ids, journal 8; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  E first tab at the end: shown 8 ids, journal 8; equal=True duplicates=[] journal-not-shown=[] shown-not-in-journal=[]
+  request [E-2] GET /api/copilotkit/info
+  request [E-2] POST /api/copilotkit/agent/spe/connect
+  connect requests from the rejoining page: 1; journal runs ['completed', 'completed']; slow steps shown at rejoin 0, at the end 10
+  every id shown more than once: []; every journal id not shown at some tick: []
+PASS E: connects 1; duplicates 0; ids missing at some tick 0; committed lists with a duplicate 0, lacking a history id 1 of 13; slow steps shown at the end 10 of 10 (exactly 10: streamed whole, none repeated); equal to GET at the end True; runs ['completed', 'completed']
+== Browser console (errors and warnings)
+== Summary: FAIL: C1 C2 C3
+shutdown: 0 run(s) cancelled, journals written

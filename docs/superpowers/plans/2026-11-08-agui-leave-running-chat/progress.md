@@ -26,7 +26,7 @@ CopilotKit 1.84.1, `@ag-ui/client` 1.0.2, the fake agent; script and output in
 
   (C2 and C3 alike: `lacking a history id 1 of 12` and `1 of 13`.) The cause: `CopilotKitCore.connectAgent`
   treats every rejoin from a freshly loaded page as a fresh restore and calls `agent.setMessages([])` before
-  connecting (`@copilotkit/core/dist/index.mjs:4304`, `:4317`).
+  connecting (`@copilotkit/core/dist/index.mjs:4308`, `:4317`).
 - **With the layer in its `every` form, C1–C3 and E PASS** (`rejoin-check-dedupe.txt`, run 1):
 
       PASS C1: connects 1; duplicates 0; ids missing at some tick 0; committed lists with a duplicate 0, lacking a history id 0 of 13; slow steps shown at the end 10 of 10 (exactly 10: streamed whole, none repeated); equal to GET at the end True; runs ['completed', 'completed', 'completed']
@@ -40,7 +40,11 @@ CopilotKit 1.84.1, `@ag-ui/client` 1.0.2, the fake agent; script and output in
     subscriber saw: each event's `messageId` and `parentMessageId` (strings), collected in an `onEvent` subscriber
     on the agent, the set emptied on each `RUN_STARTED`. `connect` replays past runs first (compacted), then the
     running run from its own `RUN_STARTED`, whole (`@copilotkit/runtime` `v2/runtime/runner/in-memory.mjs:582`,
-    a `ReplaySubject(Infinity)` at :471), so the last `RUN_STARTED` is the run in progress.
+    a `ReplaySubject(Infinity)` at :471), so the last `RUN_STARTED` is the run in progress. Slice 3 adds what the
+    check did not exercise: the ids of a `MESSAGES_SNAPSHOT`'s messages seen after that `RUN_STARTED`. The chat's
+    recorder sends one right after `RUN_STARTED` when the browser's messages were ignored or a command ran
+    (`lib/recorder.ts:188`, `:210–212`), and `connect` passes it on, having no `messageId` to filter on
+    (`in-memory.mjs:600`).
   - **The rule** (`rejoinedMessages`): keep the history in order; a history message whose id is in that set is
     replaced in place by the agent's copy; append the agent's messages whose id the history lacks; drop every
     other replayed copy.
@@ -65,8 +69,15 @@ CopilotKit 1.84.1, `@ag-ui/client` 1.0.2, the fake agent; script and output in
 ## Rulings while building
 
 - **Slice 3, task 2's *Live* text names the verdict's mechanism** (slice 1, 2026-11-08). It now names the marker
-  for the run in progress (a third argument of `rejoinedMessages`, `inProgress`), runs the merge on every message change during the connect and once after it resolves,
-  and adds tests for a current run's tool call and result and a `MESSAGES_SNAPSHOT` during the replay, and a
-  Playwright check that the streamed text grows during the run. *Why:* the check found `connectAgent` clears the
-  messages first and a merge from the replay's first event on (`wait`) fails; task 2's review asked for the rest.
+  for the run in progress (a third argument of `rejoinedMessages`, `inProgress`), runs the merge on every
+  message change during the connect and once after it resolves, and adds tests for a current run's tool call
+  and result and a `MESSAGES_SNAPSHOT` during the replay, and a Playwright check that the streamed text grows
+  during the run. *Why:* the check found `connectAgent` clears the messages first and a merge from the replay's
+  first event on (`wait`) fails; task 2's review asked for the rest.
   *Cost if wrong:* the ordering race above makes a rejoined message repeat its text; the Playwright check shows it.
+- **Slice 3's run-in-progress collector also takes a replayed `MESSAGES_SNAPSHOT`'s ids** (slice 1, 2026-11-08),
+  all of them, and is its own tested function (`nextInProgress`). *Why:* task 3's review found the recorder's
+  snapshot can sit inside the running run's replay with no `messageId`, so a collector of `messageId` and
+  `parentMessageId` alone keeps the history's copy over it; all ids, because the snapshot is the run's own branch
+  as the server holds it, never older than the history's, and replacing an equal copy changes nothing. *Cost if
+  wrong:* none found: a snapshot id the history holds unchanged is replaced by an equal copy.

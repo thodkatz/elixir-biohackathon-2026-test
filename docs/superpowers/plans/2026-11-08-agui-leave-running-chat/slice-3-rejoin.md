@@ -51,12 +51,20 @@ tab; stop in the rejoined chat journals `cancelled`; opening a session not runni
   — `history` is the journal's branch; `current` the agent's messages; `inProgress` the ids of the run in
   progress. Keeps `history` in order, each message replaced in place by `current`'s copy of the same id when
   `inProgress` holds that id, and appends `current`'s messages whose id `history` lacks; every other replayed copy
-  is dropped. The marker slice 1's verdict found: `inProgress` is the set of each replayed event's `messageId` and
-  `parentMessageId` (strings) since the last `RUN_STARTED`, collected by an `onEvent` subscriber on the agent and
-  emptied on each `RUN_STARTED`.
+  is dropped. The marker slice 1's verdict found: `inProgress` holds, for the replayed events since the last
+  `RUN_STARTED`, each event's `messageId` and `parentMessageId` (strings) and the ids of every message of a
+  `MESSAGES_SNAPSHOT` (the recorder sends one right after `RUN_STARTED`, `lib/recorder.ts:210–212`; all its ids,
+  because it is the run's own branch as the server holds it, never older than the history's copy).
+- `export function nextInProgress(ids: ReadonlySet<string>, event: BaseEvent): ReadonlySet<string>` — the
+  collector, called from an `onEvent` subscriber on the agent: an empty set on `RUN_STARTED`, else `ids` plus the
+  event's ids as above.
 - Tests: `a past run replayed is shown once`, `the current run's partial message is replaced by its live copy`,
   `a new message of the current run is appended`, `no replay: history unchanged`, `a tool call and its result of
-  the current run keep each id once`, `a MESSAGES_SNAPSHOT during the replay keeps each id once`.
+  the current run keep each id once`, `a MESSAGES_SNAPSHOT during the replay keeps each id once`; and the
+  collector itself, fed a replayed event sequence (a past run's events, `RUN_STARTED`, a `MESSAGES_SNAPSHOT`
+  with a changed copy of a history message, text and tool-call events): `nextInProgress marks the current run's
+  ids, a snapshot's included, and no past run's`, and `rejoinedMessages` over its result shows the snapshot's
+  copy, each id once.
 - `SessionAgent` gains `rejoin: boolean` (the `GET` answered `running` and `live.streaming` lacks the id, or an
   open idle session turned `running` in a list fetch): it calls `copilotkit.connectAgent({ agent })` once and
   applies `rejoinedMessages` **on every message change while the connect lasts** (an `onMessagesChanged`

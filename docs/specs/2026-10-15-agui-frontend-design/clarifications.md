@@ -308,3 +308,19 @@ in the parts it amends.
     instant start relies on CopilotKit passing the scroll slot's props to `use-stick-to-bottom`, which its type
     leaves out. *Amends:* §6 *Row menu*, *Opening a session*; reverses the chat sessions spec's clarification 7
     (a click outside never refocusing the `⋯`). *Status:* folded.
+
+25. **Tool calls are grouped across model steps, by CopilotKit's own layout** (2026-11-08; the fork's PR #50).
+    §6 *Tool calls are rendered* now groups calls made in a row across successive assistant messages, until
+    assistant text, a user message or reasoning comes between them, instead of one assistant message's calls
+    only (clarifications 17 and 20); the header says "Exploring" also while the run may still add calls. Done by
+    registering our card with `useDefaultRenderTool({ …, group: true })` and passing our header as
+    `CopilotChatToolCallsView`'s `group` slot: CopilotKit 1.84.1's message view lays out such runs itself
+    (`toolCallDisplay`, default `"grouped"`, `getToolCallLayouts`), so no `groupMessages` function of ours.
+    *Reason:* asked for by the user (2026-11-04; testing on de.NBI 2026-11-08); on Anthropic `claude-haiku-5-5`,
+    which makes one call per model step, no call was ever grouped (the all-features check: `groups=0 cards=4`).
+    The backlog's open question, whether a stray text line beside a call ends a group, is answered by
+    CopilotKit's rule: non-blank assistant text does. *Cost if wrong:* the grouping rule is CopilotKit's, so an
+    upgrade can change it (the all-features check's "tool calls grouped" then fails); a model that narrates
+    between calls (qwen) gets several groups, as before; as in clarification 17, the first card remounts under
+    the header when a second call joins, so a card opened while calls stream in closes. *Amends:* §6 *Tool calls
+    are rendered*; supersedes the one-response limit of clarifications 17 and 20. *Status:* folded.

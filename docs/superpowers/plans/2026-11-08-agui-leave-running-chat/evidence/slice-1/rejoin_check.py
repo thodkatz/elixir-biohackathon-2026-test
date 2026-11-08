@@ -294,9 +294,12 @@ def follow(page: Page, sid: str, label: str, stop_after: float | None = None) ->
     seen_dups: set[str] = set()
     seen_gaps: set[str] = set()
     ticks, started, after_end, stopped = 0, time.time(), 0, False
-    first_steps = slow_steps(page, sid)
+    first_steps = None  # the slow steps the first tick's line shows (the caller waits for the chat to render)
     while True:
         ticks += 1
+        steps = slow_steps(page, sid)
+        if first_steps is None:
+            first_steps = steps
         mine = shown(page, sid)
         theirs, running = journal_ids(sid)
         dups = sorted(i for i, c in Counter(mine).items() if c > 1)
@@ -305,7 +308,7 @@ def follow(page: Page, sid: str, label: str, stop_after: float | None = None) ->
         seen_dups.update(dups)
         seen_gaps.update(gaps)
         out(f"  [{label}] t={time.time() - started:4.1f}s running={running} status={status(page, sid)!r} "
-            f"steps={slow_steps(page, sid)} shown={len(mine)} journal={len(theirs)} dups={dups} "
+            f"steps={steps} shown={len(mine)} journal={len(theirs)} dups={dups} "
             f"journal-not-shown={gaps} shown-not-in-journal={extra}")
         if stop_after is not None and not stopped and time.time() - started >= stop_after:
             stop = holder(page, sid).get_by_test_id("copilot-send-button")
@@ -379,6 +382,7 @@ def rejoin(browser: Browser, reqs: Requests, label: str, earlier: int, how: str,
         watch_console(viewer, vlabel)
         viewer.goto(url([sid], "rejoin"))
     expect(viewer.get_by_test_id(f"status-{sid}")).not_to_have_text("waiting", timeout=20_000)
+    wait_chat(viewer, sid)  # so the first tick's slow-step count reads a rendered chat
     res = follow(viewer, sid, vlabel, stop_after)
     res["trace"] = trace(viewer, sid, before)
     if how == "second-tab":
@@ -392,7 +396,7 @@ def rejoin(browser: Browser, reqs: Requests, label: str, earlier: int, how: str,
     res["runs"] = [r["status"] for r in wait_ended(sid, earlier + 1, seconds=10)]
     res["sid"], res["viewer"], res["page"] = sid, viewer, page
     out(f"  connect requests from the rejoining page: {res['connects']}; journal runs {res['runs']}; "
-        f"slow steps shown at rejoin {res['first_steps']}, at the end {res['last_steps']}")
+        f"slow steps shown at the first tick {res['first_steps']}, at the end {res['last_steps']}")
     out(f"  every id shown more than once: {res['dups']}; every journal id not shown at some tick: {res['gaps']}")
     return res
 
@@ -434,7 +438,9 @@ def check_e(browser: Browser, reqs: Requests) -> None:
     out("== E. Second tab")
     res = rejoin(browser, reqs, "E", 1, "second-tab")
     shot(res["viewer"], "e-second-tab")
-    ok = res["final_ok"] and not res["dups"] and res["connects"] == 1 and res["last_steps"] == 10
+    # "as C": the same criterion.
+    ok = (res["final_ok"] and not res["dups"] and not res["gaps"] and not res["trace"]["dup_lists"]
+          and not res["trace"]["gap_lists"] and res["connects"] == 1 and res["last_steps"] == 10)
     verdict("E", ok, f"connects {res['connects']}; duplicates {len(res['dups'])}; ids missing at some tick "
                      f"{len(res['gaps'])}; committed lists with a duplicate {res['trace']['dup_lists']}, "
                      f"lacking a history id {res['trace']['gap_lists']} of {res['trace']['lists']}; slow steps shown at the end {res['last_steps']} of 10 (exactly 10: streamed whole, none repeated); "

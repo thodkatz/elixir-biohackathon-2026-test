@@ -24,11 +24,11 @@ work*).
 B=change/<slug>; W=.claude/worktrees/${B//\//-}
 git worktree remove --force /workspace/biohackathon/.git/modules/elixir-biohackathon-2026-test/$W  # the misplaced one
 git fetch origin && git worktree add -b "$B" "$W" origin/main
-ln -s /home/agentvm/.local/share/agent-methodology/current "$W/.methodology"   # git-ignored, as in the main checkout
+ln -s "$(readlink .methodology)" "$W/.methodology"   # git-ignored, as in the main checkout
 git -C "$W" push -u origin "$B"
 gh api repos/thodkatz/elixir-biohackathon-2026-test/pulls -f title='…' -f head="$B" -f base=main \
   -F draft=true -f body='…' --jq .number
 ```
 
-Copy the `.methodology` link target from the main checkout's own link (`readlink .methodology`). Until
-`methodology worktree` resolves the main checkout another way (an agent-methodology change), use these commands for every claim in this repo.
+Until `methodology worktree` resolves the main checkout another way (an agent-methodology change, `BACKLOG.md`),
+use these commands for every claim in this repo.

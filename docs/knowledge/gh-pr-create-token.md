@@ -29,3 +29,12 @@ open the compare page with the base set to upstream explicitly:
 (BACKLOG's *Upstream PR for the AG-UI package* item) and leaves the PR creation to the user. An old upstream PR
 needs no write on kraatz either way: `gh pr merge --repo kraatz/…` is out of reach (403), so a merged upstream PR
 is merged by the user, or by reauth as the kraatz owner..
+
+`gh pr ready <n>` fails the same way. REST cannot mark a draft ready either: `gh api -X PATCH …/pulls/<n> -F
+draft=false` answers 200 and leaves `"draft": true`. The GraphQL mutation alone, which does not read the parent,
+works (#46, 2026-11-08):
+
+```bash
+ID=$(gh api repos/thodkatz/elixir-biohackathon-2026-test/pulls/<n> --jq .node_id)
+gh api graphql -f query="mutation { markPullRequestReadyForReview(input:{pullRequestId:\"$ID\"}) { pullRequest { isDraft } } }"
+```

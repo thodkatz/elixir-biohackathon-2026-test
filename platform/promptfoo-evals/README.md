@@ -219,10 +219,15 @@ the same call on Anthropic is paid and does.
 ## Without a model
 
 ```bash
-uv run --group dev pytest -q              # provider and assertions on synthetic event streams
-(cd ../agui/pydantic-ai-agent && uv run --group dev python ../../dev/fake_agent.py --port 18100 --key test-key)
-SPE_AGENT_URL=http://127.0.0.1:18100/agent SPE_AGENT_API_KEY=test-key SPE_LLM_API_KEY=dummy-llm-key \
-  SPE_HANDOFF_DIR=../ansible/output/INSTANCE npm run eval:agent  # fails its content checks by design
+uv run --group dev pytest -q              # provider, assertions, metrics, catalogue lint
+# both suites against the scripted agent: no model, but the hooks restore the instance
+# before every test. The utility and injection rows fail their own checks by design;
+# no leak metric and no `error` may appear (reports/agent.json: .results.stats).
+(cd ../agui/pydantic-ai-agent && uv run --group dev python ../../dev/fake_agent.py --port 18100 --key fake-agent-key-0001)
+export SPE_AGENT_URL=http://127.0.0.1:18100/agent SPE_AGENT_API_KEY=fake-agent-key-0001 \
+  SPE_LLM_API_KEY=dummy-llm-key-0001 SPE_HANDOFF_DIR=../ansible/output/INSTANCE
+npm run eval:controls && npm run eval:agent -- --repeat 1
+rm -rf reports .promptfoo
 ```
 
 The same run covers the ladder's scoring (`handoff.py`, `metrics.py`, `injections_schema.py`,

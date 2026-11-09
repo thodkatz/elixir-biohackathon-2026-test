@@ -118,6 +118,7 @@ class Run:
     def __init__(self, page: Page, sessions: Path, shots: Path | None):
         self.page, self.sessions, self.shots, self.n = page, sessions, shots, 0
         self.restart_ui = None
+        self.save_delay_ms = 0  # SPE_SESSIONS_TEST_SAVE_DELAY_MS the local chat UI was started with
 
     def shot(self, name: str) -> None:
         if self.shots:
@@ -851,16 +852,40 @@ def check_leave_running(r: Run, save_delay_ms: int = 1500) -> None:
     page.wait_for_timeout(1500)
     second = last_reply(page)
     assert second > first, ("A's reply stopped growing once reopened", first, second)
+    # A, reopened mid-run, stays open while the idle session's GET is in flight, then fails: it keeps streaming
+    # all along (the chat drawn mid-run is redrawn until A's run ends, not until another session is clicked).
+    pending: list = []
+    pattern = f"**/api/sessions/{idle}"
+    page.route(pattern, lambda route: pending.append(route) if route.request.method == "GET" else route.continue_())
+    r.row_of(idle).locator(".spe-row-open").click()
+    until = time.time() + 5
+    while not pending and time.time() < until:
+        page.wait_for_timeout(50)
+    assert pending, "the idle session's GET was never sent"
+    page.wait_for_timeout(1000)
+    held_get = last_reply(page)
+    assert r.url_session() == a and held_get > second, ("A froze while another session's GET was pending",
+                                                        second, held_get)
+    for route in pending:
+        route.fulfill(status=500, body="{}")
+    expect(page.locator(".spe-error")).to_have_count(1, timeout=5_000)
+    page.wait_for_timeout(1000)
+    second = last_reply(page)
+    assert r.url_session() == a and second > held_get, ("A froze after another session's GET failed",
+                                                       held_get, second)
+    page.locator(".spe-error").get_by_role("button", name="Dismiss").click()
+    page.unroute(pattern)
     # A -> B -> A within 300 ms, both held: A's messages, no fetch.
+    started = time.time()
     r.row_of(b).locator(".spe-row-open").click()
     r.row_of(a).locator(".spe-row-open").click()
+    assert time.time() - started < 0.3, time.time() - started
     page.wait_for_url(f"**session={a}**")
     expect(page.locator(".spe-chat").get_by_text(a_text)).to_have_count(1)
     expect(page.locator(".spe-chat").get_by_text(b_text)).to_have_count(0)
     # A -> idle -> A within 300 ms, idle not held, its GET held back until A is open again: the late answer
     # never replaces what A's agent shows.
     late: list = []
-    pattern = f"**/api/sessions/{idle}"
     page.route(pattern, lambda route: late.append(route) if route.request.method == "GET" else route.continue_())
     started = time.time()
     r.row_of(idle).locator(".spe-row-open").click()
@@ -880,8 +905,9 @@ def check_leave_running(r: Run, save_delay_ms: int = 1500) -> None:
     third = last_reply(page)
     assert third > second, (second, third)
     assert a not in gets and b not in gets, gets
-    r.ok("leave-running: A reopened mid-run with no GET, its reply growing; A -> B -> A and A -> idle -> A "
-         "(idle's GET answered late) both land on A's own messages")
+    r.ok("leave-running: A reopened mid-run with no GET, its reply growing, also while another session's GET "
+         "is pending and after it fails; A -> B -> A and A -> idle -> A (idle's GET answered late) both land on "
+         "A's own messages")
 
     # 4. Both runs end completed: one run in A, no cancelled (26, 40); marks gone; A's chat equals GET's (41).
     wait_run(r, a, seconds=30)
@@ -937,7 +963,7 @@ def check_leave_running(r: Run, save_delay_ms: int = 1500) -> None:
         assert SAVE_FAILED not in "".join(page.locator(".spe-error").all_inner_texts())
         assert r.wait_runs(d, 1, seconds=10)["runs"][0]["status"] == "completed"
     finally:
-        r.restart_ui(0)
+        r.restart_ui(r.save_delay_ms)  # the delay this run started with
         page.goto(BASE + "/")
     r.ok(f"leave-running: a New chat's row appears with run_end delayed {save_delay_ms} ms; no save error")
     page.remove_listener("request", log)
@@ -1545,6 +1571,7 @@ def main() -> None:
             page = browser.new_page(viewport={"width": 1280, "height": 800}, color_scheme=args.color_scheme)
             r = Run(page, data, args.shots)
             r.restart_ui = restart_ui
+            r.save_delay_ms = args.save_delay_ms
             if args.scenario == "all":
                 ids = check_list(r)
                 check_focus(r, ids)

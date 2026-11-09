@@ -214,9 +214,8 @@ function Chat() {
     const requestId = (requestRef.current += 1);
     // A session with an agent in this page is shown as it is, its run still streaming if it is: its messages
     // are newer than the journal's, so no fetch.
-    midRun.current = null;
     if (isHeld(liveRef.current, id)) {
-      if (liveRef.current.streaming.has(id)) midRun.current = id;
+      midRun.current = liveRef.current.streaming.has(id) ? id : null;
       setLive(openSession(liveRef.current, id));
       showInUrl(sessionsRef.current.some((s) => s.id === id) ? id : null);
       return;
@@ -231,6 +230,8 @@ function Chat() {
         return;
       }
       initial.current.set(id, session.messages);
+      // Only where the open session changes: the one still open while this fetch ran kept streaming.
+      midRun.current = null;
       setLive(openSession(liveRef.current, id));
       showInUrl(id);
     } catch (e) {

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EMPTY, runStarted } from "./live-sessions.ts";
-import { POLL_MS, needsPoll } from "./refresh.ts";
+import { POLL_MS, afterListApplied, needsPoll } from "./refresh.ts";
 import type { SessionMeta } from "./sessions.ts";
 
 const row = (id: string, running: boolean): SessionMeta => ({
@@ -26,4 +26,11 @@ test("polls while a running session is not streamed, stops when every running on
 
 test("a streamed session the list does not show running does not poll", () => {
   assert.equal(needsPoll([row("A", false)], runStarted(EMPTY, "A")), false);
+});
+
+test("a list applied clears the list's own error, and no other", () => {
+  assert.equal(afterListApplied("Failed to fetch", "Failed to fetch"), null);
+  assert.equal(afterListApplied("“A”: scripted model failure", "Failed to fetch"), "“A”: scripted model failure");
+  assert.equal(afterListApplied("Failed to fetch", null), "Failed to fetch");
+  assert.equal(afterListApplied(null, "Failed to fetch"), null);
 });

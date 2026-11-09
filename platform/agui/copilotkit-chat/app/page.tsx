@@ -25,7 +25,8 @@ import {
 import type { Live } from "../lib/live-sessions.ts";
 import { ListOrder } from "../lib/list-order.ts";
 import { TitleTrigger, fetchSessionList, waitListed } from "../lib/reconcile.ts";
-import { POLL_MS, needsPoll } from "../lib/refresh.ts";
+import { POLL_MS, afterListApplied, needsPoll } from "../lib/refresh.ts";
+import { runErrorText } from "../lib/run-error.ts";
 import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
 import { effectiveTheme, parseTheme } from "../lib/theme.ts";
@@ -125,6 +126,9 @@ function Chat() {
   const listOrder = useRef(new ListOrder()).current;
   const fetchList = useRef(listOrder.wrap(fetchSessionList)).current;
 
+  // The text a failed list refresh put in the error bar, until a list is applied again (applyList).
+  const listError = useRef<string | null>(null);
+
   const startNewRef = useRef<() => void>(() => {});
   const setLive = useCallback((next: Live) => {
     liveRef.current = next;
@@ -156,6 +160,10 @@ function Chat() {
   // session is in it (its first run recorded), the URL names it.
   const applyList = useCallback((list: SessionMeta[]) => {
     if (!listOrder.accept(list)) return; // older than one already applied
+    // The list loads again: a failed refresh's error goes, any other stays.
+    const failed = listError.current;
+    listError.current = null;
+    if (failed !== null) setError((e) => afterListApplied(e, failed));
     sessionsRef.current = list;
     setSessions(list);
     const { live: next, startNew } = listed(liveRef.current, new Set(list.map((s) => s.id)));
@@ -175,7 +183,8 @@ function Chat() {
       applyList(list);
       return list;
     } catch (e) {
-      setError(messageOf(e));
+      listError.current = messageOf(e);
+      setError(listError.current);
       return null;
     }
   }, [applyList, listOrder]);
@@ -220,8 +229,10 @@ function Chat() {
   }, []);
   // A run's errors, in any session, open or not: CopilotChat's onError hears only the open session's agent,
   // so each holder reports its own (and the chat's onError, below, leaves run errors to it).
-  const onAgentError = useCallback((_id: string, message: string) => {
-    setError(message);
+  // One from a session that is not open names it, by the list's title (lib/run-error.ts).
+  const onAgentError = useCallback((id: string, message: string) => {
+    const title = sessionsRef.current.find((s) => s.id === id)?.title ?? null;
+    setError(runErrorText(title, message, id === liveRef.current.open));
   }, []);
 
   // The open session, when its chat was drawn while its run was already streaming (opened again mid-run, or

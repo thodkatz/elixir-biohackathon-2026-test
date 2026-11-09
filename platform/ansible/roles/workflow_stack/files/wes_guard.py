@@ -37,6 +37,15 @@ def _repeats_params(value: str) -> bool:
     return len(names) != len(set(names))
 
 
+def _names_file(value: str) -> bool:
+    """True if a Content-Disposition names a filename in any form (filename, filename*, filename*N):
+    werkzeug files the part as an upload even when the name is empty."""
+    m = Message()
+    m["X"] = value
+    return any(re.sub(r"\*(\d+\*?)?$", "", k).lower() == "filename"
+               for k, _ in (m.get_params(header="X") or [])[1:])
+
+
 def check(content_type: str, body: bytes) -> tuple[int, str] | None:
     """None if the request may pass, else (status, reason)."""
     if not body:
@@ -59,7 +68,7 @@ def check(content_type: str, body: bytes) -> tuple[int, str] | None:
                 if "content-transfer-encoding" in part or len(disp) > 1 or any(map(_repeats_params, disp)):
                     return AMBIGUOUS
                 name = part.get_param("name", header="content-disposition")
-                if part.get_filename() is not None or name == "workflow_attachment":
+                if part.get_filename() is not None or any(map(_names_file, disp)) or name == "workflow_attachment":
                     return 403, NO_FILE
                 if name == "workflow_url":
                     urls.append(part.get_payload(decode=True).decode("utf-8", "replace"))

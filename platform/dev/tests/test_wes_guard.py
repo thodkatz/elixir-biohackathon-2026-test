@@ -39,6 +39,16 @@ def test_any_file_part_is_refused(guard, files):
     assert status == 403 and "attachment" in reason
 
 
+@pytest.mark.parametrize("disp", ["filename*=UTF-8''", "filename*=''", "filename*0=a.txt"])
+def test_rfc2231_file_parts_are_refused(guard, disp):
+    # werkzeug files these parts as uploads although get_filename() gives None
+    ctype, body = multipart({"workflow_url": TRS})
+    body = body.replace(b"--b0undary--", b'--b0undary\r\nContent-Disposition: form-data; name="foo"; '
+                        + disp.encode() + b"\r\n\r\nx\r\n--b0undary--")
+    status, reason = guard.check(ctype, body)
+    assert status == 403 and "attachment" in reason
+
+
 @pytest.mark.parametrize("url", ["main.nf", "file:main.nf", "https://evil.example/m.nf",
                                  "trs://other.host:8080/t/1/NFL/main.nf", TRS + "?x=1"])
 def test_non_trs_urls_are_refused(guard, url):

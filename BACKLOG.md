@@ -15,6 +15,15 @@ start reads this section; keep it short.
 - AG-UI chat: does a reply that finished while away need a mark of its own, and should the open row show its running
   spinner? Two no-gate questions on #58's early output (issuecomment-6730913819), nothing built — waits on the user:
   an answer; a *yes* is a change with a spec §6 clarification.
+- Turn on GitHub's *Automatically delete head branches* (`deleteBranchOnMerge`, now `false`) on this fork: the
+  start routine's prune removes only worktrees whose remote branch is gone, so a merging session that skips
+  cleanup leaves its worktree for good (#58's, 2026-11-09; agent-methodology #153) — waits on the user: an OK to
+  change the repo setting.
+- Canary ladder upstream: once slice 5 merges, port slices 1–5 to kraatz as one `contrib/` branch (scoring,
+  isolation, controls, injections, agent suite), then one port per hardening level as slices 6–9 merge. Before it:
+  a short `docs/specs/` version of the spec (the design lives fork-only in `docs/superpowers/specs/`), and the
+  L1–L3 switches checked off by default (the portal follows upstream `main`) — from the user, 2026-11-09; due: at
+  slice 5's merge.
 
 ## Unscheduled
 
@@ -51,13 +60,6 @@ start reads this section; keep it short.
   local note at the next `methodology update` — from #57's methodology review (finding 7); waits because it is a
   change to another repository, its own unit.
 
-- agent-methodology: `methodology worktree` takes the main checkout from `git worktree list`'s first line, which in a
-  submodule is the parent's `.git/modules/<name>`, so here it misplaces the worktree and claims nothing
-  (`docs/knowledge/methodology-worktree-submodule.md`). `next-session.sh` (`--unit`'s worktree, the `repo=` hint)
-  and `supervise.sh` read the same line, and `status.sh` uses `dirname` of the common dir, so a chained unit runs
-  under `.git/modules/` with no `methodology status` row (seen 2026-11-08, slice 1 of leave-running-chat). Carry a fix to agent-methodology (resolve the checkout with
-  `git rev-parse --show-toplevel` from the main worktree, or `core.worktree`) — from #50's review; waits because it
-  is another repository's change.
 - agent-methodology: `forge.sh` calls `gh pr view <n>` (and `gh api repos/{owner}/{repo}/…`) without `--repo`; on
   this fork, whose parent is now in an organization, that fails (`methodology gate approve`: "could not read #N's
   labels") even with `gh repo set-default` (`docs/knowledge/gh-pr-create-token.md`). Carry a fix (pass the origin's

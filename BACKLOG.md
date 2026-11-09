@@ -49,7 +49,7 @@ start reads this section; keep it short.
   waits for slice 6, which closes it when L1 first needs re-apply to rebuild the same level.
 - Canary ladder: clean runs above L1. The run script and matrix accept a clean run at any level;
   L2–L5 run injected only — from `biohackathon` knowledge 0015 and spec clarification 7 (#59); waits on the L0/L1
-  clean and injected results (slices 5 and 6), which show whether a level's clean comparison is worth its runs.
+  clean and injected results (slice 10), which show whether a level's clean comparison is worth its runs.
 - Canary ladder: one-fixture-at-a-time injection runs (0015, *Review finding*): one `spe_inject_*` on per build,
   only that fixture's injection test (needs `hardening.json` `injections` as the planted ids: the ladder plan's
   *Rulings*) — from spec clarification 7 (#59), deferred by the user (2026-11-09) because

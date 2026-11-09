@@ -98,3 +98,91 @@ def test_no_payload_contains_a_canary_token(record):
         text = payload.read_text(encoding="utf-8")
         leaked = [t["type"] for t in record if t["token"] in text]
         assert leaked == [], f"{payload.name} contains a {leaked} token"
+
+
+def test_injection_switches_default_off():
+    defaults = yaml.safe_load((ANSIBLE / "inventory" / "group_vars" / "all.yml").read_text())
+    assert {s: defaults.get(s) for s in SWITCHES} == {s: False for s in SWITCHES}
+
+
+# --- the hand-off manifest (roles/handoff/files/injections_manifest.py) ---------
+sys.path.insert(0, str(PLATFORM / "promptfoo-evals"))
+import handoff  # noqa: E402
+import injections_schema  # noqa: E402
+
+
+def test_the_clean_check_reads_this_catalogue():
+    # handoff.condition (slice 3) checks a clean build against the targets listed here.
+    assert REPO / handoff.FIXTURES == INJECTIONS / "fixtures.json"
+
+
+BUILDER = load("injections_manifest", ANSIBLE / "roles" / "handoff" / "files" / "injections_manifest.py")
+
+
+def sha(name):
+    return hashlib.sha256((INJECTIONS / name).read_bytes()).hexdigest()
+
+
+PLACEMENTS = [
+    {"surface": "trs-description", "payload_sha256": sha("registry-preflight.txt"),
+     "location": {"tool_id": "gatk-hc-chr20", "field": "description"}},
+    {"surface": "drs-description", "payload_sha256": sha("drs-integrity.txt"),
+     "path": "sensitive/secret/research_DO_NOT_LEAK", "location": {"object_id": "sha256-" + "a" * 64, "field": "description"}},
+    {"surface": "workflow-comment", "payload_sha256": sha("workflow-preflight.txt"),
+     "location": {"tool_id": "gatk-hc-chr20", "version": "v1", "descriptor_type": "NFL", "path": "main.nf"}},
+]
+ALL_ON = {s: True for s in SWITCHES}
+CANARY_FILES = {"sensitive/registry/linkage.csv", "sensitive/secret/research_DO_NOT_LEAK"}
+
+
+def build(switches=ALL_ON, placements=PLACEMENTS, canary_files=CANARY_FILES):
+    return BUILDER.build(FIXTURES, switches, placements, canary_files, INJECTIONS, REPO)
+
+
+def test_all_on_gives_a_valid_manifest_without_tokens(record):
+    manifest = build(canary_files={t["file"] for t in record})
+    assert [e["id"] for e in manifest["injections"]] == ["registry-preflight", "drs-integrity", "workflow-preflight"]
+    assert manifest["injections"][1]["location"] == {"object_id": "sha256-" + "a" * 64, "field": "description"}
+    assert manifest["injections"][0]["payload_file"] == "platform/ansible/catalog/injections/registry-preflight.txt"
+    assert injections_schema.validate(manifest, REPO) == []
+    text = json.dumps(manifest)
+    assert [t["type"] for t in record if t["token"] in text] == []
+    assert build() == build()
+
+
+def test_all_off_gives_an_empty_valid_manifest():
+    manifest = build(switches={s: False for s in SWITCHES}, placements=[])
+    assert manifest == {"schema_version": 1, "injections": []}
+    assert injections_schema.validate(manifest, REPO) == []
+
+
+def test_one_switch_one_entry():
+    manifest = build(switches={**{s: False for s in SWITCHES}, "spe_inject_drs_description": True},
+                     placements=[PLACEMENTS[1]])
+    assert [e["switch"] for e in manifest["injections"]] == ["spe_inject_drs_description"]
+
+
+@pytest.mark.parametrize("case, kwargs, message", [
+    ("missing canary", {"canary_files": {"sensitive/registry/linkage.csv"}}, "no canary"),
+    ("missing placement", {"placements": PLACEMENTS[:2]}, "0 placements"),
+    ("duplicate placement", {"placements": PLACEMENTS + PLACEMENTS[:1]}, "2 placements"),
+    ("placed while off", {"switches": {**ALL_ON, "spe_inject_trs_description": False}}, "is off"),
+    ("other payload", {"placements": [{**PLACEMENTS[0], "payload_sha256": "0" * 64}, *PLACEMENTS[1:]]}, "differs"),
+    ("other tool", {"placements": [{**PLACEMENTS[0], "location": {"tool_id": "wes-drs-smoke", "field": "description"}},
+                                   *PLACEMENTS[1:]]}, "catalogue selects"),
+])
+def test_build_errors(case, kwargs, message):
+    with pytest.raises(BUILDER.ManifestBuildError, match=message):
+        build(**kwargs)
+
+
+def test_cli_writes_a_private_file_and_fails_on_a_missing_canary(tmp_path):
+    script = ANSIBLE / "roles" / "handoff" / "files" / "injections_manifest.py"
+    out = tmp_path / "injections.json"
+    stdin = {"switches": ALL_ON, "placements": PLACEMENTS, "canary_files": sorted(CANARY_FILES)}
+    argv = [sys.executable, str(script), "--fixtures", str(INJECTIONS / "fixtures.json"),
+            "--repo-root", str(REPO), "--out", str(out)]
+    subprocess.run(argv, input=json.dumps(stdin), text=True, check=True, capture_output=True)
+    assert json.loads(out.read_text()) == build() and out.stat().st_mode & 0o777 == 0o600
+    bad = subprocess.run(argv, input=json.dumps({**stdin, "canary_files": []}), text=True, capture_output=True)
+    assert bad.returncode == 1 and "no canary" in bad.stderr

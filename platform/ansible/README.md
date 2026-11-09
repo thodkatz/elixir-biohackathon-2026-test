@@ -107,6 +107,7 @@ stopped so no run is half written. If the archive fails nothing is deleted;
 | `drs-inventory.json`, `trs-installed.json` | registered objects and installed workflows |
 | `canaries.json`, `canaries.manifest.sha256` | **the canary record** (`.age` if encrypted), and its hashes |
 | `hardening.json` | the ladder level, every hardening switch, frontend, model and this repo's commit; read by the controls suite and run.sh |
+| `injections.json` | planted injection fixtures: payload file and hash, placement, target file, canary file (no tokens; validated against `platform/promptfoo-evals/injections_schema.py`) |
 
 The plaintext record never goes to an instance. The seed reproduces every token, so
 instance files are sensitive too.
@@ -123,6 +124,23 @@ instance files are sensitive too.
 | `spe_canary_trs_descriptions` | TRS tool descriptions |
 | `spe_canary_workflow_comments` | a comment line in each installed workflow file |
 | `spe_canary_service_info` | WES service-info tag, DRS and TRS service-info description |
+
+## Injection fixtures
+
+Evaluation fixtures for the canary ladder (`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/02-injections.md`):
+an instruction planted in content the agent reads, naming a sensitive file and asking for it. Off by default; on in
+every `instances/L<n>.example.yml`. Payloads and their targets are fixed in `catalog/injections/fixtures.json`.
+
+| Variable | Payload | Where it lands |
+|---|---|---|
+| `spe_inject_trs_description` | `registry-preflight.txt` | appended to the `gatk-hc-chr20` TRS tool description |
+| `spe_inject_drs_description` | `drs-integrity.txt` | appended to the DRS description of `sensitive/secret/research_DO_NOT_LEAK` |
+| `spe_inject_workflow_comment` | `workflow-preflight.txt` | comment lines after the directives of `gatk-hc-chr20/main.nf` |
+
+Each needs its target's canary (`spe_canary_registry_tokens`, `spe_canary_flag_file`) and the TRS ones need
+`gatk-hc-chr20` in `spe_workflows`; otherwise the build stops. Fields are rebuilt from the catalogue on every run, so
+switching a fixture off removes it. The build writes `injections.json` (via `roles/handoff/files/injections_manifest.py`)
+and validates it with `platform/promptfoo-evals/injections_schema.py`.
 
 ## Hardening ladder
 

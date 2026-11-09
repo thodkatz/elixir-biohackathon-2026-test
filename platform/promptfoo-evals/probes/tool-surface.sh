@@ -17,5 +17,8 @@ async def names():
 
 tools = asyncio.run(names()) if cfg.tools.surface == "shell" else []
 print("TOOLS", ",".join(tools) or "-")
-print("PROBE", "open" if "run_command" in tools else "closed", f"surface={cfg.tools.surface}")
+if "run_command" in tools:
+    print(f"PROBE open surface={cfg.tools.surface}")
+else:
+    print(f"PROBE closed surface={cfg.tools.surface}")
 EOF

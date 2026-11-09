@@ -207,6 +207,19 @@ def test_vm_runner_quotes_for_ssh(hdir, monkeypatch):
     assert seen[1][0] == ["docker", "ps"]
 
 
+
+def test_vm_runner_timeout_is_an_isolation_error(hdir, monkeypatch):
+    # A hung SSH or docker call must fail as the step it was (RestoreError, StateError), not as TimeoutExpired.
+    def hang(argv, **kw):
+        raise subprocess.TimeoutExpired(argv, kw["timeout"])
+
+    monkeypatch.setattr(isolation, "vm_argv", lambda d: [])
+    monkeypatch.setattr(isolation.subprocess, "run", hang)
+    with pytest.raises(isolation.StateError, match="timed out"):
+        isolation.baseline(hdir)
+    with pytest.raises(isolation.RestoreError, match="timed out"):
+        isolation.restore(hdir)
+
 def _compose(path):
     # The workflow stack's file is a Jinja template; the frontend's is plain Compose with ${VAR}s, which YAML reads as is.
     data = yaml.safe_load(re.sub(r"\{\{.*?\}\}", "x", path.read_text()))
@@ -223,3 +236,205 @@ def test_volumes_match_the_compose_files():
     assert set(isolation.VOLUMES) | set(isolation.NOT_RESTORED) == declared
     assert not set(isolation.VOLUMES) & set(isolation.NOT_RESTORED)
     assert set(isolation.CONTAINERS) <= services and isolation.SANDBOX in isolation.CONTAINERS
+
+
+TOOLS = [{"id": "wes-drs-smoke", "versions": [{"id": "1.0.0", "descriptor_type": ["NFL"]}]},
+         {"id": "x", "versions": [{"id": "2", "descriptor_type": ["NFL"]}]}]
+RUNS = {"": {"runs": [{"run_id": "R1", "state": "COMPLETE"}], "next_page_token": "p2"},
+        "p2": {"runs": [{"run_id": "R2", "state": "RUNNING"}], "next_page_token": ""}}
+RECORDED = {"/trs/tools": TOOLS, "/wes/runs/R2": {"run_id": "R2", "request": {
+    "workflow_url": "trs://h/x/2/NFL/main.nf", "workflow_params": "{\"a\": 1}"}},
+    "/trs/tools/x/versions/2/NFL/files": [{"path": "main.nf", "file_type": "PRIMARY_DESCRIPTOR"}],
+    "/trs/tools/x/versions/2/NFL/descriptor/main.nf": {"content": "process A {}", "url": "u"}}
+
+
+@pytest.fixture
+def api():
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            path, _, query = self.path.partition("?")
+            body = RUNS[query.removeprefix("page_token=")] if path == "/wes/runs" else RECORDED.get(path)
+            self.send_response(200 if body is not None else 404)
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_port}"
+    srv.shutdown()
+
+
+def test_state_script_against_recorded_api(api, tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "a.txt").write_text("a")
+    (tmp_path / "sub" / "b.txt").write_text("b")
+    env = {**os.environ, "TRS_BASE": f"{api}/trs", "WES_BASE": f"{api}/wes", "SPE_SANDBOX_HOME": str(tmp_path),
+           "SPE_STATE_DETAILS": json.dumps({"runs": ["R2"], "tools": [["x", "2"]]})}
+    out = subprocess.run([sys.executable, "-"], input=isolation.STATE_PY, env=env, capture_output=True,
+                         text=True, check=True).stdout
+    state = json.loads(out)
+    assert sorted(state["trs"]) == ["wes-drs-smoke/1.0.0", "x/2"]
+    assert state["trs"]["x/2"]["descriptor_types"] == ["NFL"]
+    assert state["wes"] == {"R1": "COMPLETE", "R2": "RUNNING"}
+    assert state["runs"]["R2"] == {"workflow_url": "trs://h/x/2/NFL/main.nf", "workflow_params": {"a": 1}}
+    assert state["tools"]["x/2"] == {"descriptor_urls": [f"{api}/trs/tools/x/versions/2/NFL/descriptor/main.nf"],
+                                     "descriptors": {"main.nf": "process A {}"}}
+    assert state["sandbox"] == ["a.txt", "sub/b.txt"]
+
+
+def _state(trs, wes, sandbox, runs=None, tools=None):
+    return json.dumps({"trs": {k: {"id": k.split("/")[0], "version": k.split("/")[1], "descriptor_types": ["NFL"]}
+                               for k in trs}, "wes": wes, "sandbox": sandbox,
+                       "runs": runs or {}, "tools": tools or {}})
+
+
+def test_baseline_and_state_diff(hdir):
+    answers = iter([_state(["wes-drs-smoke/1.0.0"], {"R1": "COMPLETE"}, ["a.txt"]),
+                    _state(["wes-drs-smoke/1.0.0", "x/2"], {"R1": "COMPLETE", "R2": "RUNNING"}, ["a.txt", "n.sh"]),
+                    _state([], {}, [], runs={"R2": {"workflow_url": "trs://h/x/2/NFL/main.nf",
+                                                    "workflow_params": {"a": 1}}},
+                           tools={"x/2": {"descriptor_urls": ["u"], "descriptors": {"main.nf": "process A {}"}}})])
+    calls = []
+
+    def run(argv, stdin=None):
+        if argv[:2] == ["sh", "-c"]:  # the test receiver's log: not deployed here
+            return cp(out="absent\n")
+        calls.append(argv)
+        assert argv[:3] == ["docker", "exec", "-i"] and argv[-3:] == [isolation.SANDBOX, "python3", "-"]
+        assert stdin == isolation.STATE_PY
+        return cp(out=next(answers))
+
+    base = isolation.baseline(hdir, run=run)
+    assert base == {"trs": ["wes-drs-smoke/1.0.0"], "wes": ["R1"], "sandbox": ["a.txt"], "sink": None}
+    assert isolation.state_diff(hdir, base, run=run) == {
+        "trs_tools_added": [{"id": "x", "version": "2", "descriptor_urls": ["u"],
+                             "descriptors": {"main.nf": "process A {}"}}],
+        "wes_runs_added": [{"run_id": "R2", "workflow_url": "trs://h/x/2/NFL/main.nf", "workflow_params": {"a": 1},
+                            "state": "RUNNING"}],
+        "sandbox_files_added": ["n.sh"], "sink_requests_added": None}
+    assert json.loads(calls[2][calls[2].index("-e") + 1].split("=", 1)[1]) == {"runs": ["R2"], "tools": [["x", "2"]]}
+
+
+def test_state_diff_with_nothing_new_makes_one_call(hdir):
+    same = _state(["t/1"], {"R1": "COMPLETE"}, [])
+    calls = []
+    diff = isolation.state_diff(hdir, {"trs": ["t/1"], "wes": ["R1"], "sandbox": [], "sink": None},
+                                run=lambda argv, stdin=None: calls.append(argv) or cp(
+                                    out="absent" if argv[0] == "sh" else same))
+    assert diff == {"trs_tools_added": [], "wes_runs_added": [], "sandbox_files_added": [],
+                    "sink_requests_added": None}
+    assert len([c for c in calls if c[0] == "docker"]) == 1
+
+
+def _receiver(size_then, size_now, appended):
+    sizes = iter([size_then, size_now])
+
+    def run(argv, stdin=None):
+        if argv[:2] == ["sh", "-c"]:
+            assert argv[-1] == isolation.SINK_LOG
+            if "wc -c" in argv[2]:
+                return cp(out=f"{next(sizes)}\n")
+            assert argv[-2] == str(size_then)
+            return cp(out="".join(json.dumps(r) + "\n" for r in appended))
+        return cp(out=_state([], {}, []))
+    return run
+
+
+def test_receiver_requests_since_the_baseline(hdir):
+    got = [{"method": "POST", "host": "backup.spe-eval.test:8099", "path": "/upload", "body": "summary"}]
+    run = _receiver(120, 260, got)
+    base = isolation.baseline(hdir, run=run)
+    assert base["sink"] == 120
+    assert isolation.state_diff(hdir, base, run=run)["sink_requests_added"] == got
+
+
+def test_no_receiver_is_none_not_empty(hdir):
+    run = _receiver("absent", "absent", [])
+    base = isolation.baseline(hdir, run=run)
+    assert base["sink"] is None and isolation.state_diff(hdir, base, run=run)["sink_requests_added"] is None
+
+
+def test_a_shrunk_receiver_log_is_an_error(hdir):
+    # A receiver restarted with a new log would make "nothing appended" look like "nothing received".
+    run = _receiver(120, 40, [])
+    with pytest.raises(isolation.StateError, match="receiver"):
+        isolation.state_diff(hdir, isolation.baseline(hdir, run=run), run=run)
+
+
+@pytest.mark.parametrize("answer", [cp(1, err="Traceback"), cp(out="not json")])
+def test_state_read_failure_is_an_error(hdir, answer):
+    with pytest.raises(isolation.StateError):
+        isolation.baseline(hdir, run=lambda argv, stdin=None: answer)
+
+
+def test_state_diff_rejects_a_malformed_baseline(hdir):
+    with pytest.raises(isolation.StateError):
+        isolation.state_diff(hdir, {"trs": "x"}, run=lambda argv, stdin=None: cp(out=_state([], {}, [])))
+
+
+@pytest.fixture
+def hooked(hdir, tmp_path, monkeypatch):
+    seen = {"snapshot": 0, "restore": iter([30.0, 50.0, 40.0])}
+    monkeypatch.setenv("SPE_EVAL_BASELINE", str(tmp_path / "rep" / ".baseline.json"))
+    monkeypatch.setattr(isolation, "handoff_dir", lambda: hdir)
+    monkeypatch.setattr(isolation, "snapshot_exists", lambda d: seen.get("exists", False))
+    monkeypatch.setattr(isolation, "snapshot", lambda d: seen.__setitem__("snapshot", seen["snapshot"] + 1))
+    monkeypatch.setattr(isolation, "restore", lambda d: next(seen["restore"]))
+    monkeypatch.setattr(isolation, "baseline", lambda d: {"trs": ["t/1"], "wes": [], "sandbox": [], "sink": None})
+    return seen
+
+
+def test_before_all_snapshots_only_when_missing(hooked):
+    assert isolation.extension_hook("beforeAll", {"suite": {}}) is None
+    hooked["exists"] = True
+    isolation.extension_hook("beforeAll", {"suite": {}})
+    assert hooked["snapshot"] == 1
+
+
+def test_before_each_restores_then_writes_baseline_and_restore_seconds(hooked, hdir):
+    (hdir / "hardening.json").write_text(json.dumps({"schema_version": 1, "restore_seconds": None}))
+    for _ in range(3):
+        assert isolation.extension_hook("beforeEach", {"test": {"vars": {}}}) is None
+    assert isolation.read_baseline() == {"trs": ["t/1"], "wes": [], "sandbox": [], "sink": None}
+    assert json.loads((hdir / "hardening.json").read_text())["restore_seconds"] == 40.0
+    assert json.loads((hdir / "restore_times.json").read_text()) == {"generated_at": STAMP,
+                                                                     "seconds": [30.0, 50.0, 40.0]}
+
+
+def test_restore_times_reset_when_the_build_changes(hdir):
+    (hdir / "restore_times.json").write_text(json.dumps({"generated_at": "2026-01-01T00:00:00Z", "seconds": [999]}))
+    assert isolation.record_restore_seconds(hdir, 20.0) == 20.0
+    assert not (hdir / "hardening.json").exists()
+
+
+def test_before_each_restore_failure_raises_and_leaves_no_baseline(hooked, monkeypatch):
+    isolation.write_baseline({"trs": ["stale/1"], "wes": [], "sandbox": []})
+
+    def broken(d):
+        raise isolation.RestoreError("stack not healthy after 300s: rest-1")
+
+    monkeypatch.setattr(isolation, "restore", broken)
+    with pytest.raises(isolation.RestoreError):
+        isolation.extension_hook("beforeEach", {"test": {}})
+    with pytest.raises(isolation.StateError):
+        isolation.read_baseline()
+
+
+def test_after_each_logs_counts_and_never_raises(hooked, monkeypatch, capsys):
+    isolation.write_baseline({"trs": [], "wes": [], "sandbox": []})
+    monkeypatch.setattr(isolation, "state_diff", lambda d, b: {"trs_tools_added": [{"id": "x"}],
+                                                               "wes_runs_added": [], "sandbox_files_added": []})
+    assert isolation.extension_hook("afterEach", {"test": {}, "result": {}}) is None
+    assert "trs_tools_added=1" in capsys.readouterr().err
+    monkeypatch.setattr(isolation, "state_diff", lambda d, b: (_ for _ in ()).throw(isolation.StateError("down")))
+    isolation.extension_hook("afterEach", {"test": {}, "result": {}})
+    assert "state diff unavailable" in capsys.readouterr().err
+
+
+def test_other_hooks_do_nothing_and_default_baseline_path(monkeypatch):
+    assert isolation.extension_hook("afterAll", {"suite": {}}) is None
+    monkeypatch.delenv("SPE_EVAL_BASELINE", raising=False)
+    assert isolation.baseline_path() == Path(isolation.__file__).resolve().parent / "reports" / ".baseline.json"

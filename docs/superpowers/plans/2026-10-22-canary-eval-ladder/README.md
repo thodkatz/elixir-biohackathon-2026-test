@@ -18,7 +18,7 @@ writes the hand-off directory `platform/ansible/output/<instance>/` (`canaries.j
 standard-library Python modules, `run.sh` gluing a ladder run together, and `matrix.py` turning reports into a
 committed Markdown matrix of counts.
 
-**Tech stack:** promptfoo 0.124.1 (pinned), Python ≥ 3.12 standard library (pytest and PyYAML for tests only),
+**Tech stack:** promptfoo 0.125.1 (pinned), Python ≥ 3.12 standard library (pytest and PyYAML for tests only),
 Ansible from the system package, Docker Compose on the instance VM, Traefik v2.11, WESkit, trs-filer, drs-filer.
 
 ## Global Constraints
@@ -104,8 +104,8 @@ level instance files are overlays on the operator's instance file, without an in
 
 | Claim | Checked in | If false |
 |---|---|---|
-| promptfoo 0.124.1 runs Python extension hooks with `beforeAll`/`beforeEach`/`afterEach`, before the assertions for `beforeEach` | slice 2, task 1 | restore from `run.sh` per test, running promptfoo once per test |
-| The listed volumes plus recreated containers hold all mutable state (nothing the build needs lives in a container's writable layer); a restore takes about a minute | slice 2, task 1 and 4 | add the missing volumes; a container whose build state is in its writable layer moves that state into its image or a volume; above ~3 minutes, stop and ask (parallel stacks are out of scope) |
+| promptfoo 0.124.1 runs Python extension hooks with `beforeAll`/`beforeEach`/`afterEach`, before the assertions for `beforeEach` | **true** on 0.125.1 (slice 2, task 1; the assertions also run before `afterEach`: clarification 8) | restore from `run.sh` per test, running promptfoo once per test |
+| The listed volumes plus recreated containers hold all mutable state (nothing the build needs lives in a container's writable layer); a restore takes about a minute | **true** (slice 2, tasks 1 and 4: the volumes match; median restore 45.6 s on de.NBI) | add the missing volumes; a container whose build state is in its writable layer moves that state into its image or a volume; above ~3 minutes, stop and ask (parallel stacks are out of scope) |
 | The sandbox has open egress (`tools` network is an ordinary bridge) | slice 3, task 1 | P4 is closed at L0; the `egress` probe expects `closed` everywhere and slice 8 is dropped |
 | promptfoo does not cache our Python provider's responses | **false** (read in promptfoo 0.124.1 while planning: Python provider results are cached by prompt and vars) | both suites run with `--no-cache`; slice 3, task 1 records the clarification |
 | WESkit accepts `workflow_attachment` or non-TRS workflow URLs | slice 3, task 1 | `wes-inline` is `closed` at L0; L1 is TRS writes only |
@@ -166,8 +166,7 @@ The input classes the spec implies that most likely bite a user; each has its te
 
 ## Proposed spec clarifications
 
-- Slice 2 (clarification 8): the state diff is taken by the agent provider after the run, because promptfoo runs assertions
-  before `afterEach`; `afterEach` only logs it (amends decision 9, part 05 *Hooks*).
+- Slice 2: folded as spec clarification 8 (#60): the agent provider takes the state diff after the run.
 - Slice 4: payloads target `wes-drs-smoke` if `gatk-hc-chr20` cannot be installed on de.NBI (part 02), only if
   slice 4's task 1 finds that.
 

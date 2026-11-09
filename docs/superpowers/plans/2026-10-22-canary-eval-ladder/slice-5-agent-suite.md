@@ -1,6 +1,6 @@
 # Slice 5/9: agent suite and the first L0 run
 
-Delivers the paid agent suite: `agent.yaml` wiring the AG-UI provider, the isolation hooks and the six leak
+Delivers the agent suite: `agent.yaml` wiring the AG-UI provider, the isolation hooks and the six leak
 metrics into every test; the first fixed catalogue of 13 tests in `tests/*.yaml` with their metadata and
 deterministic utility checks; the provider's state diff, taken after each run; a no-model dry run against the
 scripted agent; and the first L0 runs on de.NBI (`qwen3.8-27b`), clean and injected, whose counts and matrix are
@@ -261,7 +261,7 @@ agent doing its job, so it must pass at every level; *environment and keys probe
 by `key.leak` (which replaces `no_key_leak` in `defaultTest`; `asserts.no_key_leak` stays for `metrics.py` to reuse).
 
 **Carried from slice 1** (its handoff, *Deferred minors*): two changes to `metrics.py`, each with its test in
-`tests/test_metrics.py`, before the first paid run:
+`tests/test_metrics.py`, before the first agent run:
 - `key_leak` must report unset API keys as a configuration error (reason starting `configuration error:`), so
   `matrix.counts` counts the run under `errors`. Today `asserts.no_key_leak` returns "cannot check: … not
   provided", which counts as a `key.leak` failure.
@@ -540,7 +540,7 @@ def test_workflow_comment_row_requests_the_descriptor():
 
 ```yaml
 # The agent suite (spec part 04): one fixed catalogue, run unchanged at every level L0–L5.
-# Every test is one real agent run: paid model calls. Ask first (AGENTS.md); run it through run.sh.
+# Every test is one real agent run: model calls (de.NBI: no OK; Anthropic: paid, ask, AGENTS.md). Run it through run.sh.
 # Every leak assertion asserts "no leak": a failure at L0 is the proof of the vulnerability.
 # Secrets, the agent URL and the hand-off directory come from the environment: see README.md.
 description: SPE agent over AG-UI — canary evaluation ladder
@@ -680,14 +680,15 @@ EOF
   (run from the repository root). Check: `grep -n '"eval"' platform/promptfoo-evals/package.json` prints nothing.
 
 - [ ] **Step 11: Document it.** In `platform/promptfoo-evals/README.md`, replace the paragraph starting
-  "**Every test is one real agent run: paid model calls.** The starter suite has 3 tests;" and the table after it
+  "**Every test is one real agent run: model calls.**" and the table after it
   (through the *environment and keys probe* row) with:
 
 ```markdown
-**Every test of the agent suite (`agent.yaml`) is one real agent run: paid model calls.**
+**Every test of the agent suite (`agent.yaml`) is one real agent run: model calls.**
 13 tests, run with `--repeat N` (5 at L0 and the last level, 3 in between); each run can make
 several model requests (up to the agent's per-run limits: 50 requests, 100 tool calls; no token
-cap unless `spe_agent_total_tokens_limit` is set). Get the go-ahead first, stating level, model and runs (`AGENTS.md`).
+cap unless `spe_agent_total_tokens_limit` is set). On Anthropic the calls are paid: get the go-ahead first.
+On de.NBI they cost no money and run without asking (`AGENTS.md`, *Setup*).
 
 Every test gets, from `defaultTest`: `no_tls_bypass` and the six leak metrics of
 `metrics.py`, each a named promptfoo metric: `canary.answer`, `canary.touched`,
@@ -855,13 +856,12 @@ utility pass rate at L0, read in step 5).
 
 The spec's order at L0 is **clean first, then injected** (part 06, *Order*); the start times land in the counts.
 
-- [ ] **Step 1: STOP and ask the user.** Model calls on de.NBI (no money, rate limits only; still the user's OK
-  first). Ask, in these words or close: "Run the agent suite at **L0** on de.NBI, model **qwen3.8-27b**, in both
-  conditions, clean first, then injected: 13 tests × 5 repeats × 2 = **130 agent runs** (each up to 50 model
-  requests), plus 130 restores (about a minute each, measured in slice 2: `hardening.json` `restore_seconds`), two
-  in-place rebuilds of the VM (no instance created) and the no-model controls suite before each. OK?" Do not go on
-  without a yes. If the user agrees to the injected run only, run step 4 alone and record the clean run as not run,
-  with the user's words, in the handoff.
+- [ ] **Step 1: The runs ahead.** Model calls on de.NBI (no money, rate limits only; no OK needed: the user's
+  standing OK, `AGENTS.md`, *Setup*). Record in the handoff: the agent suite at **L0** on de.NBI, model
+  **qwen3.8-27b**, in both conditions, clean first, then injected: 13 tests × 5 repeats × 2 = **130 agent runs**
+  (each up to 50 model requests), plus 130 restores (about a minute each, measured in slice 2: `hardening.json`
+  `restore_seconds`), two in-place rebuilds of the VM (no instance created) and the no-model controls suite before
+  each.
 
 - [ ] **Step 2: Reach the agent.** From `platform/promptfoo-evals/`, with `INSTANCE` as in task 3:
 

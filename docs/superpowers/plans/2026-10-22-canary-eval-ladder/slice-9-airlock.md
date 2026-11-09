@@ -565,7 +565,7 @@ de.NBI VM at L3 plus `spe_harden_airlock`, `hardening.json`'s `level` stays 3 (i
 `airlock` by design. The check therefore runs only the `airlock` probe and reads its observed `state` from the
 report: `closed`, with `probe_state` failing as *expected open, observed closed*, is the pass. No model calls.
 
-- [ ] **Step 1: Converge the VM to L3 plus the airlock** (`spe_provision: existing`, no paid calls,
+- [ ] **Step 1: Converge the VM to L3 plus the airlock** (`spe_provision: existing`, no model calls,
   `spe_agui_smoke` stays `false`): the create command the newest L3 handoff records, with
   `-e '{"spe_harden_airlock": true}'` appended, e.g.
   `ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml -e @instances/L3.example.yml -e '{"spe_harden_airlock": true}' </dev/null`.
@@ -588,7 +588,7 @@ jq -r '.results.results[] | [.vars.probe, .response.metadata.state, .success] | 
 - [ ] **Step 4: Hand L4/L5 over.** In `BACKLOG.md`, replace the L4 line with:
 
 ```markdown
-- Spec for the typed GA4GH tool server (`spe_agent_tool_surface: typed`), the canary ladder's L4, and in its plan: `instances/L4.example.yml` (L3 plus that switch), `instances/L5.example.yml` (L4 plus `spe_harden_airlock: true`), the controls suite at L4 and L5 (all probes, unfiltered), and the L4 and L5 agent-suite runs with their matrix columns (paid: ask first) — from `docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/out-of-scope.md` and the canary ladder plan, slice 9; waits for that spec; its requirements are the L4 row of part 01; the airlock is built and checked at L3 + airlock (slice 9 handoff).
+- Spec for the typed GA4GH tool server (`spe_agent_tool_surface: typed`), the canary ladder's L4, and in its plan: `instances/L4.example.yml` (L3 plus that switch), `instances/L5.example.yml` (L4 plus `spe_harden_airlock: true`), the controls suite at L4 and L5 (all probes, unfiltered), and the L4 and L5 agent-suite runs with their matrix columns (de.NBI model calls) — from `docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/out-of-scope.md` and the canary ladder plan, slice 9; waits for that spec; its requirements are the L4 row of part 01; the airlock is built and checked at L3 + airlock (slice 9 handoff).
 ```
 
   and add:

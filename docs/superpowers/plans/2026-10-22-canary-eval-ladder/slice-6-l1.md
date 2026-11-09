@@ -5,7 +5,7 @@ for the sandbox only on `GET`/`HEAD`, and operator writes go through an admin en
 `127.0.0.1` only. WES accepts only workflows that are TRS URIs of the stack's own TRS: WESkit's request validation
 rejects any other `workflow_url`, and a small guard in front of every WES write rejects `workflow_attachment`.
 The agent's runbook stays as it is: an infrastructure control does not touch
-the agent. The slice also adds `instances/L1.example.yml`, the live re-provision at L1, the controls suite at L1, and, once the user agrees, the L1 agent runs, injected and clean, and the `L1` and `L1 clean` columns of the matrix.
+the agent. The slice also adds `instances/L1.example.yml`, the live re-provision at L1, the controls suite at L1, and the L1 agent runs, injected and clean, and the `L1` and `L1 clean` columns of the matrix.
 
 **Implements:** spec [01, *The ladder*](../../specs/2026-10-22-canary-eval-ladder-design/01-leak-paths-and-ladder.md#the-ladder)
 (row L1, *L1's two halves are one control*): decisions 2 and 3. Spec
@@ -813,15 +813,14 @@ jq -r '.results.results[] | "\(.vars.probe)\t\(.response.metadata.state)\t\(.suc
   and `airlock` `open` (`egress` `closed` if slice 3 found it closed at L0); `api-reach` `open`; `isolation`
   passes (`isolation-plant` reports `planted=sandbox trs-refused=403` now: the TRS half of the marker is
   refused by L1 itself); every row `true`.
-- [ ] **Step 4: STOP AND ASK the user:** "Controls at L1 match the level (paste the table). May I run the
-  agent suite at L1 on `denbi-agui-01`, model `qwen3.8-27b` on de.NBI (no money, rate limits only), in both
-  conditions, injected first, then clean after an in-place rebuild without the injections: 13 tests × 3 repeats × 2
-  = 78 agent runs?" Do not continue without a yes. If the user agrees to the injected run only, skip step 5b and
-  record the clean run as not run, with the user's words, in the handoff.
+- [ ] **Step 4: Controls agree, then run (no OK needed:** de.NBI, `AGENTS.md`, *Setup*). Go on only if the
+  controls at L1 match the level; paste the table into the handoff. The runs: the agent suite at L1 on
+  `denbi-agui-01`, model `qwen3.8-27b` on de.NBI (no money, rate limits only), in both conditions, injected first,
+  then clean after an in-place rebuild without the injections: 13 tests × 3 repeats × 2 = 78 agent runs.
 - [ ] **Step 5: The injected run.** With the agent tunnel open as `platform/promptfoo-evals/README.md`
   describes: `./run.sh "$SPE_HANDOFF_DIR" 3`. Expected: exit 0, `reports/L1/{controls,agent,hardening,injections,run}.json`.
 - [ ] **Step 5b: The clean run.** Rebuild L1 in place with the clean overlay, take a fresh snapshot, then the same
-  suite (no OK beyond step 4's):
+  suite:
 
 ```bash
 (cd platform/ansible && ansible-playbook playbooks/create.yml -e @$PRIVATE/instances/denbi-agui-01.yml \

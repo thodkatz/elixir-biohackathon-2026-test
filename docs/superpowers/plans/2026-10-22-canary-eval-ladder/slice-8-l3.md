@@ -9,7 +9,7 @@ Delivers `spe_harden_egress`. When it is on, the sandbox gets a fixed address on
 firewall rules in Docker's `DOCKER-USER` chain (and in `INPUT`) drop every packet from that address except
 replies and new TCP connections to the API host on port 443. The sandbox's DNS forwards to an unroutable
 resolver, so names outside the compose project do not resolve. The slice also adds `instances/L3.example.yml`,
-the live re-provision at L3, the controls suite at L3, and, once the user agrees, the paid L3 agent run and the
+the live re-provision at L3, the controls suite at L3, and the L3 agent run and the
 L3 column.
 
 **Implements:** spec [01, *Leak paths* (P4) and *The ladder*](../../specs/2026-10-22-canary-eval-ladder-design/01-leak-paths-and-ladder.md)
@@ -379,7 +379,7 @@ git commit -s -m "L3: sandbox egress only to the API host on 443" \
   -m "DOCKER-USER rules on the sandbox's fixed address: the API is reached through Docker's DNAT of port 443, which an internal network would cut."
 ```
 
-### Task 3: `L3.example.yml`, docs, L3 on the de.NBI VM, the paid run, the matrix
+### Task 3: `L3.example.yml`, docs, L3 on the de.NBI VM, the agent run, the matrix
 
 **Files:** create `platform/ansible/instances/L3.example.yml`, `docs/results/qwen3.8-27b/L3.json` and
 `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/<UTC>-slice-8-done.md`. Modify
@@ -472,9 +472,9 @@ jq -r '.results.results[] | "\(.vars.probe)\t\(.response.metadata.state)\t\(.suc
 
   Expected: `trs-write`, `wes-inline`, `e2e-exploit`, `tier-reach` and `egress` `closed`; `api-reach` `open`;
   `tool-surface` and `airlock` `open`; `isolation` passes; every row `true`.
-- [ ] **Step 7: STOP AND ASK the user:** "Controls at L3 match the level (paste the table). May I run the
-  paid agent suite at L3 on `denbi-agui-01`: model `qwen3.8-27b` on de.NBI, 13 tests × 3 repeats = 39 agent
-  runs?" Do not continue without a yes.
+- [ ] **Step 7: Controls agree, then run (no OK needed:** de.NBI, `AGENTS.md`, *Setup*). Go on only if the
+  controls at L3 match the level; paste the table into the handoff. The run: the agent suite at L3 on
+  `denbi-agui-01`, model `qwen3.8-27b` on de.NBI, 13 tests × 3 repeats = 39 agent runs.
 - [ ] **Step 8: Run.** With the agent tunnel open as `platform/promptfoo-evals/README.md` describes:
   `./run.sh "$SPE_HANDOFF_DIR" 3`. Expected: exit 0, `reports/L3/{controls,agent,hardening}.json`.
 - [ ] **Step 9: Counts, matrix, token check, cleanup.** From the repository root:

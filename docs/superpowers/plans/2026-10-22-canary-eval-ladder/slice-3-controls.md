@@ -3,10 +3,10 @@
 Delivers the no-model controls suite: a promptfoo provider that runs one probe script per test inside the sandbox
 (or the agent container) over SSH, the probes for every control L1–L5 plus `api-reach` and the isolation
 self-check, the `probe_state` assertion against the level in `hardening.json`, the handoff role writing
-`hardening.json` from four new switches (all off), and `run.sh`, which refuses to start the paid agent suite while
+`hardening.json` from four new switches (all off), and `run.sh`, which refuses to start the agent suite while
 the controls disagree with the level or the build is neither the clean nor the injected condition, and files each
 run with the labels a matched clean and injected pair needs (start time, payload hashes, canary digest), which
-`matrix.py` carries into the counts. It ends with a live `npm run eval:controls` on the de.NBI VM at L0 (no paid
+`matrix.py` carries into the counts. It ends with a live `npm run eval:controls` on the de.NBI VM at L0 (no model
 calls).
 
 **Implements:** spec [`03-controls-suite.md`](../../specs/2026-10-22-canary-eval-ladder-design/03-controls-suite.md)
@@ -1926,7 +1926,7 @@ def test_bad_repeat(setup, repeat):
 ```bash
 #!/usr/bin/env bash
 # One ladder run for one level, condition and model (spec part 06): the controls suite, then, only if every
-# probe agrees with hardening.json's level, the whole agent suite (paid: ask the user first), repeated and
+# probe agrees with hardening.json's level, the whole agent suite (model calls), repeated and
 # uncached. The build sets the condition: injected (hardening.json injections: true) or clean (false); a
 # mixed build, or a hand-off that disagrees with its condition, is refused before any call.
 # Usage: run.sh <hand-off dir> <repeat>. Reports: reports/L<level>/ (injected) or reports/L<level>-clean/,
@@ -1978,7 +1978,7 @@ echo "run.sh: $instance, $condition, reports in reports/$run/ (agent suite exit 
 In `platform/promptfoo-evals/README.md` add *One ladder run*: `./run.sh ../ansible/output/<instance> <N>` (N 5
 at L0 and the last level, 3 between), the two conditions (the build decides: the level file alone is `injected`;
 with `instances/no-injections.example.yml` after it, `clean`, at L0 and L1 only), what it refuses and its exit
-codes, what it files, and that `eval:agent` needs the user's OK (global constraints).
+codes, what it files, and that `eval:agent` on de.NBI needs no OK while Anthropic is paid and does (global constraints).
 
 - [ ] **Step 5: Run, expect PASS** `tests/test_handoff.py`, `tests/test_matrix.py`, `tests/test_run_sh.py`, then both
   offline suites. Commit (two commits):
@@ -1991,7 +1991,7 @@ git add platform/promptfoo-evals/run.sh platform/promptfoo-evals/tests/test_run_
 git commit -s -m "run.sh: controls first; refuse the agent suite on a mismatch, a stale hand-off or a mixed build"
 ```
 
-- [ ] **Step 6: Live controls run on de.NBI at L0 (no paid calls, no OK needed)**
+- [ ] **Step 6: Live controls run on de.NBI at L0 (no model calls, no OK needed)**
 
 Re-provision in place so `hardening.json` exists (the operator's private `instances/denbi-agui-01.yml`, no
 hardening switch), then run the suite with slice 2's snapshot in place:

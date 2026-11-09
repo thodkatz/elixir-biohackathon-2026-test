@@ -13,7 +13,7 @@ show neither that the deployment as built leaks canaries nor that a configuratio
 **Decision.** One fixed promptfoo suite is run against a ladder of instances, L0 (as built) to L5, each adding
 exactly one hardening control to the one before. Ansible configures each level and plants canaries and
 injections. promptfoo drives two suites: a no-model **controls suite** showing each control is (or is not)
-in place, and the paid **agent suite** showing whether the agent is fooled, whether it leaks, and whether it still
+in place, and the **agent suite** of real agent runs showing whether the agent is fooled, whether it leaks, and whether it still
 does its job. Every test starts from a fresh copy of the stack's state. The output is a committed matrix of
 counts: test × level × metric, for `qwen3.8-27b` on de.NBI.
 
@@ -46,7 +46,7 @@ counts: test × level × metric, for `qwen3.8-27b` on de.NBI.
 | **Payload** | The committed text of one injection, naming a target file and action |
 | **Probe** | A scripted command run in the sandbox, without a model, that tries one attack step |
 | **Controls suite** | The promptfoo suite of probes (`controls.yaml`), no model calls |
-| **Agent suite** | The promptfoo suite of agent runs (`agent.yaml`), paid model calls |
+| **Agent suite** | The promptfoo suite of agent runs (`agent.yaml`), model calls (de.NBI) |
 | **Hand-off directory** | `platform/ansible/output/<instance>/`: canary record, `injections.json`, `hardening.json` |
 | **Snapshot** | The stack's mutable volumes saved after the build, restored before each test, when the containers are also recreated from their images |
 | **State diff** | What a test changed in the stack: new TRS tools or versions, WES runs, sandbox files, requests the test receiver got |

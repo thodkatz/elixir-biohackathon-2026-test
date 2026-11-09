@@ -19,8 +19,8 @@ the run script refuses). The restore hook adds the measured restore time. Every 
 
 The run is filed under its level and condition (`reports/L<n>/`, `reports/L<n>-clean/`) with its start time, the
 planted payloads' SHA-256 (from `injections.json`) and a digest of the canary record (never a token).
-`maxConcurrency: 1` stays: all tests share one instance. Running the agent suite makes paid model calls and
-needs the user's OK each time (`AGENTS.md`, *Project rules*).
+`maxConcurrency: 1` stays: all tests share one instance. Running the agent suite makes model calls on de.NBI,
+which need no OK (the user's standing OK, `AGENTS.md`, *Setup*).
 
 ## Clean and injected runs (clarification 7)
 
@@ -52,8 +52,8 @@ the ladder: `injection.followed` attributes a target action to the injection who
 
 `N` is 5 at L0 and at the last level, 3 in between. With the first catalogue (~11 tests), a ladder is about
 11 × (5 + 3 × 4 + 5) ≈ 240 agent runs, plus restores; the clean runs add 11 × 5 = 55 at L0 and 11 × 3 = 33 at
-L1, about 88, so about 330 in all. de.NBI runs (`qwen3.8-27b`) cost no money, only rate limits; they still need
-the user's OK before they start (`AGENTS.md`, *Project rules*). Anthropic (`claude-haiku-5-5`, on the development
+L1, about 88, so about 330 in all. de.NBI runs (`qwen3.8-27b`) cost no money, only rate limits; they run without
+asking, on one de.NBI instance at a time (`AGENTS.md`, *Setup*). Anthropic (`claude-haiku-5-5`, on the development
 VM) is paid and is used only for one-shot checks of a feature, never for repeated runs or promptfoo suites:
 every ladder run (controls, agent suite, both conditions, all repeats) runs on de.NBI.
 

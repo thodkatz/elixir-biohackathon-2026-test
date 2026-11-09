@@ -14,7 +14,7 @@ since the plan merged: [*Rulings*](#rulings).
 **Architecture.** Ansible configures a level (`spe_harden_*` switches), plants canaries and injections, and
 writes the hand-off directory `platform/ansible/output/<instance>/` (`canaries.json`, `injections.json`,
 `hardening.json`, `hosts.yml`). Everything else lives in `platform/promptfoo-evals/`: two promptfoo configs
-(`controls.yaml`, no model; `agent.yaml`, paid), their providers, assertions and isolation hooks as
+(`controls.yaml`, no model; `agent.yaml`, model calls), their providers, assertions and isolation hooks as
 standard-library Python modules, `run.sh` gluing a ladder run together, and `matrix.py` turning reports into a
 committed Markdown matrix of counts.
 
@@ -36,12 +36,12 @@ Every task's requirements include these.
 - **Never commit secrets** (`AGENTS.md`, *Project rules*): instance files other than `*.example.yml`,
   `platform/ansible/output/`, `canaries.json`, `injections.json` of a real instance, keys. `reports/` and
   `.promptfoo/` stay git-ignored and are deleted after use.
-- **Ask the user first** for (a) any `npm run eval:agent` or other model call, stating the level, the
-  condition (clean, injected), the model and the number of agent runs: de.NBI (`qwen3.8-27b`) costs no money, only
-  rate limits, but still needs the OK; every ladder run uses de.NBI, never Anthropic (`claude-haiku-5-5`, paid,
-  for one-shot feature checks only); (b) creating or destroying a cloud instance (`create.yml` with
-  `spe_provision: openstack`, `destroy.yml`). Re-provisioning the de.NBI VM in place (`spe_provision:
-  existing`) and running the controls suite (`npm run eval:controls`) make no paid model calls and need no OK.
+- **Runs on de.NBI need no OK** (`AGENTS.md`, *Setup*): `npm run eval:agent` and every other ladder run on
+  de.NBI (`qwen3.8-27b`, no money, only rate limits), creating, rebuilding and destroying the one de.NBI instance
+  (`create.yml` with `spe_provision: openstack` or `existing`, `destroy.yml`), and the controls suite (`npm run
+  eval:controls`, no model). Every ladder run uses de.NBI, never Anthropic (`claude-haiku-5-5`, paid, for a few
+  one-shot feature checks only). **Ask the user first** for a second instance, another cloud, or more than a few
+  Anthropic calls.
 - **Every hardening switch defaults off** in `platform/ansible/inventory/group_vars/all.yml`; an instance file
   without it builds today's deployment (decision 3). Every `spe_inject_*` switch defaults off too, and is `true`
   in every `L<n>.example.yml`.
@@ -192,6 +192,9 @@ Plan-wide decisions taken after the plan merged; a slice's own rulings go in its
   command that creates containers without `spe-apply` (by hand, `docker compose up`) drops the overlays and runs
   the sandbox unhardened at L3 (slice 8's `egress` probe shows it); if overlays prove awkward, the fallback is
   to render `spe_frontend_dir/docker-compose.yml` from a template again, which reverses part of #35.
+- **2026-11-09, runs on de.NBI need no OK** — the user's standing OK of 2026-11-09 (`AGENTS.md`, *Setup*).
+  *Decision:* the agent-suite steps of slices 5–8 that stopped to ask now just run, once the controls suite
+  agrees. *Cost if wrong:* an unattended session spends de.NBI quota.
 - **2026-11-09, `biohackathon` knowledge 0015 folded: matched clean and injected runs at L0 and L1** (spec
   clarification 7). *Decision:* at L0 and L1 the whole suite runs in two conditions, `injected` (the level file)
   and `clean` (plus `instances/no-injections.example.yml`, created and tested in slice 4, task 6); L2–L5 run

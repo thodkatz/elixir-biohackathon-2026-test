@@ -2,8 +2,8 @@
 
 promptfoo calls the agent's AG-UI endpoint directly (`agui_provider.py`) and
 `asserts.py` checks the answer and every tool call. Both use the Python standard
-library only. **Every test is one real agent run: paid model calls.** Get the
-go-ahead before running the suite.
+library only. **Every test is one real agent run: model calls.** Runs on
+Anthropic are paid: get the go-ahead first. Runs on de.NBI need none (`AGENTS.md`, *Setup*).
 
 ## Run the suite
 

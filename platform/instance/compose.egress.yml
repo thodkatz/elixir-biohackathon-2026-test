@@ -12,3 +12,4 @@ networks:
     ipam:
       config:
         - subnet: ${SPE_SANDBOX_SUBNET}
+          ip_range: ${SPE_SANDBOX_IP_RANGE}   # dynamic addresses, outside SPE_SANDBOX_IP

@@ -20,12 +20,14 @@ def test_on_sandbox_has_fixed_address_and_unroutable_dns():
     assert load_vars(spe_eval_sink=True, **ON)["spe_compose_overlays"] == ["eval-sink", "egress"]
     lines = set(render("sandbox", "frontend.env.j2", **ON).splitlines())
     assert {"SPE_COMPOSE_OVERLAYS=egress", "SPE_SANDBOX_SUBNET=172.30.250.0/24",
-            "SPE_SANDBOX_IP=172.30.250.10", "SPE_SANDBOX_DNS=192.0.2.53"} <= lines
+            "SPE_SANDBOX_IP=172.30.250.10", "SPE_SANDBOX_IP_RANGE=172.30.250.128/25",
+            "SPE_SANDBOX_DNS=192.0.2.53"} <= lines
     c = yaml.safe_load((INSTANCE / "compose.egress.yml").read_text())
     # Only the sandbox: the agent keeps its route to the LLM endpoint.
     assert c["services"] == {"sandbox": {"networks": {"tools": {"ipv4_address": "${SPE_SANDBOX_IP}"}},
                                          "dns": ["${SPE_SANDBOX_DNS}"]}}
-    assert c["networks"] == {"tools": {"ipam": {"config": [{"subnet": "${SPE_SANDBOX_SUBNET}"}]}}}
+    assert c["networks"] == {"tools": {"ipam": {"config": [{"subnet": "${SPE_SANDBOX_SUBNET}",
+                                                         "ip_range": "${SPE_SANDBOX_IP_RANGE}"}]}}}
 
 
 def run(tmp_path, action, rc_check=1):
@@ -67,3 +69,10 @@ def test_remove_deletes_jumps_and_chains(tmp_path):
 def test_missing_parameters_fail(tmp_path):
     env = dict(os.environ, IPTABLES="true", SPE_EGRESS_ENV=str(tmp_path / "none"))
     assert subprocess.run(["sh", str(SCRIPT), "apply"], env=env, capture_output=True).returncode != 0
+
+
+def test_status_fails_without_the_jumps(tmp_path):
+    res, calls = run(tmp_path, "status", rc_check=1)  # -C: a jump is missing
+    assert res.returncode != 0
+    res, calls = run(tmp_path, "status", rc_check=0)
+    assert res.returncode == 0 and "-C DOCKER-USER -j SPE-EGRESS" in calls and "-C INPUT -j SPE-EGRESS-IN" in calls

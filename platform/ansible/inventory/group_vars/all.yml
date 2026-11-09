@@ -324,6 +324,7 @@ spe_harden_airlock: false        # L5: pattern filter on the agent's final answe
 # spe_api_host:443. spe_sandbox_dns is TEST-NET-1: names outside the project do not resolve.
 spe_sandbox_subnet: 172.30.250.0/24
 spe_sandbox_ip: 172.30.250.10
+spe_sandbox_ip_range: 172.30.250.128/25   # Docker's dynamic addresses: never spe_sandbox_ip
 spe_sandbox_dns: 192.0.2.53
 # L1 (spe_harden_trs_readonly): operator TRS writes use a Traefik entrypoint published
 # on the VM's 127.0.0.1 only; the sandbox's TRS route is read-only.

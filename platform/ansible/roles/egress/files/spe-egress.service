@@ -2,7 +2,6 @@
 Description=SPE sandbox egress filter (spe_harden_egress)
 After=docker.service
 Requires=docker.service
-PartOf=docker.service
 
 [Service]
 Type=oneshot

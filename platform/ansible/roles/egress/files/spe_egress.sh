@@ -36,6 +36,8 @@ remove() {
 case "${1:-}" in
   apply) apply ;;
   remove) remove ;;
-  status) $IPT -S SPE-EGRESS && $IPT -S SPE-EGRESS-IN ;;
+  # The chains alone are not enough: without its jump a chain filters nothing.
+  status) $IPT -S SPE-EGRESS && $IPT -S SPE-EGRESS-IN
+          $IPT -C DOCKER-USER -j SPE-EGRESS && $IPT -C INPUT -j SPE-EGRESS-IN ;;
   *) echo "usage: $0 apply|remove|status" >&2; exit 2 ;;
 esac

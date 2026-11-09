@@ -6,7 +6,7 @@
   register: egress_unit
 
 - name: Egress filter installed (spe_harden_egress)
-  when: spe_harden_egress
+  when: spe_harden_egress | bool
   become: true
   block:
     - name: Directory for the filter's parameters
@@ -37,12 +37,25 @@
         daemon_reload: true
         state: "{{ 'restarted' if egress_files.changed else 'started' }}"
 
+    # The oneshot unit stays active, so a rule or jump lost since (iptables-restore, by hand)
+    # is only re-applied by running apply again; it is idempotent.
+    - name: Egress rules found
+      ansible.builtin.command: /opt/spe/bin/spe_egress.sh status
+      register: egress_status
+      changed_when: false
+      failed_when: false
+
+    - name: Egress rules re-applied (some were missing)
+      ansible.builtin.command: /opt/spe/bin/spe_egress.sh apply
+      when: egress_status.rc != 0
+      changed_when: true
+
     - name: Egress rules in place
       ansible.builtin.command: /opt/spe/bin/spe_egress.sh status
       changed_when: false
 
 - name: Egress filter removed (switch off, unit present)
-  when: not spe_harden_egress and egress_unit.stat.exists
+  when: not (spe_harden_egress | bool) and egress_unit.stat.exists
   become: true
   block:
     - name: Stop and disable (ExecStop removes the rules)

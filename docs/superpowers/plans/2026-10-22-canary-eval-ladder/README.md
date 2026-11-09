@@ -127,7 +127,7 @@ level instance files are overlays on the operator's instance file, without an in
 | `platform/ansible/roles/workflow_stack/templates/*` (Traefik: TRS read-only for the sandbox, operator writes on a localhost entrypoint; WESkit), a standard-library WES write guard, `instances/L1.example.yml`, `platform/dev/tests/golden/` (today's renders, for decision 3); the runbook `roles/sandbox/files/agent/AGENTS.md` stays as it is | 6 | L1 |
 | `platform/ansible/roles/workflow_stack/templates/compose.install.yaml.j2` (WESkit and worker mounts by tier), the verify smoke input, `instances/L2.example.yml` | 7 | L2 |
 | `platform/instance/compose.egress.yml` (a fixed sandbox address, an overlay on `platform/instance/compose.yml`), `roles/egress/` (`DOCKER-USER` firewall rules), `instances/L3.example.yml` | 8 | L3 |
-| `platform/agui/pydantic-ai-agent/` (airlock), `roles/agui/templates/agent.env.j2`, `playbooks/create.yml` (refuses the airlock with `openwebui` in `spe_frontends`) | 9 | L5 airlock |
+| `platform/agui/pydantic-ai-agent/` (airlock), `roles/agui/templates/agent.env.j2`, `inventory/group_vars/all.yml`, `playbooks/create.yml` (refuses the airlock with `openwebui` in `spe_frontends`), `platform/dev/tests/test_agui_env.py` | 9 | L5 airlock |
 | `docs/results/canary-ladder-qwen3.8-27b.md`, `docs/results/qwen3.8-27b/L{0,1}{,-clean}.json`, `L2.json`, `L3.json`, `docs/README.md` (the `results/` row) | 10 | the agent runs at L0–L3 and the matrix |
 
 ## PR slices

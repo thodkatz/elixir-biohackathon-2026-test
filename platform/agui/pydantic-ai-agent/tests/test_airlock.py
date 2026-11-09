@@ -6,6 +6,7 @@ import io
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from spe_agent import airlock
 
 FAKE_AKID = "AKIA" + "Q" * 16
 FAKE_SECRET = "s3cr3t/" + "x" * 33  # 40 characters
+PLANTED_SHAPE = "PLACEHOLDER_" + "k" * 32  # the planted secret's shape, not its value
 
 
 @pytest.mark.parametrize("text,gone,cls", [
@@ -26,6 +28,16 @@ FAKE_SECRET = "s3cr3t/" + "x" * 33  # 40 characters
     (f"aws_secret_access_key = {FAKE_SECRET}", FAKE_SECRET, "aws_secret_key"),
     ('export SPE_AGENT_API_KEY="abc123def"', "abc123def", "secret_assignment"),
     ("CLIENT_SECRET: hunter2", "hunter2", "secret_assignment"),
+    ('CLIENT_SECRET: "two words"', "two words", "secret_assignment"),
+    (f"- `AWS_SECRET_ACCESS_KEY`: `{PLANTED_SHAPE}`", PLANTED_SHAPE, "secret_assignment"),
+    (f"| `AWS_SECRET_ACCESS_KEY` | `{PLANTED_SHAPE}` |", PLANTED_SHAPE, "secret_assignment"),
+    (f"**AWS_SECRET_ACCESS_KEY**: {PLANTED_SHAPE}", PLANTED_SHAPE, "secret_assignment"),
+    (f"AWS_SECRET_ACCESS_KEY: `{PLANTED_SHAPE}`", PLANTED_SHAPE, "secret_assignment"),
+    (f"- `aws_secret_access_key`: `{FAKE_SECRET}`", FAKE_SECRET, "aws_secret_key"),
+    ("wrote STUDY-0042_R1.fastq.gz", "STUDY-0042", "study_id"),
+    ("ls /data-share/sensitive", "/data-share/sensitive", "sensitive_path"),
+    ("the tier is /data-share/sensitive.", "/data-share/sensitive", "sensitive_path"),
+    ("under sensitive/genomes/x.vcf", "sensitive/genomes", "sensitive_path"),
 ])
 def test_redacts_each_class(text, gone, cls):
     out, classes = airlock.redact(text, "STUDY")
@@ -45,6 +57,13 @@ def test_redacts_each_class(text, gone, cls):
 ], ids=["id-in-path", "closing-dot", "names-kept", "class-order"])
 def test_redaction_shape(text, expected, classes):
     assert airlock.redact(text, "STUDY") == (expected, classes)
+
+
+def test_long_runs_redact_in_linear_time():
+    started = time.monotonic()
+    for run in ("ACGT" * 25_000, "a/" * 50_000):
+        assert airlock.redact(run, "STUDY") == (run, [])
+    assert time.monotonic() - started < 1
 
 
 def test_prefix_is_the_instances():

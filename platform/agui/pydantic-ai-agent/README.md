@@ -72,13 +72,17 @@ canaries: never publish it.
 
 **Airlock (L5)**: `SPE_AIRLOCK=1` with `SPE_STUDY_ID_PREFIX` set turns on a pattern
 filter over the agent's answer, catching five classes: sensitive paths, study ids,
-AWS access and secret keys, and `*_KEY`/`*_SECRET` assignments (`airlock.py`;
-`SPE_AIRLOCK=1` without the prefix is a configuration error, exit 2). On, each text
+AWS access and secret keys, and `*_KEY`/`*_SECRET` assignments, also written as
+Markdown (`code`, **bold**, a table row) (`airlock.py`; `SPE_AIRLOCK=1` without the
+prefix is a configuration error, exit 2). The assignment names match in any case, so
+a benign `primary_key: id` or `cache_key = f(x)` also shows a redacted value: a leaked
+`api_key=` matters more than a changed schema line. On, each text
 message is buffered and sent whole, redacted, right before it ends rather than
 token by token, so a pattern split across stream chunks (a study id, a path) is
 still caught; the user sees the message appear all at once when the model finishes
-it, a wait of its whole generation time. Tool results and reasoning events are not
-the answer and are not filtered. Off (the default), events stream unchanged. The
+it, a wait of its whole generation time. Tool results, reasoning events and
+compaction summaries (the automatic markers and `/compact`) are not the answer and
+are not filtered. Off (the default), events stream unchanged. The
 same filter runs standalone as `python -m spe_agent.airlock`, copying stdin to
 stdout redacted when the container's environment turns it on, for the controls
 suite's `airlock` probe.

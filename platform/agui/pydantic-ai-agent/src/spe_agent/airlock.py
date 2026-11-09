@@ -18,6 +18,9 @@ from collections.abc import Callable, Mapping
 # Characters that end a path or a value in prose, Markdown or shell output; a path also leaves out the
 # sentence's closing punctuation.
 _STOP = r"\s'\"`<>()\[\]{},;"
+# Between a credential's name and its value: Markdown decoration (`code`, **bold**, quotes) on either side of
+# the separator, which is `=`, `:` or a table's `|`. A quoted value runs to its closing quote.
+_PAIR = r"[`*\"']{0,2}\s*(?:[=:]|\|)\s*[`*\"']{0,2}"
 
 
 def _patterns(prefix: str) -> list[tuple[str, re.Pattern[str], Callable[[re.Match[str]], str]]]:
@@ -30,17 +33,20 @@ def _patterns(prefix: str) -> list[tuple[str, re.Pattern[str], Callable[[re.Matc
     # Paths first: a study id inside a sensitive path goes with the path.
     return [
         ("sensitive_path",
-         re.compile(rf"[\w./-]*(?:/data-share/sensitive/|sensitive/(?:registry|secret))"
+         # The lookbehind tries each run of path characters once, from its start: unanchored, a long run
+         # (a quoted sequence) backtracks from every position, quadratic.
+         re.compile(rf"(?<![\w./-])[\w./-]*(?:/data-share/sensitive(?:/|\b)|sensitive/(?:registry|secret|genomes))"
                     rf"(?:[^{_STOP}]*[^{_STOP}.:!?])?"),
          whole("sensitive_path")),
-        ("study_id", re.compile(rf"(?<![A-Za-z0-9_]){re.escape(prefix)}-\d+(?![A-Za-z0-9_])"), whole("study_id")),
+        ("study_id", re.compile(rf"(?<![A-Za-z0-9_]){re.escape(prefix)}-\d+(?![0-9A-Za-z])"), whole("study_id")),
         ("aws_secret_key",
-         re.compile(r"(aws_secret_access_key[\"']?\s*[=:]\s*[\"']?)[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])",
+         re.compile(rf"(aws_secret_access_key{_PAIR})[A-Za-z0-9/+=]{{40}}(?![A-Za-z0-9/+=])",
                     re.IGNORECASE),
          value("aws_secret_key")),
         ("aws_access_key", re.compile(r"(?<![A-Z0-9])AKIA[0-9A-Z]{16}(?![A-Z0-9])"), whole("aws_access_key")),
         ("secret_assignment",
-         re.compile(rf"(\b[A-Za-z][A-Za-z0-9_]*_(?:KEY|SECRET)[\"']?\s*[=:]\s*[\"']?)(?!\[redacted:)[^{_STOP}]+",
+         re.compile(rf"(\b[A-Za-z][A-Za-z0-9_]*_(?:KEY|SECRET){_PAIR})"
+                    rf"(?!\[redacted:)(?:(?<=\")[^\"\n]+|(?<=')[^'\n]+|[^{_STOP}]+)",
                     re.IGNORECASE),
          value("secret_assignment")),
     ]

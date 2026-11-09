@@ -72,3 +72,25 @@ async def test_run_log_holds_the_redacted_answer(tmp_path):
     await run(tmp_path, chunked_answer(), airlock_prefix="STUDY")
     (rec,) = log_records(tmp_path)
     assert rec["answer"] == REDACTED
+
+
+async def test_on_releases_each_message_before_the_next_tool_call(tmp_path):
+    """Text, then a tool call in the same response, then the answer: each message goes out redacted between
+    its own START and END, the first before TOOL_CALL_START (a guard against an adapter upgrade)."""
+
+    async def stream(messages, info):
+        if not isinstance(messages[-1].parts[-1], ToolReturnPart):
+            yield "Checking STU"
+            yield "DY-0007 first."
+            yield {0: DeltaToolCall(name="run_command", json_args='{"command": "ls"}', tool_call_id="call-1")}
+            return
+        yield "Done with STUDY-0007."
+
+    evs = await run(tmp_path, FunctionModel(stream_function=stream), airlock_prefix="STUDY")
+    assert contents(evs) == ["Checking [redacted:study_id] first.", "Done with [redacted:study_id]."]
+    text = [e for e in evs if e["type"].startswith("TEXT_MESSAGE_")]
+    assert [e["type"] for e in text] == ["TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"] * 2
+    for start, content, end in (text[:3], text[3:]):
+        assert start["messageId"] == content["messageId"] == end["messageId"]
+    types = [e["type"] for e in evs]
+    assert types.index("TEXT_MESSAGE_END") < types.index("TOOL_CALL_START")

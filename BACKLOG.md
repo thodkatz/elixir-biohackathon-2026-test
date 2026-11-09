@@ -39,6 +39,12 @@ start reads this section; keep it short.
 
 <!-- - <item> — from <PR #n / review thread / spec Inputs for>, waits because <reason>. -->
 
+- Canary ladder agent runs are slow, ~93 s per test of which ~80% is reset and waiting: the restore (~46 s,
+  `docker stop -t 30` on the stack) and the agent's sandbox rediscovery after it (30 s probe, backoff to 30 s; the
+  provider retries its 503, `docs/knowledge/ladder-agent-503-after-restore.md`). A shorter stop timeout, restoring
+  only touched volumes, or an agent probe the restore can trigger would roughly halve a run — from slice 10 (#70),
+  waits because changing them mid-batch breaks the levels' comparability; take it up before the next model's runs.
+
 - AG-UI chat, minor polish from #58's review (finding 5): opening a session no holder keeps shows *Loading…* for
   one render; no unit test drives `SessionAgent` with the page (only e2e `leave-running` does); while a chat
   reopened mid-run streams, the whole chat re-renders per message change (`page.tsx`, `midRun`); a ms race between

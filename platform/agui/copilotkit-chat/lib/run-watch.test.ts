@@ -66,3 +66,59 @@ test("watchRuns: a run started before the previous run's list came back is not e
   await tick();
   assert.deepEqual(ended, [ID]);
 });
+
+// A rejoined run (connect): the page does not know its start, so its end waits for the list to show the
+// session not running (lib/reconcile.ts, waitNotRunning), not for a `last_run_at` after the connect.
+const listed = (running: boolean): ListResult => ({ list: [{ ...row("2026-01-01T00:00:00.000Z"), running }], serverOffsetMs: 0 });
+
+test("watchRuns: a rejoined run ends once the list shows the session not running", async () => {
+  const { agent, start, end } = fakeAgent();
+  const answers = [listed(false)];
+  const ended: string[] = [];
+  const recorded: string[] = [];
+  const errors: string[] = [];
+  const w = watchRuns(agent, () => ({
+    ...options(async () => answers.shift()!, ended),
+    onRecorded: (id) => recorded.push(id), onError: (m) => errors.push(m),
+  }));
+  w.rejoining();
+  start();
+  end();
+  await tick();
+  await tick();
+  // A `last_run_at` older than the connect would have failed reconcile(); waitNotRunning takes it.
+  assert.deepEqual({ ended, recorded, errors }, { ended: [ID], recorded: [ID], errors: [] });
+});
+
+test("watchRuns: a rejoined run whose session left the list ends with no error", async () => {
+  const { agent, start, end } = fakeAgent();
+  const ended: string[] = [];
+  const lists: number[] = [];
+  const errors: string[] = [];
+  const w = watchRuns(agent, () => ({
+    ...options(async () => ({ list: [], serverOffsetMs: 0 }), ended),
+    onList: (l) => lists.push(l.length), onError: (m) => errors.push(m),
+  }));
+  w.rejoining();
+  start();
+  end();
+  await tick();
+  await tick();
+  assert.deepEqual({ ended, lists, errors }, { ended: [ID], lists: [0], errors: [] });
+});
+
+test("watchRuns: only the run a rejoin starts is a rejoin; a connect that never started one leaves none", async () => {
+  const { agent, start, end } = fakeAgent();
+  const f = manualFetch();
+  const ended: string[] = [];
+  const w = watchRuns(agent, () => options(f.fetchList, ended));
+  w.rejoining();
+  w.rejoined(); // the connect failed before its run started
+  start(); // an ordinary send: reconcile(), which a list with a fresh last_run_at satisfies at once
+  end();
+  await tick();
+  f.answer();
+  await tick();
+  assert.deepEqual(ended, [ID]);
+  assert.equal(f.pending.length, 0);
+});

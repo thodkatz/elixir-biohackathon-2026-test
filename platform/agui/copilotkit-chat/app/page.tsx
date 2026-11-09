@@ -89,6 +89,15 @@ function Chat() {
   const [agentsReady, setAgentsReady] = useState<ReadonlySet<string>>(new Set());
   // What each holder puts on its agent once ready: the GET's messages, or [] for a New chat.
   const initial = useRef(new Map<string, Message[]>());
+  // The held sessions whose holder is to connect to a run going elsewhere (./session-agent.tsx, `rejoin`):
+  // set where the GET or a list shows the open session running and this page is not streaming it, cleared
+  // when the connect ends or the holder goes. The ref is the current value, the state the one rendered.
+  const [rejoining, setRejoiningState] = useState<ReadonlySet<string>>(new Set());
+  const rejoiningRef = useRef<ReadonlySet<string>>(new Set());
+  const setRejoining = useCallback((next: ReadonlySet<string>) => {
+    rejoiningRef.current = next;
+    setRejoiningState(next);
+  }, []);
   // Bumped by every open()/startNew() call, so a response from a call that is no longer the
   // latest (a second click while the first's fetch is still in flight) is ignored on arrival.
   const requestRef = useRef(0);
@@ -123,7 +132,24 @@ function Chat() {
     const keep = new Set(held(next));
     for (const id of initial.current.keys()) if (!keep.has(id)) initial.current.delete(id);
     setAgentsReady((r) => ([...r].every((id) => keep.has(id)) ? r : new Set([...r].filter((id) => keep.has(id)))));
-  }, []);
+    const r = rejoiningRef.current;
+    if (![...r].every((id) => keep.has(id))) setRejoining(new Set([...r].filter((id) => keep.has(id))));
+  }, [setRejoining]);
+
+  // The open session has a run going that this page does not stream: its holder connects to it. Its chat is
+  // then drawn on a run already going, so it is redrawn on the agent's changes (midRun, below) until it ends.
+  const rejoin = useCallback((id: string) => {
+    const now = liveRef.current;
+    if (now.open !== id || !isHeld(now, id) || now.streaming.has(id) || rejoiningRef.current.has(id)) return;
+    midRun.current = id;
+    setRejoining(new Set(rejoiningRef.current).add(id));
+  }, [setRejoining]);
+  const onRejoined = useCallback((id: string) => {
+    if (!rejoiningRef.current.has(id)) return;
+    const next = new Set(rejoiningRef.current);
+    next.delete(id);
+    setRejoining(next);
+  }, [setRejoining]);
 
   // Every list the page fetches comes through here: the sidebar shows it, the live sessions learn which
   // ids left it (an open session that left it while idle is replaced by a new one), and once the open
@@ -137,9 +163,12 @@ function Chat() {
     if (startNew) startNewRef.current();
     else {
       const id = liveRef.current.open;
-      if (id && list.some((s) => s.id === id)) showInUrl(id);
+      const shown = id ? list.find((s) => s.id === id) : undefined;
+      if (id && shown) showInUrl(id);
+      // An open idle session that turned running (a run from another tab): join it.
+      if (id && shown?.running) rejoin(id);
     }
-  }, [listOrder, setLive]);
+  }, [listOrder, rejoin, setLive]);
   const refresh = useCallback(async (): Promise<SessionMeta[] | null> => {
     try {
       const list = await listOrder.track(() => fetchSessions(), (l) => l);
@@ -240,6 +269,8 @@ function Chat() {
       midRun.current = null;
       setLive(openSession(liveRef.current, id));
       showInUrl(id);
+      // Its run is going elsewhere (another tab, or before a reload): the holder rejoins it live.
+      if (session.running) rejoin(id);
     } catch (e) {
       if (requestId !== requestRef.current) return; // superseded by a later open()/startNew()
       setError(messageOf(e));
@@ -251,7 +282,7 @@ function Chat() {
         showInUrl(null);
       }
     }
-  }, [refresh, setLive, startNew]);
+  }, [refresh, rejoin, setLive, startNew]);
 
   // First load, once the runtime has answered: a holder's agent registers while the runtime is still
   // pending, so the runtime's status, not an agent's `isReady`, says the page can run anything.
@@ -342,6 +373,8 @@ function Chat() {
           onList={applyList}
           onError={onAgentError}
           onMessages={onAgentMessages}
+          rejoin={rejoining.has(id)}
+          onRejoined={onRejoined}
         />
       ))}
       <Sidebar

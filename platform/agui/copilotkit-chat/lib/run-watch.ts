@@ -5,9 +5,12 @@
 // chat's title; `onRecorded` once the list shows the run; `onEnded` last, once the list (or its error) has
 // been passed on, so the page drops the agent only after it has seen that list. `onEnded` is for the latest
 // run only: a run started before the previous one's list came back keeps the session streaming, and the
-// page must not drop its agent. Pure apart from the agent, so `node --test` covers it.
+// page must not drop its agent. A rejoined run (a connect to a run already going, lib/rejoin.ts) has a start
+// the page does not know, so its end waits for the list to show the session not running instead
+// (waitNotRunning); a list without the session is the session deleted, which the page's list handling deals
+// with, not an error bar. Pure apart from the agent, so `node --test` covers it.
 import type { SessionMeta } from "./sessions.ts";
-import { SAVE_FAILED_MESSAGE, isRefusal, reconcile } from "./reconcile.ts";
+import { SAVE_FAILED_MESSAGE, isRefusal, reconcile, waitNotRunning } from "./reconcile.ts";
 import type { FetchList } from "./reconcile.ts";
 
 export type RunWatchOptions = {
@@ -30,7 +33,7 @@ export type RunSource = {
   }): { unsubscribe(): void };
 };
 
-type Run = { startMs: number; refused: boolean };
+type Run = { startMs: number; refused: boolean; rejoined: boolean };
 
 export const LIST_FAILED = "The session list could not be loaded.";
 
@@ -38,9 +41,11 @@ export const LIST_FAILED = "The session list could not be loaded.";
 export function watchRuns(agent: RunSource, opts: () => RunWatchOptions, now: () => number = Date.now) {
   let current: Run | null = null; // the run in progress
   let last: Run | null = null; // the latest run, in progress or ended
+  let rejoining = false; // a connect is under way: the next run to start is the one it rejoins
   const sub = agent.subscribe({
     onRunInitialized: () => {
-      current = last = { startMs: now(), refused: false };
+      current = last = { startMs: now(), refused: false, rejoined: rejoining };
+      rejoining = false;
       opts().onStarted(opts().id);
     },
     onRunErrorEvent: ({ event }) => {
@@ -60,6 +65,18 @@ export function watchRuns(agent: RunSource, opts: () => RunWatchOptions, now: ()
           .finally(done);
         return;
       }
+      if (ended.rejoined) {
+        waitNotRunning(opts().fetchList, id)
+          .then(({ list, saved }) => {
+            opts().onList(list);
+            if (!list.some((s) => s.id === id)) return; // deleted: the list's own handling, no error bar
+            if (saved) opts().onRecorded(id);
+            else opts().onError(SAVE_FAILED_MESSAGE);
+          })
+          .catch(() => opts().onError(LIST_FAILED))
+          .finally(done);
+        return;
+      }
       reconcile(opts().fetchList, id, ended.startMs)
         .then(({ list, saved }) => {
           opts().onList(list);
@@ -74,6 +91,10 @@ export function watchRuns(agent: RunSource, opts: () => RunWatchOptions, now: ()
     unsubscribe: () => sub.unsubscribe(),
     /** Pass every run error here too: a refusal that reaches the page outside the stream (a failed request
      *  rather than a RUN_ERROR event) is then not reported as a failed save. */
+    /** Just before a connect: the run it starts is a rejoined one. */
+    rejoining: () => { rejoining = true; },
+    /** Once the connect has ended, however: a connect that never started a run leaves no mark on the next. */
+    rejoined: () => { rejoining = false; },
     noteRunError: (message: string) => {
       if (last !== null && isRefusal(message)) last.refused = true;
     },

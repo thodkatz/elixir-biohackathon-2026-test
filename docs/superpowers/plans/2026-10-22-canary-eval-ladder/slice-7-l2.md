@@ -28,7 +28,7 @@ the L2 agent run and the L2 column.
 - `drs-filer` also mounts `spe_data_root`. It executes nothing and serves only metadata, so it keeps the full
   mount.
 
-**Offline test command:** `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q`.
+**Offline test command:** `uv run --with pytest --with pyyaml --with jinja2 --with mkdocs-material pytest platform/dev/tests -q`.
 The render helper `platform/dev/tests/ansible_render.py` (slice 6) provides `render(role, template,
 **overrides) -> str`, `load_vars(**overrides) -> dict`, `environment() -> jinja2.Environment` (Ansible's
 `trim_blocks`, `keep_trailing_newline`, `StrictUndefined`), `ANSIBLE` and `GOLDEN`. The golden
@@ -223,7 +223,7 @@ spe_tier_dirs: {ref: ref, genomes: sensitive/genomes, registry: sensitive/regist
 +      - "{{ ((verify_inventory | selectattr('tier', 'in', spe_harden_data_tiers) | list) if spe_harden_data_tiers else (verify_inventory | selectattr('path', 'equalto', 'PROVENANCE.md') | list)) | map(attribute='drs_uri') | first }}"
 ```
 
-- [ ] **Step 4: Run.** `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q`.
+- [ ] **Step 4: Run.** `uv run --with pytest --with pyyaml --with jinja2 --with mkdocs-material pytest platform/dev/tests -q`.
   Expected: PASS, including slice 6's off-render tests.
 - [ ] **Step 5: Commit.**
 

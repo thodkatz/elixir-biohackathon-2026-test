@@ -27,8 +27,8 @@ Every task's requirements include these.
 
 - **Tests.** Offline, before every commit, the suites a slice touches:
   `(cd platform/promptfoo-evals && uv run --group dev pytest -q)` and
-  `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q` (jinja2 renders the Ansible
-  templates in the tests slices 6–9 add). New Python under `platform/promptfoo-evals/`
+  `uv run --with pytest --with pyyaml --with jinja2 --with mkdocs-material pytest platform/dev/tests -q` (jinja2 renders the Ansible
+  templates in the tests slices 6–9 add; mkdocs-material, the site build test). New Python under `platform/promptfoo-evals/`
   imports only the standard library; PyYAML is a `dev` dependency there, for tests only.
 - **No token ever leaves the operator side in a committed file or a report reason.** Assertions name the canary
   *type* and *file*, never the token (spec part 04, *Reports carry values*). Fixtures use synthetic seeds and

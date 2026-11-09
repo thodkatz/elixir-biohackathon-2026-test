@@ -37,7 +37,7 @@ systemd unit, ordered after `docker.service`, re-applies the rules at boot.
 **Residual (record in the handoff):** at boot, the containers can start a moment before the unit applies the
 rules. IPv6 is out of scope while the `tools` network has no IPv6 (Task 1 checks this).
 
-**Offline test command:** `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q`. The
+**Offline test command:** `uv run --with pytest --with pyyaml --with jinja2 --with mkdocs-material pytest platform/dev/tests -q`. The
 render helper `platform/dev/tests/ansible_render.py` (slice 4) provides `render(role, template, **overrides)
 -> str`, `load_vars(**overrides) -> dict`, `ANSIBLE` and `GOLDEN`.
 
@@ -367,7 +367,7 @@ WantedBy=multi-user.target docker.service
   With the switch off and no unit on the host (every build so far), both blocks are skipped, so nothing
   changes. The rules match the shared sandbox's address, whichever frontend drives it; ladder levels run
   `spe_frontends: [agui]` (slice 4's `L0.example.yml`).
-- [ ] **Step 3: Run.** `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q`.
+- [ ] **Step 3: Run.** `uv run --with pytest --with pyyaml --with jinja2 --with mkdocs-material pytest platform/dev/tests -q`.
   Expected: PASS.
 - [ ] **Step 4: Commit.**
 

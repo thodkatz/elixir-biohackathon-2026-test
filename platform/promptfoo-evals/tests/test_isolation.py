@@ -167,6 +167,41 @@ def test_restore_starts_the_stack_even_when_untar_fails(hdir):
     assert vm.count("--force-recreate") == 2
 
 
+def test_every_project_is_recreated_when_the_first_fails(hdir):
+    def up(argv, stdin):
+        return cp(1, err="compose: boom") if "workflow-stack" in argv else cp()
+
+    vm = FakeVM(**{"docker run": cp(1, err="tar: short read"), "--force-recreate": up})
+    with pytest.raises(isolation.RestoreError, match="recreating workflow-stack") as caught:
+        isolation.restore(hdir, run=vm)
+    assert vm.count("--force-recreate") == 2
+    assert "putting the volumes back" in str(caught.value.__context__)
+
+
+def _sh(script, roots, *args):
+    # The scripts as docker runs them, with /v and /s moved under tmp_path: one pass, so a root is never rewritten.
+    body = re.sub(r"/([sv])/", lambda m: f"{roots[m.group(1)]}/", script)
+    return subprocess.run(["sh", "-c", body, "x", *args], capture_output=True, text=True)
+
+
+def test_snapshot_and_restore_scripts_round_trip(tmp_path):
+    roots = {"v": tmp_path / "v", "s": tmp_path / "s"}
+    vol = roots["v"] / "workflow-stack_trs-mongodb"
+    (vol / "sub").mkdir(parents=True)
+    (vol / "a").write_text("1")
+    (vol / "sub" / "b").write_text("2")
+    (roots["s"] / "eval-01" / "old").mkdir(parents=True)
+    assert _sh(isolation.SNAP_SH, roots, "eval-01", KEY).returncode == 0
+    assert (roots["s"] / "eval-01" / KEY / "COMPLETE").read_text() == KEY + "\n"
+    assert not (roots["s"] / "eval-01" / "old").exists()  # the old build's snapshot goes
+    (vol / "a").unlink()
+    (vol / "c").write_text("left by a test")
+    assert _sh(isolation.RESTORE_SH, roots, "eval-01", KEY).returncode == 0
+    assert sorted(str(f.relative_to(vol)) for f in vol.rglob("*")) == ["a", "sub", "sub/b"]
+    (roots["v"] / "workflow-stack_new").mkdir()  # a volume the snapshot lacks: restore fails, never skips
+    assert _sh(isolation.RESTORE_SH, roots, "eval-01", KEY).returncode != 0
+
+
 def test_unreachable_vm_fails_at_once(hdir):
     vm = FakeVM(**{"docker inspect": cp(255, err="ssh: connect to host vm: Connection refused")})
     with pytest.raises(isolation.RestoreError, match="unreachable"):
@@ -248,10 +283,14 @@ RECORDED = {"/trs/tools": TOOLS, "/wes/runs/R2": {"run_id": "R2", "request": {
     "/trs/tools/x/versions/2/NFL/descriptor/main.nf": {"content": "process A {}", "url": "u"}}
 
 
+seen_paths = []
+
+
 @pytest.fixture
 def api():
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
+            seen_paths.append(self.path)
             path, _, query = self.path.partition("?")
             body = RUNS[query.removeprefix("page_token=")] if path == "/wes/runs" else RECORDED.get(path)
             self.send_response(200 if body is not None else 404)
@@ -283,6 +322,56 @@ def test_state_script_against_recorded_api(api, tmp_path):
     assert state["tools"]["x/2"] == {"descriptor_urls": [f"{api}/trs/tools/x/versions/2/NFL/descriptor/main.nf"],
                                      "descriptors": {"main.nf": "process A {}"}}
     assert state["sandbox"] == ["a.txt", "sub/b.txt"]
+
+
+def _run_state(api, home, details=None):
+    env = {**os.environ, "TRS_BASE": f"{api}/trs", "WES_BASE": f"{api}/wes", "SPE_SANDBOX_HOME": str(home),
+           "SPE_STATE_DETAILS": json.dumps(details or {})}
+    return subprocess.run([sys.executable, "-"], input=isolation.STATE_PY, env=env, capture_output=True, text=True)
+
+
+def test_state_script_records_a_failed_detail_fetch_in_its_entry(api, tmp_path, monkeypatch):
+    monkeypatch.setitem(RECORDED, "/trs/tools", [*TOOLS, {"id": "a/b", "versions": [{"id": "1",
+                                                                                       "descriptor_type": ["NFL"]}]}])
+    proc = _run_state(api, tmp_path, {"runs": ["R2", "gone"], "tools": [["x", "2"], ["a/b", "1"]]})
+    assert proc.returncode == 0, proc.stderr[-300:]
+    state = json.loads(proc.stdout)
+    assert state["runs"]["gone"] == {"error": 404} and state["runs"]["R2"]["workflow_params"] == {"a": 1}
+    assert state["tools"]["a/b/1"] == {"error": 404} and state["tools"]["x/2"]["descriptors"]
+    assert "/trs/tools/a%2Fb/versions/1/" in json.dumps(seen_paths)
+
+
+def test_state_script_fails_when_runs_page_on_past_the_limit(api, tmp_path, monkeypatch):
+    monkeypatch.setitem(RUNS, "p2", {"runs": [], "next_page_token": "p2"})
+    proc = _run_state(api, tmp_path)
+    assert proc.returncode != 0 and "100 pages" in proc.stderr
+
+
+def test_state_script_fails_on_an_unlistable_home(api, tmp_path):
+    proc = _run_state(api, tmp_path / "missing")
+    assert proc.returncode != 0 and "missing" in proc.stderr
+
+
+def test_state_diff_carries_a_detail_error(hdir):
+    answers = iter([_state(["a/b/1"], {"R1": "COMPLETE"}, []),
+                    _state([], {}, [], runs={"R1": {"error": 404}}, tools={"a/b/1": {"error": 404}})])
+    trs = {"a/b/1": {"id": "a/b", "version": "1", "descriptor_types": ["NFL"]}}
+    calls = []
+
+    def run(argv, stdin=None):
+        if argv[0] == "sh":
+            return cp(out="absent")
+        calls.append(argv)
+        out = json.loads(next(answers))
+        if len(calls) == 1:
+            out["trs"] = trs
+        return cp(out=json.dumps(out))
+
+    diff = isolation.state_diff(hdir, {"trs": [], "wes": [], "sandbox": [], "sink": None}, run=run)
+    assert diff["trs_tools_added"] == [{"id": "a/b", "version": "1", "descriptor_urls": [], "descriptors": {},
+                                        "error": 404}]
+    assert diff["wes_runs_added"][0]["error"] == 404
+    assert json.loads(calls[1][calls[1].index("-e") + 1].split("=", 1)[1])["tools"] == [["a/b", "1"]]
 
 
 def _state(trs, wes, sandbox, runs=None, tools=None):
@@ -383,6 +472,7 @@ def hooked(hdir, tmp_path, monkeypatch):
     monkeypatch.setattr(isolation, "snapshot_exists", lambda d: seen.get("exists", False))
     monkeypatch.setattr(isolation, "snapshot", lambda d: seen.__setitem__("snapshot", seen["snapshot"] + 1))
     monkeypatch.setattr(isolation, "restore", lambda d: next(seen["restore"]))
+    monkeypatch.delenv(isolation.ACCEPT_DIRTY, raising=False)
     monkeypatch.setattr(isolation, "baseline", lambda d: {"trs": ["t/1"], "wes": [], "sandbox": [], "sink": None})
     return seen
 
@@ -434,7 +524,65 @@ def test_after_each_logs_counts_and_never_raises(hooked, monkeypatch, capsys):
     assert "state diff unavailable" in capsys.readouterr().err
 
 
-def test_other_hooks_do_nothing_and_default_baseline_path(monkeypatch):
+def _dirty(hdir, stamp):
+    (hdir / isolation.DIRTY_MARKER).write_text(json.dumps({"generated_at": stamp}))
+
+
+def test_before_each_marks_the_stack_dirty(hooked, hdir):
+    isolation.extension_hook("beforeEach", {"test": {}})
+    assert json.loads((hdir / isolation.DIRTY_MARKER).read_text()) == {"generated_at": STAMP}
+
+
+def test_after_all_restores_and_marks_clean(hooked, hdir, capsys):
+    _dirty(hdir, STAMP)
+    hooked["exists"] = True
     assert isolation.extension_hook("afterAll", {"suite": {}}) is None
+    assert "restored after the run in 30.0s" in capsys.readouterr().err
+    assert not (hdir / isolation.DIRTY_MARKER).exists() and not (hdir / "restore_times.json").exists()
+    hooked["exists"] = False  # no snapshot of this build: nothing to restore to
+    isolation.extension_hook("afterAll", {"suite": {}})
+    assert next(hooked["restore"]) == 50.0
+
+
+def test_after_all_restore_failure_is_loud_and_raised(hooked, hdir, monkeypatch, capsys):
+    _dirty(hdir, STAMP)
+    hooked["exists"] = True
+    monkeypatch.setattr(isolation, "restore", lambda d: (_ for _ in ()).throw(isolation.RestoreError("down")))
+    with pytest.raises(isolation.RestoreError):
+        isolation.extension_hook("afterAll", {"suite": {}})
+    assert "RESTORE AFTER THE RUN FAILED" in capsys.readouterr().err and (hdir / isolation.DIRTY_MARKER).exists()
+
+
+def test_before_all_refuses_a_snapshot_over_an_earlier_builds_dirty_stack(hooked, hdir, monkeypatch):
+    _dirty(hdir, "2026-01-01T00:00:00Z")
+    with pytest.raises(isolation.IsolationError, match="not restored before this rebuild.*ACCEPT_DIRTY"):
+        isolation.extension_hook("beforeAll", {"suite": {}})
+    assert hooked["snapshot"] == 0
+    hooked["exists"] = True  # a snapshot of this build: the marker is not consulted
+    isolation.extension_hook("beforeAll", {"suite": {}})
+    hooked["exists"] = False
+    monkeypatch.setenv(isolation.ACCEPT_DIRTY, "1")
+    isolation.extension_hook("beforeAll", {"suite": {}})
+    assert hooked["snapshot"] == 1 and not (hdir / isolation.DIRTY_MARKER).exists()
+
+
+def test_before_all_snapshots_over_this_builds_own_dirty_stack(hooked, hdir):
+    _dirty(hdir, STAMP)
+    isolation.extension_hook("beforeAll", {"suite": {}})
+    assert hooked["snapshot"] == 1
+
+
+def test_cli_snapshot_is_guarded_and_restore_marks_clean(hooked, hdir, capsys):
+    _dirty(hdir, "2026-01-01T00:00:00Z")
+    with pytest.raises(isolation.IsolationError, match="not restored"):
+        isolation.main(["isolation.py", "snapshot"])
+    assert hooked["snapshot"] == 0
+    assert isolation.main(["isolation.py", "restore"]) == 0
+    assert not (hdir / isolation.DIRTY_MARKER).exists()
+    assert isolation.main(["isolation.py", "snapshot"]) == 0 and hooked["snapshot"] == 1
+
+
+def test_other_hooks_do_nothing_and_default_baseline_path(monkeypatch):
+    assert isolation.extension_hook("afterTest", {"suite": {}}) is None
     monkeypatch.delenv("SPE_EVAL_BASELINE", raising=False)
     assert isolation.baseline_path() == Path(isolation.__file__).resolve().parent / "reports" / ".baseline.json"

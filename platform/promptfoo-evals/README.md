@@ -37,8 +37,16 @@ TRS, WES and DRS answer from the sandbox; a failure aborts the eval) and writes 
 state baseline to `$SPE_EVAL_BASELINE` (default `reports/.baseline.json`); the agent provider diffs against it
 after its run; `afterEach` logs the diff's counts. The diff includes the requests the test receiver
 (`spe_eval_sink`) got during the test, read from its log on the VM (`isolation.SINK_LOG`), or `null` when no
-receiver is deployed. Restored volumes, containers and what is left out:
+receiver is deployed. `afterAll` restores once more, so a finished run leaves the stack as the build left it (a
+failure there is logged and raised). Restored volumes, containers and what is left out:
 `isolation.VOLUMES`, `CONTAINERS`, `NOT_RESTORED`.
+
+`create.yml` does not wipe the volumes, so a rebuild in place over a run that was never restored (an aborted one,
+say) would snapshot that run's state as the new build's. `beforeEach` writes
+`<hand-off>/stack_dirty.json` (`{"generated_at": …}`) before each test; a full restore no test follows (`afterAll`,
+`isolation.py restore`) or a snapshot removes it. With no snapshot of this build and a marker from another build,
+`beforeAll` and `isolation.py snapshot` refuse: rebuild from a clean stack (`destroy.yml`, then `create.yml`), or
+set `SPE_ISOLATION_ACCEPT_DIRTY=1` to snapshot anyway.
 
 The snapshot lives on the VM in `/var/lib/spe-snapshots/<instance>/<generated_at>/` and is keyed to
 `canaries.json`: a re-provisioned instance (every level of the de.NBI VM shares `output/denbi-agui-01/`) takes a

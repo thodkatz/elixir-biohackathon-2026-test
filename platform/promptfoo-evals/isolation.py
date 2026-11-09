@@ -178,12 +178,19 @@ def _cycle(run: Runner, argv: list[str], what: str) -> None:
     try:
         _ok(run(argv), what)
     finally:
+        first = None  # every project is recreated even when one fails; the first failure is raised after
         for project, (workdir, files, services) in projects.items():
             # --renew-anon-volumes also empties the MongoDB containers' anonymous volume (the mongo image's
             # VOLUME /data/configdb, checked live on de.NBI): unused by a standalone mongod, so not snapshotted.
-            _ok(run(["docker", "compose", "--project-directory", workdir, "-p", project,
-                     *[a for f in files for a in ("-f", f)], "up", "-d", "--force-recreate", "--renew-anon-volumes",
-                     "--no-deps", "--no-build", "--pull", "never", *services]), f"recreating {project}")
+            try:
+                _ok(run(["docker", "compose", "--project-directory", workdir, "-p", project,
+                         *[a for f in files for a in ("-f", f)], "up", "-d", "--force-recreate",
+                         "--renew-anon-volumes", "--no-deps", "--no-build", "--pull", "never", *services]),
+                    f"recreating {project}")
+            except IsolationError as e:
+                first = first or e
+        if first:
+            raise first  # raised in finally: an untar error in flight stays attached as its __context__
 
 
 def snapshot(directory: Path, run: Runner | None = None, timeout: float = 300.0,
@@ -213,7 +220,7 @@ def restore(directory: Path, run: Runner | None = None, timeout: float = 300.0,
 
 
 STATE_PY = r'''
-import json, os, urllib.parse, urllib.request
+import json, os, urllib.error, urllib.parse, urllib.request
 def get(url):
     with urllib.request.urlopen(url, timeout=30) as r:
         return json.load(r)
@@ -233,8 +240,15 @@ for _ in range(100):
     token = page.get("next_page_token") or ""
     if not token:
         break
+else:
+    raise SystemExit("WES /runs still has a next_page_token after 100 pages: the run list would be short")
+# A failed detail fetch is that entry's {"error": <HTTP code>}: the entry stays, the rest of the diff too.
 for rid in want.get("runs", []):
-    req = get(f"{wes}/runs/{q(rid)}").get("request") or {}
+    try:
+        req = get(f"{wes}/runs/{q(rid)}").get("request") or {}
+    except urllib.error.HTTPError as e:
+        out["runs"][rid] = {"error": e.code}
+        continue
     params = req.get("workflow_params")
     if isinstance(params, str):
         try:
@@ -244,16 +258,22 @@ for rid in want.get("runs", []):
     out["runs"][rid] = {"workflow_url": req.get("workflow_url"), "workflow_params": params}
 for tid, vid in want.get("tools", []):
     urls, texts = [], {}
-    for dtype in out["trs"].get(f"{tid}/{vid}", {}).get("descriptor_types", []):
-        base = f"{trs}/tools/{q(tid)}/versions/{q(vid)}/{dtype}"
-        for f in get(base + "/files"):
-            url = f"{base}/descriptor/{urllib.parse.quote(f['path'])}"
-            urls.append(url)
-            texts[f["path"]] = str(get(url).get("content", ""))[:200000]
+    try:
+        for dtype in out["trs"].get(f"{tid}/{vid}", {}).get("descriptor_types", []):
+            base = f"{trs}/tools/{q(tid)}/versions/{q(vid)}/{q(dtype)}"
+            for f in get(base + "/files"):
+                url = f"{base}/descriptor/{urllib.parse.quote(f['path'])}"
+                urls.append(url)
+                texts[f["path"]] = str(get(url).get("content", ""))[:200000]
+    except urllib.error.HTTPError as e:
+        out["tools"][f"{tid}/{vid}"] = {"error": e.code}
+        continue
     out["tools"][f"{tid}/{vid}"] = {"descriptor_urls": urls, "descriptors": texts}
 home = os.environ.get("SPE_SANDBOX_HOME", "/home/user")
+def unreadable(e):
+    raise e  # a directory os.walk cannot list would drop its files from the diff unseen
 out["sandbox"] = sorted(os.path.relpath(os.path.join(root, n), home)
-                        for root, _, names in os.walk(home) for n in names)
+                        for root, _, names in os.walk(home, onerror=unreadable) for n in names)
 print(json.dumps(out))
 '''
 
@@ -317,6 +337,11 @@ def baseline(directory: Path, run: Runner | None = None) -> dict:
             "sink": _sink_size(run)}
 
 
+def _error(detail: dict | None) -> dict:
+    """A detail the state script could not fetch carries its HTTP code into the diff entry."""
+    return {"error": detail["error"]} if isinstance(detail, dict) and "error" in detail else {}
+
+
 def state_diff(directory: Path, base: dict, run: Runner | None = None) -> dict:
     if not isinstance(base, dict) or not all(isinstance(base.get(k), list) for k in ("trs", "wes", "sandbox")) \
             or "sink" not in base or not (base["sink"] is None or type(base["sink"]) is int):
@@ -325,15 +350,17 @@ def state_diff(directory: Path, base: dict, run: Runner | None = None) -> dict:
     now = _collect(directory, run)
     new_tools = sorted(set(now["trs"]) - set(base["trs"]))
     new_runs = sorted(set(now["wes"]) - set(base["wes"]))
-    more = _collect(directory, run, new_runs, [k.split("/", 1) for k in new_tools]) \
-        if new_tools or new_runs else {"runs": {}, "tools": {}}
+    ids = [(now["trs"][k]["id"], now["trs"][k]["version"]) for k in new_tools]  # an id may itself hold a "/"
+    more = _collect(directory, run, new_runs, ids) if new_tools or new_runs else {"runs": {}, "tools": {}}
+    tools, runs = more["tools"], more["runs"]
     return {
         "trs_tools_added": [{"id": now["trs"][k]["id"], "version": now["trs"][k]["version"],
-                             "descriptor_urls": more["tools"].get(k, {}).get("descriptor_urls", []),
-                             "descriptors": more["tools"].get(k, {}).get("descriptors", {})} for k in new_tools],
-        "wes_runs_added": [{"run_id": r, "workflow_url": more["runs"].get(r, {}).get("workflow_url"),
-                            "workflow_params": more["runs"].get(r, {}).get("workflow_params"),
-                            "state": now["wes"][r]} for r in new_runs],
+                             "descriptor_urls": tools.get(k, {}).get("descriptor_urls", []),
+                             "descriptors": tools.get(k, {}).get("descriptors", {}), **_error(tools.get(k))}
+                            for k in new_tools],
+        "wes_runs_added": [{"run_id": r, "workflow_url": runs.get(r, {}).get("workflow_url"),
+                            "workflow_params": runs.get(r, {}).get("workflow_params"),
+                            "state": now["wes"][r], **_error(runs.get(r))} for r in new_runs],
         "sandbox_files_added": sorted(set(now["sandbox"]) - set(base["sandbox"])),
         "sink_requests_added": _sink_since(run, base["sink"]),
     }
@@ -381,19 +408,63 @@ def _log(message: str) -> None:
     print(f"[isolation] {message}", file=sys.stderr, flush=True)
 
 
+# The stack may hold a test's state: written after beforeEach's restore, removed by a full restore no test follows
+# (afterAll's, the CLI's) and by a snapshot. create.yml does not wipe the volumes, so a rebuild in place over a dirty
+# stack would snapshot the previous run's leftovers as its clean state; this marker lets beforeAll refuse that.
+DIRTY_MARKER = "stack_dirty.json"
+ACCEPT_DIRTY = "SPE_ISOLATION_ACCEPT_DIRTY"
+
+
+def _build(directory: Path) -> str:
+    snapshot_key(directory)  # validates the record
+    return json.loads((Path(directory) / "canaries.json").read_text())["generated_at"]
+
+
+def mark_dirty(directory: Path) -> None:
+    (Path(directory) / DIRTY_MARKER).write_text(json.dumps({"generated_at": _build(directory)}))
+
+
+def mark_clean(directory: Path) -> None:
+    (Path(directory) / DIRTY_MARKER).unlink(missing_ok=True)
+
+
+def refuse_dirty_rebuild(directory: Path) -> None:
+    """Before a snapshot: the stack must not hold state from an earlier build's run that was never restored."""
+    try:
+        left = json.loads((Path(directory) / DIRTY_MARKER).read_text()).get("generated_at")
+    except FileNotFoundError:
+        return
+    except (ValueError, AttributeError):
+        left = "unknown"
+    if left == _build(directory) or os.environ.get(ACCEPT_DIRTY) == "1":
+        return
+    raise IsolationError(f"the run of the previous build ({left}) was not restored before this rebuild, so a "
+                         "snapshot now would hold its state: rebuild from a clean stack (destroy.yml, then "
+                         "create.yml), or restore before rebuilding next time; set "
+                         f"{ACCEPT_DIRTY}=1 to snapshot anyway")
+
+
+def guarded_snapshot(directory: Path) -> None:
+    refuse_dirty_rebuild(directory)
+    snapshot(directory)
+    mark_clean(directory)
+
+
 def extension_hook(hook_name: str, context: dict) -> None:
-    """promptfoo hook (legacy convention: called for every hook). Raising in beforeAll/beforeEach aborts the eval."""
+    """promptfoo hook (legacy convention: called for every hook). Raising in beforeAll/beforeEach aborts the eval;
+    raising in afterAll only gets logged by promptfoo."""
     if hook_name == "beforeAll":
         directory = handoff_dir()
         if snapshot_exists(directory):
             _log("snapshot of this build present")
         else:
             _log("no snapshot of this build: taking one")
-            snapshot(directory)
+            guarded_snapshot(directory)
     elif hook_name == "beforeEach":
         directory = handoff_dir()
         baseline_path().unlink(missing_ok=True)
         seconds = restore(directory)
+        mark_dirty(directory)  # the test about to run changes the stack
         median = record_restore_seconds(directory, seconds)
         write_baseline(baseline(directory))
         _log(f"restored in {seconds:.1f}s (median {median:.1f}s)")
@@ -403,6 +474,18 @@ def extension_hook(hook_name: str, context: dict) -> None:
             _log("state diff: " + ", ".join(f"{k}={'-' if v is None else len(v)}" for k, v in diff.items()))
         except Exception as e:  # afterEach only logs: promptfoo would swallow it anyway
             _log(f"state diff unavailable: {type(e).__name__}")
+    elif hook_name == "afterAll":
+        # Leave the stack as the build left it, so a rebuild in place snapshots a clean stack. Not in
+        # restore_times.json: that median is the per-test cost.
+        directory = handoff_dir()
+        if snapshot_exists(directory):
+            try:
+                seconds = restore(directory)
+            except Exception as e:
+                _log(f"RESTORE AFTER THE RUN FAILED, the stack keeps the last test's state: {e}")
+                raise
+            mark_clean(directory)
+            _log(f"restored after the run in {seconds:.1f}s")
     return None
 
 
@@ -410,11 +493,12 @@ def main(argv: list[str]) -> int:
     directory = handoff_dir()
     command = argv[1] if len(argv) > 1 else ""
     if command == "snapshot":
-        snapshot(directory)
+        guarded_snapshot(directory)
     elif command == "exists":
         return 0 if snapshot_exists(directory) else 1
     elif command == "restore":
         seconds = restore(directory)
+        mark_clean(directory)
         print(f"{seconds:.1f} (median {record_restore_seconds(directory, seconds):.1f})")
     elif command == "sh":
         proc = vm_runner(directory)(["sh", "-s"], sys.stdin.read())

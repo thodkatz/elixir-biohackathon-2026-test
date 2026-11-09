@@ -193,6 +193,9 @@ spe_local_vars:
   - spe_inject_drs_description
   - spe_inject_workflow_comment
   - spe_eval_sink
+  - spe_eval_sink_port
+  - spe_eval_sink_host
+  - spe_eval_sink_image
   - spe_denbi_api_key
   - spe_agent_llm_key
   - spe_agui_ui_dev

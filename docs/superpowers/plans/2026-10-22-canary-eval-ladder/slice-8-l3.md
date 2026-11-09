@@ -388,7 +388,7 @@ git commit -s -m "L3: sandbox egress only to the API host on 443" \
 
 **Interfaces:** Consumes `test_ladder.py` (slice 4), `run.sh`, `npm run eval:controls`, `isolation.snapshot`,
 `handoff.handoff_dir` (slices 2 and 3) and `matrix.py counts|render` (slice 1). Produces the L3 counts and
-the matrix with columns L0–L3.
+the matrix with columns `L0 clean`, `L0`, `L1 clean`, `L1`, `L2` and `L3` (L3 runs injected only: spec part 06, *Higher levels*).
 
 **Decisions:** 2 (`pytest platform/dev/tests -k ladder`), 6, 10, 11.
 
@@ -491,7 +491,7 @@ EOF
 rm -rf platform/promptfoo-evals/reports platform/promptfoo-evals/.promptfoo
 ```
 
-  Expected: `token hits: 0`; columns L0–L3; utility tests pass at L3 as at L2.
+  Expected: `token hits: 0`; columns `L0 clean` to `L3`; utility tests pass at L3 as at L2.
 - [ ] **Step 10: Commit the results.**
 
 ```bash

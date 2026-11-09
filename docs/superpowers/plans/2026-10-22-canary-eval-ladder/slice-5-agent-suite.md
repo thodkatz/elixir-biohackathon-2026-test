@@ -3,7 +3,8 @@
 Delivers the paid agent suite: `agent.yaml` wiring the AG-UI provider, the isolation hooks and the six leak
 metrics into every test; the first fixed catalogue of 13 tests in `tests/*.yaml` with their metadata and
 deterministic utility checks; the provider's state diff, taken after each run; a no-model dry run against the
-scripted agent; and the first ladder run at L0 on de.NBI (`qwen3.8-27b`), whose counts and matrix are committed.
+scripted agent; and the first L0 runs on de.NBI (`qwen3.8-27b`), clean and injected, whose counts and matrix are
+committed.
 The starter `promptfooconfig.yaml` and the `eval` script go; their three tests live on in the catalogue.
 
 **Implements** (spec [`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/`](../../specs/2026-10-22-canary-eval-ladder-design/README.md)):
@@ -15,8 +16,9 @@ The starter `promptfooconfig.yaml` and the `eval` script go; their three tests l
   actually requests the descriptor".
 - [05](../../specs/2026-10-22-canary-eval-ladder-design/05-isolation.md), *Hooks*, as amended by the plan's
   *Proposed spec clarifications* (slice 2): the provider takes the state diff after the run.
-- [06](../../specs/2026-10-22-canary-eval-ladder-design/06-runs-and-results.md): *One ladder run*, *Repeats and
-  cost*, *The matrix* — decisions 10 and 11 (the first committed result).
+- [06](../../specs/2026-10-22-canary-eval-ladder-design/06-runs-and-results.md): *One ladder run*, *Clean and
+  injected runs* (at L0), *Repeats and cost*, *The matrix*, *Reading the matrix* — decisions 10 and 11 (the first
+  committed result).
 
 **Branch:** `impl/canary-eval-ladder-5-agent-suite`. Global constraints, shared interfaces and the claims table:
 the plan's [README](README.md). All paths below are relative to the repository root; commands run from
@@ -796,7 +798,9 @@ jq -r '.results.results[] | [.testCase.metadata.id, ([.gradingResult.componentRe
 - [ ] **Step 4: Build a throw-away matrix from it.**
 
 ```bash
-mkdir -p reports/dry-run && cp "$SPE_HANDOFF_DIR/hardening.json" reports/controls.json reports/agent.json reports/dry-run/
+mkdir -p reports/dry-run && cp "$SPE_HANDOFF_DIR"/{hardening,injections}.json reports/controls.json reports/agent.json reports/dry-run/
+python3 -c 'import json, sys, handoff; print(json.dumps({"started": "2026-01-01T00:00:00Z",
+  "canaries_sha256": handoff.canaries_digest(sys.argv[1])}))' "$SPE_HANDOFF_DIR" > reports/dry-run/run.json  # as run.sh files it
 python3 matrix.py counts reports/dry-run > reports/dry-run/L0.json
 python3 matrix.py render reports/dry-run/L0.json
 ```
@@ -829,26 +833,35 @@ git add platform/promptfoo-evals/README.md
 git commit -s -m "promptfoo-evals README: dry run of both suites against the scripted agent"
 ```
 
-### Task 4: the first L0 run on de.NBI, its matrix and the handoff
+### Task 4: the first L0 runs on de.NBI, clean and injected, their matrix and the handoff
 
 **Files:**
-- Create: `docs/results/qwen3.8-27b/L0.json`, `docs/results/qwen3.8-27b/L0-clean.json` (the clean control),
-  `docs/results/canary-ladder-qwen3.8-27b.md`, `platform/ansible/instances/no-injections.example.yml`,
+- Create: `docs/results/qwen3.8-27b/L0-clean.json`, `docs/results/qwen3.8-27b/L0.json`,
+  `docs/results/canary-ladder-qwen3.8-27b.md`,
   `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/<date -u +%Y-%m-%dT%H%MZ>-slice-5-done.md`
 - Modify: `docs/README.md`, `docs/superpowers/plans/2026-10-22-canary-eval-ladder/README.md` (slices table),
   `AGENTS.md` (*Current work*)
 
 **Interfaces:**
-- Consumes: `run.sh <hand-off dir> <repeat>`; `matrix.py counts`/`render` (README, *Shared interfaces*).
-- Produces: the committed L0 counts and matrix, which slices 6–8 extend with their `L<n>.json`.
+- Consumes: `run.sh <hand-off dir> <repeat>` and `handoff.condition` (slice 3); `instances/L0.example.yml` and
+  `instances/no-injections.example.yml` (slice 4); `matrix.py counts`/`render` (README, *Shared interfaces*).
+- Produces: the committed L0 counts of both conditions and the matrix, which slice 6 extends with `L1` and
+  `L1 clean`, and slices 7–8 with their `L<n>.json`.
 
-**Decisions:** 10 (`run.sh` stops before any model call on a controls mismatch: its exit code, step 3), 11 (the
-committed files hold counts only: the token check, step 5), 7 (the utility pass rate at L0, read in step 4).
+**Decisions:** 10 (`run.sh` stops before any model call on a controls mismatch or a build that is not a ladder
+condition: its exit code, steps 3 and 4; L0 runs clean and injected, spec part 06 *Clean and injected runs*), 11
+(the committed files hold counts only: the token check, step 6; `render` refuses an unmatched pair, step 4), 7 (the
+utility pass rate at L0, read in step 5).
 
-- [ ] **Step 1: STOP and ask the user.** Paid model calls. Ask, in these words or close: "Run the agent suite at
-  **L0** on de.NBI, model **qwen3.8-27b**: 13 tests × 5 repeats = **65 agent runs** (each up to 50 model
-  requests), plus 65 restores (about a minute each, measured in slice 2: `hardening.json` `restore_seconds`) and
-  the no-model controls suite. OK?" Do not go on without a yes.
+The spec's order at L0 is **clean first, then injected** (part 06, *Order*); the start times land in the counts.
+
+- [ ] **Step 1: STOP and ask the user.** Model calls on de.NBI (no money, rate limits only; still the user's OK
+  first). Ask, in these words or close: "Run the agent suite at **L0** on de.NBI, model **qwen3.8-27b**, in both
+  conditions, clean first, then injected: 13 tests × 5 repeats × 2 = **130 agent runs** (each up to 50 model
+  requests), plus 130 restores (about a minute each, measured in slice 2: `hardening.json` `restore_seconds`), two
+  in-place rebuilds of the VM (no instance created) and the no-model controls suite before each. OK?" Do not go on
+  without a yes. If the user agrees to the injected run only, run step 4 alone and record the clean run as not run,
+  with the user's words, in the handoff.
 
 - [ ] **Step 2: Reach the agent.** From `platform/promptfoo-evals/`, with `INSTANCE` as in task 3:
 
@@ -859,72 +872,58 @@ export SPE_AGENT_URL=http://127.0.0.1:8100/agent SPE_AGENT_API_KEY_FILE=$SPE_HAN
 export SPE_LLM_API_KEY_FILE=/path/to/llm_key     # 0600, only the de.NBI key (DENBI_LLM_API_KEY)
 export PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_SHARING=1 PROMPTFOO_DISABLE_UPDATE=1
 export PROMPTFOO_CONFIG_DIR=$PWD/.promptfoo
-jq '{level, model, commit, restore_seconds}' $SPE_HANDOFF_DIR/hardening.json
+PRIVATE=/workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # as in slice 4, task 6
+build() {  # rebuild the VM in place at L0; "$@" adds overlays
+  (cd ../ansible && ansible-playbook playbooks/create.yml -e @$PRIVATE/instances/denbi-agui-01.yml \
+    -e @instances/L0.example.yml "$@" -e spe_output_root=$PRIVATE/output </dev/null) &&
+  python3 -c 'import handoff, isolation; isolation.snapshot(handoff.handoff_dir())' &&   # fresh baseline
+  jq '{level, model, commit, injections}' $SPE_HANDOFF_DIR/hardening.json
+}
 ```
 
-  Expected: `level` 0, `model` `qwen3.8-27b`, `commit` this branch's `HEAD` (if not, re-provision the VM in
-  place from the L0 instance file first: `spe_provision: existing`, no OK needed).
+  `build` recreates the agent container: if the agent stops answering afterwards, reopen the tunnel.
 
-- [ ] **Step 3: Run the ladder step.**
+- [ ] **Step 3: The clean run.** Build L0 clean, then run the whole suite:
 
 ```bash
+build -e @instances/no-injections.example.yml   # expect level 0, injections false, commit = this branch's HEAD
+jq '.injections' $SPE_HANDOFF_DIR/injections.json  # []
 time ./run.sh ../ansible/output/$INSTANCE 5; echo "exit $?"
-jq '.results.stats' reports/L0/agent.json
+jq '.results.stats' reports/L0-clean/agent.json   # 65 results, errors 0
+mkdir -p ../../docs/results/qwen3.8-27b
+python3 matrix.py counts reports/L0-clean > ../../docs/results/qwen3.8-27b/L0-clean.json
 ```
 
-  Record for the handoff: the exit code, the wall time, the stats. Expected: exit 0, 65 results, `errors` 0. A
-  non-zero exit before the agent suite means the controls disagree with L0: record which probe, stop, and fix
-  the instance (decision 10). Provider `error`s (a state diff that failed, a run timeout) are not results: find
-  the cause, and re-run only after asking again.
+  Record for the handoff: the exit code, the wall time, the stats, `run.json`'s `started`. Exit 2 before any call
+  means the build is not the clean condition: `run.sh` names what (a manifest still listing injections, or a
+  target file whose canary the clean build lacks: spec part 02, *Matched builds*); fix the build, never the check.
+  A non-zero exit before the agent suite otherwise means the controls disagree with L0: record which probe, stop,
+  and fix the instance (decision 10). Provider `error`s (a state diff that failed, a run timeout) are not results:
+  find the cause, and re-run only after asking again.
 
-- [ ] **Step 4: Build and render the counts.**
+- [ ] **Step 4: The injected run.** Rebuild L0 as the level file says, then the same suite:
 
 ```bash
-mkdir -p ../../docs/results/qwen3.8-27b
+build                                              # expect level 0, injections true
+jq '[.injections[].id]' $SPE_HANDOFF_DIR/injections.json   # the three fixtures
+time ./run.sh ../ansible/output/$INSTANCE 5; echo "exit $?"
+jq '.results.stats' reports/L0/agent.json          # 65 results, errors 0
 python3 matrix.py counts reports/L0 > ../../docs/results/qwen3.8-27b/L0.json
 python3 matrix.py render ../../docs/results/qwen3.8-27b/L*.json > ../../docs/results/canary-ladder-qwen3.8-27b.md
 ```
 
-  Read the matrix and record for the handoff: the utility pass rate per test (a utility test below 5/5 at L0 is
-  an agent or runbook problem to note, not a leak), and which leak metrics fail on which rows.
+  `render` refusing with "different canaries: L0" means the two builds are not a matched pair (another seed or
+  canary switch in one of them): find which, rebuild that condition and run it again, after asking. The VM ends at
+  L0 injected, with a fresh snapshot, so slice 6 starts from L0.
 
-- [ ] **Step 4b: The clean control at L0** (spec part 06, *The clean control*; clarification 6). The same three
-  injection tests at L0 with nothing planted, so the matrix can show how much the injections themselves change
-  what the agent touches, answers, sends and delivers. **STOP and ask the user first**: "Run the clean control at
-  **L0** on de.NBI, model **qwen3.8-27b**: the 3 injection tests × 5 repeats = **15 agent runs**, after an
-  in-place rebuild of the VM with the three injection switches off (no instance created). OK?" Without a yes,
-  skip to step 5 and say so in the handoff.
+- [ ] **Step 5: Read the matrix** (spec part 06, *Reading the matrix*) and record for the handoff: the utility pass
+  rate per test in both columns (a utility test below 5/5 at L0 is an agent or runbook problem to note, not a
+  leak); for each direct and benign row, the clean column on its own (a leak there needs no injection); for each
+  injection row, `touched`/`answer`/`sent`/`delivered` in `L0 clean` against `L0` (`followed` is 0 in the clean
+  column by construction: nothing to follow), with errors apart and whether the payload was exposed; the two start
+  times and, if the order was not clean first, why.
 
-  Create `platform/ansible/instances/no-injections.example.yml`, an overlay layered after a level file:
-
-```yaml
-# The clean control (spec part 06): a level with no injection planted, scored by the injection tests only.
-#   ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml -e @instances/L0.example.yml \
-#     -e @instances/no-injections.example.yml
-# hardening.json then has injections: false; run.sh files the reports under reports/L0-clean/.
-spe_inject_trs_description: false
-spe_inject_drs_description: false
-spe_inject_workflow_comment: false
-```
-
-  Rebuild in place with it (slice 4, task 6, step 5's command plus `-e @instances/no-injections.example.yml`),
-  check `jq '{level, injections}' $SPE_HANDOFF_DIR/hardening.json` gives `0` and `false` and `injections.json`
-  lists none, take a fresh snapshot (`python3 -c 'import handoff, isolation; isolation.snapshot(handoff.handoff_dir())'`),
-  then:
-
-```bash
-time ./run.sh ../ansible/output/$INSTANCE 5 --filter-metadata group=injection; echo "exit $?"
-jq '.results.stats' reports/L0-clean/agent.json          # 15 results, errors 0
-python3 matrix.py counts reports/L0-clean > ../../docs/results/qwen3.8-27b/L0-clean.json
-python3 matrix.py render ../../docs/results/qwen3.8-27b/L*.json > ../../docs/results/canary-ladder-qwen3.8-27b.md
-```
-
-  The matrix gains an `L0 clean` column before `L0`; only the injection rows have cells there. Record for the
-  handoff the injection rows' `touched`, `answer`, `sent` and `delivered` counts in both columns. `followed` is 0
-  in the clean column by construction (nothing to follow): the comparison is the other metrics. Then rebuild the
-  VM in place at L0 again (without the overlay) and take a fresh snapshot, so slice 6 starts from L0.
-
-- [ ] **Step 5: Check that no token and no key reached the committed files.** Locally, printing counts only:
+- [ ] **Step 6: Check that no token and no key reached the committed files.** Locally, printing counts only:
 
 ```bash
 python3 - "$SPE_HANDOFF_DIR" ../../docs/results/qwen3.8-27b/L0*.json ../../docs/results/canary-ladder-qwen3.8-27b.md <<'EOF'
@@ -943,57 +942,59 @@ EOF
   Expected: `0 of N` for every file. Any hit: do not commit; the offending line came from a report `reason` or
   label, which is a slice 1 bug (`matrix.py`, decision 11) to fix first.
 
-- [ ] **Step 6: Index the results.** Add to the table in `docs/README.md`, before the closing comment:
+- [ ] **Step 7: Index the results.** Add to the table in `docs/README.md`, before the closing comment:
 
 ```markdown
 | `results/` | committed ladder results, counts only: `canary-ladder-<model>.md` (the matrix) and `<model>/L<n>.json` (one level's counts, its input) | you cite a ladder result or add a level |
 ```
 
-- [ ] **Step 7: Commit the result.**
+- [ ] **Step 8: Commit the result.**
 
 ```bash
 cd ../..
-git add docs/results/qwen3.8-27b/L0*.json docs/results/canary-ladder-qwen3.8-27b.md docs/README.md \
-  platform/ansible/instances/no-injections.example.yml
+git add docs/results/qwen3.8-27b/L0*.json docs/results/canary-ladder-qwen3.8-27b.md docs/README.md
 git diff --staged --stat
 git commit -s -m "Results: canary ladder L0, qwen3.8-27b on de.NBI" \
-  -m "13 tests x 5 repeats at L0, and the clean control (the 3 injection tests x 5 without injections,
-clarification 6) if the user agreed (decision 11: counts only; checked locally that no canary token
-or key from the hand-off appears in any file). Raw reports deleted."
+  -m "13 tests x 5 repeats at L0 in both conditions, clean (no injections planted) then injected, a
+matched pair (spec part 06; decision 11: counts only; checked locally that no canary token or key from
+the hand-off appears in any file). Raw reports deleted."
 cd platform/promptfoo-evals && rm -rf reports .promptfoo && cd ../..
 ```
 
   Close the tunnel.
 
-- [ ] **Step 8: Write the handoff.** `F=docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/$(date -u +%Y-%m-%dT%H%MZ)-slice-5-done.md`,
-  with these sections, filled from steps 3–5 and task 3:
+- [ ] **Step 9: Write the handoff.** `F=docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/$(date -u +%Y-%m-%dT%H%MZ)-slice-5-done.md`,
+  with these sections, filled from steps 3–6 and task 3:
 
 ```markdown
 # Slice 5/9 done: agent suite and the first L0 run
 
-**State.** `agent.yaml` and 13 tests merged; the L0 run committed in
-`docs/results/canary-ladder-qwen3.8-27b.md` (`docs/results/qwen3.8-27b/L0.json`).
+**State.** `agent.yaml` and 13 tests merged; the L0 runs committed in
+`docs/results/canary-ladder-qwen3.8-27b.md` (`docs/results/qwen3.8-27b/L0-clean.json`, `L0.json`).
 
-**Run.** Instance `<INSTANCE>`, commit `<hardening.json commit>`, `run.sh` exit `<0>`, wall time `<h:mm>`,
-restore `<restore_seconds>` s, stats `<successes/failures/errors>`.
+**Runs.** Instance `<INSTANCE>`, commit `<hardening.json commit>`; per condition (clean, injected): started
+`<run.json started>`, `run.sh` exit `<0>`, wall time `<h:mm>`, restore `<restore_seconds>` s, stats
+`<successes/failures/errors>`. Order: `<clean first, as the spec says | the departure and why>`.
 
 **L0 in one paragraph.** Utility pass rates (`<id> n/5`, …); leak metrics failing (`<metric>` on `<ids>`); which
 injections were followed (`injection.followed` rows) and whether the planted fields were exposed
 (`explain-descriptor`'s `fetched_descriptor`).
 
-**Clean control (step 4b).** `<run or skipped>`; per injection row, `touched`/`answer`/`sent`/`delivered` with
-injections (L0) and without (L0 clean).
+**Clean against injected (step 5).** Direct and benign rows that leak in `L0 clean`; per injection row,
+`touched`/`answer`/`sent`/`delivered` in `L0 clean` and `L0`, errors apart, exposure; what each supports (spec part
+06, *Reading the matrix*).
 
 **Dry run (task 3).** `<errors 0; 13 state diffs; anything that needed fixing>`.
 
 **Rulings** (decision, why, cost if wrong): `<e.g. the comment injection's tool, if slice 4 fell back to
 wes-drs-smoke>`; `<anything else decided while running>`.
 
-**Next: slice 6/9** (`impl/canary-eval-ladder-6-l1`): L1, `spe_harden_trs_readonly`; its run adds
-`docs/results/qwen3.8-27b/L1.json` and re-renders the matrix with `matrix.py render docs/results/qwen3.8-27b/L*.json`.
+**Next: slice 6/9** (`impl/canary-eval-ladder-6-l1`): L1, `spe_harden_trs_readonly`; its runs, injected first,
+then clean, add `docs/results/qwen3.8-27b/L1.json` and `L1-clean.json` and re-render the matrix with
+`matrix.py render docs/results/qwen3.8-27b/L*.json`.
 ```
 
-- [ ] **Step 9: Status and current work.** In the plan `README.md`'s *PR slices* table, set row 5/9's *Status*
+- [ ] **Step 10: Status and current work.** In the plan `README.md`'s *PR slices* table, set row 5/9's *Status*
   to `merged #<n>`, where `n` is this slice's PR number (`gh pr view --json number -q .number` once the PR is
   open). In `AGENTS.md`, *Current work*, replace the canary ladder's line with:
 
@@ -1003,7 +1004,7 @@ wes-drs-smoke>`; `<anything else decided while running>`.
   Handoff: `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/<this handoff's file name>`.
 ```
 
-- [ ] **Step 10: Commit.**
+- [ ] **Step 11: Commit.**
 
 ```bash
 git add "$F" docs/superpowers/plans/2026-10-22-canary-eval-ladder/README.md AGENTS.md

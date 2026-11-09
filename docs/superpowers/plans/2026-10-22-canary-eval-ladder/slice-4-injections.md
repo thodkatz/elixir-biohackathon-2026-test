@@ -7,7 +7,8 @@ test that keeps every later level one switch away from the one before. Ends with
 (no model calls) and its planted fields checked.
 
 **Implements:** [spec part 02](../../specs/2026-10-22-canary-eval-ladder-design/02-injections.md) entirely
-(decision 4: *Payload catalogue*, *Switches and planting*, *Hand-off: `injections.json`*, *Acceptance checks*;
+(decision 4: *Payload catalogue*, *Switches and planting* (with the clean overlay), *Hand-off: `injections.json`*,
+*Acceptance checks*;
 the scoring half, *Following, blocking and exposure*, is slice 1's `injection_followed`); decision 2's test and
 decision 3 ([part 01](../../specs/2026-10-22-canary-eval-ladder-design/01-leak-paths-and-ladder.md), *The ladder*).
 Global constraints, shared interfaces and the claims table: [README](README.md).
@@ -836,7 +837,14 @@ def test_injection_switches_default_off():
 
 # --- the hand-off manifest (roles/handoff/files/injections_manifest.py) ---------
 sys.path.insert(0, str(PLATFORM / "promptfoo-evals"))
+import handoff  # noqa: E402
 import injections_schema  # noqa: E402
+
+
+def test_the_clean_check_reads_this_catalogue():
+    # handoff.condition (slice 3) checks a clean build against the targets listed here.
+    assert REPO / handoff.FIXTURES == INJECTIONS / "fixtures.json"
+
 
 BUILDER = load("injections_manifest", ANSIBLE / "roles" / "handoff" / "files" / "injections_manifest.py")
 
@@ -1437,9 +1445,10 @@ for o in "${overlays[@]}"; do compose+=(-f "$SPE_REPO_DIR/platform/instance/comp
   `git add platform/ansible/roles/eval_sink platform/dev/tests/test_eval_sink.py platform/dev/tests/ansible_render.py platform/dev/tests/golden/frontend.env.L0 platform/ansible/inventory/group_vars/all.yml platform/ansible/playbooks/create.yml platform/ansible/playbooks/destroy.yml platform/ansible/roles/sandbox/templates/frontend.env.j2 platform/ansible/roles/sandbox/tasks/up.yml platform/instance/compose.eval-sink.yml platform/instance/spe-apply platform/instance/README.md platform/ansible/README.md`
   `git commit -s -m "eval_sink: the ladder's test receiver behind spe_eval_sink (clarification 4)"`
 
-### Task 6: `L0.example.yml`, the ladder test, L0 built on de.NBI, handoff
+### Task 6: `L0.example.yml`, the clean overlay, the ladder test, L0 built on de.NBI, handoff
 
-**Files:** Create `platform/ansible/instances/L0.example.yml`, `platform/dev/tests/test_ladder.py`,
+**Files:** Create `platform/ansible/instances/L0.example.yml`, `platform/ansible/instances/no-injections.example.yml`,
+`platform/dev/tests/test_ladder.py`,
 `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/<UTC>-slice-4-done.md`. Modify
 `platform/ansible/README.md`, `docs/superpowers/plans/2026-10-22-canary-eval-ladder/README.md` (slices table),
 `AGENTS.md` (*Current work*).
@@ -1450,7 +1459,9 @@ file) and `LADDER` order = README's `hardening.json` switch order.
 **Decisions:** 2: `pytest platform/dev/tests -k ladder` (`test_each_level_differs_from_the_one_before_by_exactly_its_switch`,
 `test_plain_example_and_L0_set_no_hardening_switch`, `test_levels_run_from_L0_without_gaps`); 3:
 `test_every_switch_defaults_off` offline, and live: the controls suite at L0 reports every probe `open` (step 6);
-4: `test_injections_on_and_identical_at_every_level`, the live field check (step 5).
+4: `test_injections_on_and_identical_at_every_level`, the live field check (step 5); spec part 02 *Matched builds*:
+`test_clean_overlay_turns_off_only_the_injections` (the clean build differs from the injected one only in the
+planted instructions; its canary digest and target canaries are checked by `run.sh`, slice 3).
 
 - [ ] **Step 1: Write the failing test** `platform/dev/tests/test_ladder.py`:
 
@@ -1518,6 +1529,12 @@ def test_injections_on_and_identical_at_every_level():
         assert "gatk-hc-chr20" in level.get("spe_workflows", [])
 
 
+def test_clean_overlay_turns_off_only_the_injections():
+    # Spec part 06, *Clean and injected runs*: layered after a level file, it changes nothing but the three switches.
+    clean = yaml.safe_load((ANSIBLE / "instances" / "no-injections.example.yml").read_text())
+    assert clean == {k: False for k in INJECT}
+
+
 def test_level_files_carry_no_host_identity():
     for n, level in levels().items():
         own = [k for k in level if k in ("spe_instance", "spe_seed") or k.startswith("spe_existing_")]
@@ -1551,13 +1568,28 @@ spe_inject_workflow_comment: true
 spe_eval_sink: true                  # the test receiver, backup.spe-eval.test (canary.delivered)
 ```
 
+`platform/ansible/instances/no-injections.example.yml`, the clean condition's overlay (spec part 06, *Clean and
+injected runs*), layered after a level file:
+
+```yaml
+# The clean condition (spec part 06): the level's build with no injection planted, everything else unchanged.
+#   ansible-playbook playbooks/create.yml -e @instances/denbi-agui-01.yml -e @instances/L0.example.yml \
+#     -e @instances/no-injections.example.yml
+# hardening.json then has injections: false; run.sh runs the whole suite and files it under reports/L<n>-clean/.
+# The ladder runs it at L0 and L1 only. Nothing but these three switches (platform/dev/tests/test_ladder.py).
+spe_inject_trs_description: false
+spe_inject_drs_description: false
+spe_inject_workflow_comment: false
+```
+
   Docs: in `platform/ansible/README.md` *Usage*, add a paragraph *Ladder levels*: the overlay command above, that a
   level file never carries host, seed or instance name, that `L<n>` adds exactly the switch of level *n*
-  (`platform/dev/tests/test_ladder.py`), and that all levels on one VM share `output/<instance>/`.
+  (`platform/dev/tests/test_ladder.py`), that all levels on one VM share `output/<instance>/`, and that
+  `no-injections.example.yml` after a level file builds that level's clean condition (L0 and L1).
 
 - [ ] **Step 4: Run, expect PASS** (both suites, global constraints), then commit:
-  `git add platform/ansible/instances/L0.example.yml platform/dev/tests/test_ladder.py platform/ansible/README.md`
-  `git commit -s -m "L0.example.yml and the ladder test (decisions 2, 3)"`
+  `git add platform/ansible/instances/L0.example.yml platform/ansible/instances/no-injections.example.yml platform/dev/tests/test_ladder.py platform/ansible/README.md`
+  `git commit -s -m "L0.example.yml, the clean overlay and the ladder test (decisions 2, 3)"`
 
 - [ ] **Step 5: Build L0 in place on the de.NBI VM and check the planted fields.** No model call
   (`spe_agui_smoke: false`), existing provision: no OK needed. SSH through the de.NBI jump host bans the IP after

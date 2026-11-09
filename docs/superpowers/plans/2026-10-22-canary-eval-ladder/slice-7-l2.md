@@ -245,7 +245,7 @@ git commit -s -m "L2: WESkit and workflow containers mount only the listed data 
 
 **Interfaces:** Consumes `test_ladder.py` (slice 4), `run.sh`, `npm run eval:controls`, `isolation.snapshot`,
 `handoff.handoff_dir` (slices 2 and 3) and `matrix.py counts|render` (slice 1). Produces the L2 counts and
-the matrix with columns L0–L2.
+the matrix with columns `L0 clean`, `L0`, `L1 clean`, `L1` and `L2` (L2 runs injected only: spec part 06, *Higher levels*).
 
 **Decisions:** 2 (`pytest platform/dev/tests -k ladder`), 6, 10, 11.
 
@@ -346,7 +346,7 @@ EOF
 rm -rf platform/promptfoo-evals/reports platform/promptfoo-evals/.promptfoo
 ```
 
-  Expected: `token hits: 0`; columns L0, L1 and L2; utility tests pass at L2 as at L1.
+  Expected: `token hits: 0`; columns `L0 clean`, `L0`, `L1 clean`, `L1`, `L2`; utility tests pass at L2 as at L1.
 - [ ] **Step 10: Commit the results.**
 
 ```bash

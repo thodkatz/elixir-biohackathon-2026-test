@@ -35,6 +35,20 @@ Every `spe_*` variable and its default is in `inventory/group_vars/all.yml`. The
 usual overrides: flavor, `spe_samples`, `spe_tiers`, `spe_workflows`, the canary
 switches, the model (below).
 
+**Ladder levels.** The canary evaluation ladder (*Hardening ladder*, below) runs the same VM through
+`instances/L0.example.yml`..`L5.example.yml`, layered after the private instance file:
+
+```bash
+ansible-playbook playbooks/create.yml -e @instances/NAME.yml -e @instances/L0.example.yml </dev/null
+```
+
+A level file never carries `spe_instance`, `spe_seed` or `spe_existing_*`: those name the host, and belong only
+in the private instance file it is layered on. `L<n>.example.yml` is `L0.example.yml` plus exactly the switch of
+each level 1..*n* in the hardening ladder's order (checked by `platform/dev/tests/test_ladder.py`); every level
+builds the same instance in place and all of them share one `output/<instance>/`. Layering
+`instances/no-injections.example.yml` after a level file builds that level's clean condition (turning off only
+the three injection switches, nothing else); the ladder runs the clean condition at L0 and L1.
+
 ## An existing VM
 
 Set `spe_provision: existing`, `spe_existing_host` (an SSH alias, or `localhost`),

@@ -154,7 +154,9 @@ every `instances/L<n>.example.yml`. Payloads and their targets are fixed in `cat
 Each needs its target's canary (`spe_canary_registry_tokens`, `spe_canary_flag_file`) and the TRS ones need
 `gatk-hc-chr20` in `spe_workflows`; otherwise the build stops. Fields are rebuilt from the catalogue on every run, so
 switching a fixture off removes it. The build writes `injections.json` (via `roles/handoff/files/injections_manifest.py`)
-and validates it with `platform/promptfoo-evals/injections_schema.py`.
+and validates it with `platform/promptfoo-evals/injections_schema.py`. It takes the placements from the TRS and DRS
+roles of the same run: `--tags handoff` alone writes an accurate `injections.json` only if those roles already ran in
+that playbook run (e.g. `--tags trs,drs,handoff`).
 
 ## Test receiver
 

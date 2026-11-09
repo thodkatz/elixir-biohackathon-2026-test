@@ -160,11 +160,36 @@ payload whose SHA-256 differs from the committed file. The handoff role runs it 
 reports/L<n> > ../../docs/results/<model>/L<n>.json` keeps only labels and counts (no answer, reason or
 token), so the raw reports can be deleted after each level; `python3 matrix.py render
 ../../docs/results/<model>/L*.json > ../../docs/results/canary-ladder-<model>.md` writes the matrix: one row per
-test, one column per level, failures per metric over the repeats, and the controls result per level. A run without
-injections (`hardening.json` `injections: false`: the clean condition, spec part 06 *Clean and injected
-runs*) is its own column, `L<n> clean`, just before the injected run of that level. It refuses
-counts from two models or two runs of one level, an empty `controls.json` or `agent.json`, a test without a
-`group`, and a `metric:` other than the six above (only those assertions carry one).
+test, one column per level, failures per metric over the repeats, and the controls result per level. A clean run
+(`hardening.json` `injections: false`, spec part 06 *Clean and injected runs*) is its own column, `L<n> clean`,
+just before `L<n>`; counts carry the start time, the canary digest and the planted payloads' SHA-256 (from
+`run.json` and `injections.json`, which `run.sh` files). `render` refuses counts from two models, two runs of one
+level and condition, an empty `controls.json` or `agent.json`, a test without a `group`, a `metric:` other than
+the six above (only those assertions carry one), a level whose clean and injected runs were built with different
+canaries, and one fixture id with two payloads.
+
+## One ladder run (`run.sh`)
+
+`./run.sh <hand-off dir> <repeat>` runs the controls suite, then — only if every probe agrees with the level in
+`hardening.json` — the whole agent suite, uncached, repeated `<repeat>` times (5 at L0 and the ladder's last
+level, 3 between). It takes no other argument: the build decides what runs, never the caller, so a filtered or
+partial run is never filed as a whole condition.
+
+The build sets the condition: the level file alone (e.g. `instances/denbi-agui-01.yml` with an `L<n>.example.yml`
+import) makes it `injected`; with `instances/no-injections.example.yml` layered after it (L0 and L1 only) it is
+`clean`. `run.sh` refuses, before any model call:
+
+| Exit | When |
+|---|---|
+| 2 | bad usage (wrong argument count, a non-positive-integer repeat, any extra argument), or a stale or malformed hand-off (`controls_asserts.py check-handoff`, or the build is a mix of injections on and off, or disagrees with its own condition — `handoff.condition`) |
+| 3 | a controls probe disagrees with the level in `hardening.json` (`controls_asserts.py gate`): no agent run follows |
+| 4 | `eval:agent` wrote no `agent.json` |
+
+On success it files `hardening.json`, `controls.json`, `agent.json`, `run.json` (`{started, canaries_sha256}`,
+the start time and `handoff.canaries_digest` of this build) and, when injected, `injections.json` under
+`reports/L<level>/` (`reports/L<level>-clean/` when clean): every level of one VM shares one hand-off directory,
+so the instance name alone cannot tell the runs apart. `eval:agent` on de.NBI needs no OK (`AGENTS.md`, *Setup*);
+the same call on Anthropic is paid and does.
 
 ## Without a model
 

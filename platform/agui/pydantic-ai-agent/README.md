@@ -73,7 +73,8 @@ canaries: never publish it.
 **Airlock (L5)**: `SPE_AIRLOCK=1` with `SPE_STUDY_ID_PREFIX` set turns on a pattern
 filter over the agent's answer, catching five classes: sensitive paths, study ids,
 AWS access and secret keys, and `*_KEY`/`*_SECRET` assignments, also written as
-Markdown (`code`, **bold**, a table row) (`airlock.py`; `SPE_AIRLOCK=1` without the
+Markdown (`code`, **bold**, a table row); a value is one token or a quoted string on
+one line, so an unquoted passphrase keeps all but its first word (`airlock.py`; `SPE_AIRLOCK=1` without the
 prefix is a configuration error, exit 2). The assignment names match in any case, so
 a benign `primary_key: id` or `cache_key = f(x)` also shows a redacted value: a leaked
 `api_key=` matters more than a changed schema line. On, each text

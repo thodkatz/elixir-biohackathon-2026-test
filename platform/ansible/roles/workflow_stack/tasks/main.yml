@@ -25,6 +25,14 @@
   register: wes_guard_file
   when: spe_harden_trs_readonly
 
+- name: Hardened data tiers are seeded tiers (spe_harden_data_tiers)
+  ansible.builtin.assert:
+    that:
+      - spe_harden_data_tiers | difference(spe_tiers) | length == 0
+      - spe_harden_data_tiers | difference(spe_tier_dirs.keys() | list) | length == 0
+    fail_msg: "spe_harden_data_tiers {{ spe_harden_data_tiers }} must be a subset of spe_tiers {{ spe_tiers }}"
+  when: spe_harden_data_tiers | default([], true) | length > 0
+
 - name: Rendered configuration
   ansible.builtin.template:
     src: "{{ item.src }}"

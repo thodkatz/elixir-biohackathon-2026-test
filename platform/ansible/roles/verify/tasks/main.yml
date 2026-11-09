@@ -30,7 +30,7 @@
       - --workflow-url
       - "{{ (verify_workflows | selectattr('id', 'equalto', 'wes-drs-smoke') | first).workflow_url }}"
       - --drs-uri
-      - "{{ (verify_inventory | selectattr('path', 'equalto', 'PROVENANCE.md') | first).drs_uri }}"
+      - "{{ ((verify_inventory | selectattr('tier', 'in', spe_harden_data_tiers) | list) if spe_harden_data_tiers else (verify_inventory | selectattr('path', 'equalto', 'PROVENANCE.md') | list)) | map(attribute='drs_uri') | first }}"
   register: smoke
   changed_when: false
   when:

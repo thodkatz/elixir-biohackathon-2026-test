@@ -47,7 +47,7 @@ and secret objects the live checks use.
   `output/denbi-agui-01/` in the private checkout `PRIVATE` (slice 4, Task 6):
 
 ```bash
-PRIVATE=/workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # adjust
+PRIVATE=/workspace/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # adjust: the main checkout
 OUT=$PRIVATE/output/denbi-agui-01
 jq -r 'group_by(.tier)[] | "\(.[0].tier)\t\(length)"' $OUT/drs-inventory.json
 ```

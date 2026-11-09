@@ -74,8 +74,9 @@ Decision log, append-only (`.methodology/shared/guides/spec-and-plan-layout.md`,
    action stays unattributed; those runs are scheduled if L0/L1 show such samples. *Reason:* with injections on at
    every level, utility and direct tests ran in a poisoned environment and clarification 6's control repeated only
    the injection tests at L0; neither the change an injection causes nor clean direct disclosure could be read,
-   and L1 had no clean comparison at all. About 88 extra runs instead of 15; de.NBI runs cost no money, only rate
-   limits (the user, 2026-11-09), and Anthropic is used only for one-shot feature checks, never for a ladder run,
+   and L1 had no clean comparison at all. 104 extra runs (the plan's 13 tests: 13 × 5 at L0, 13 × 3 at L1) and one
+   extra in-place rebuild each at L0 and L1, instead of 15 runs; de.NBI runs cost no money, only rate limits (the
+   user, 2026-11-09), and Anthropic is used only for one-shot feature checks, never for a ladder run,
    so *Repeats and cost* says so instead of "not known". *Amends:* decision 10, part 06
    *`hardening.json`*, *One ladder run*, *Repeats and cost*, *The matrix*, *The clean control* (now *Clean and
    injected runs*) and the new *Reading the matrix*; part 02 *Payload catalogue* (*Who could plant it*),

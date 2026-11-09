@@ -764,12 +764,13 @@ SSH attempt at a time; if one fails, stop and check the key path before trying a
 uv run --group dev python ../../dev/fake_agent.py --port 18100 --key fake-agent-key-0001
 ```
 
-- [ ] **Step 2: Run both suites against it, one repeat.** From `platform/promptfoo-evals/`, with `INSTANCE` the
-  L0 instance's `spe_instance` (the newest handoff names it):
+- [ ] **Step 2: Run both suites against it, one repeat.** From `platform/promptfoo-evals/`, against the L0
+  instance's hand-off, which lives only in the main checkout (slice 4, task 6):
 
 ```bash
 npm ci
-export SPE_HANDOFF_DIR=../ansible/output/$INSTANCE
+PRIVATE=/workspace/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # adjust: the main checkout
+export SPE_HANDOFF_DIR=$PRIVATE/output/denbi-agui-01
 export SPE_AGENT_URL=http://127.0.0.1:18100/agent SPE_AGENT_API_KEY=fake-agent-key-0001
 export SPE_LLM_API_KEY=dummy-llm-key-0001
 export PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_SHARING=1 PROMPTFOO_DISABLE_UPDATE=1
@@ -863,16 +864,16 @@ The spec's order at L0 is **clean first, then injected** (part 06, *Order*); the
   `restore_seconds`), two in-place rebuilds of the VM (no instance created) and the no-model controls suite before
   each.
 
-- [ ] **Step 2: Reach the agent.** From `platform/promptfoo-evals/`, with `INSTANCE` as in task 3:
+- [ ] **Step 2: Reach the agent.** From `platform/promptfoo-evals/`:
 
 ```bash
-grep agui_tunnel ../ansible/output/$INSTANCE/hosts.yml   # the ssh -N -L … command; run it in its own terminal, once
-export SPE_HANDOFF_DIR=../ansible/output/$INSTANCE
+PRIVATE=/workspace/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # the main checkout, as in slice 4, task 6
+export SPE_HANDOFF_DIR=$PRIVATE/output/denbi-agui-01   # the hand-off lives only in the main checkout, not this worktree
+grep agui_tunnel $SPE_HANDOFF_DIR/hosts.yml   # the ssh -N -L … command; run it in its own terminal, once
 export SPE_AGENT_URL=http://127.0.0.1:8100/agent SPE_AGENT_API_KEY_FILE=$SPE_HANDOFF_DIR/agent_api_key
 export SPE_LLM_API_KEY_FILE=/path/to/llm_key     # 0600, only the de.NBI key (DENBI_LLM_API_KEY)
 export PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_SHARING=1 PROMPTFOO_DISABLE_UPDATE=1
 export PROMPTFOO_CONFIG_DIR=$PWD/.promptfoo
-PRIVATE=/workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # as in slice 4, task 6
 build() {  # rebuild the VM in place at L0; "$@" adds overlays
   (cd ../ansible && ansible-playbook playbooks/create.yml -e @$PRIVATE/instances/denbi-agui-01.yml \
     -e @instances/L0.example.yml "$@" -e spe_output_root=$PRIVATE/output </dev/null) &&
@@ -888,7 +889,7 @@ build() {  # rebuild the VM in place at L0; "$@" adds overlays
 ```bash
 build -e @instances/no-injections.example.yml   # expect level 0, injections false, commit = this branch's HEAD
 jq '.injections' $SPE_HANDOFF_DIR/injections.json  # []
-time ./run.sh ../ansible/output/$INSTANCE 5; echo "exit $?"
+time ./run.sh "$SPE_HANDOFF_DIR" 5; echo "exit $?"
 jq '.results.stats' reports/L0-clean/agent.json   # 65 results, errors 0
 mkdir -p ../../docs/results/qwen3.8-27b
 python3 matrix.py counts reports/L0-clean > ../../docs/results/qwen3.8-27b/L0-clean.json
@@ -899,21 +900,21 @@ python3 matrix.py counts reports/L0-clean > ../../docs/results/qwen3.8-27b/L0-cl
   target file whose canary the clean build lacks: spec part 02, *Matched builds*); fix the build, never the check.
   A non-zero exit before the agent suite otherwise means the controls disagree with L0: record which probe, stop,
   and fix the instance (decision 10). Provider `error`s (a state diff that failed, a run timeout) are not results:
-  find the cause, and re-run only after asking again.
+  find the cause, fix it, and run the condition again.
 
 - [ ] **Step 4: The injected run.** Rebuild L0 as the level file says, then the same suite:
 
 ```bash
 build                                              # expect level 0, injections true
 jq '[.injections[].id]' $SPE_HANDOFF_DIR/injections.json   # the three fixtures
-time ./run.sh ../ansible/output/$INSTANCE 5; echo "exit $?"
+time ./run.sh "$SPE_HANDOFF_DIR" 5; echo "exit $?"
 jq '.results.stats' reports/L0/agent.json          # 65 results, errors 0
 python3 matrix.py counts reports/L0 > ../../docs/results/qwen3.8-27b/L0.json
 python3 matrix.py render ../../docs/results/qwen3.8-27b/L*.json > ../../docs/results/canary-ladder-qwen3.8-27b.md
 ```
 
   `render` refusing with "different canaries: L0" means the two builds are not a matched pair (another seed or
-  canary switch in one of them): find which, rebuild that condition and run it again, after asking. The VM ends at
+  canary switch in one of them): find which, rebuild that condition and run it again. The VM ends at
   L0 injected, with a fresh snapshot, so slice 6 starts from L0.
 
 - [ ] **Step 5: Read the matrix** (spec part 06, *Reading the matrix*) and record for the handoff: the utility pass

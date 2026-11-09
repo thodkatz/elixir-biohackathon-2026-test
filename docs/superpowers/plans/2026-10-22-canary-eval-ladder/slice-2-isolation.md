@@ -9,7 +9,7 @@ live de.NBI VM, and the restore time is measured there.
 **Implements** (spec [`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/`](../../specs/2026-10-22-canary-eval-ladder-design/README.md)):
 
 - [05](../../specs/2026-10-22-canary-eval-ladder-design/05-isolation.md), *What others do, and what we do*,
-  *Mutable state*, *Hooks* — decision **9**, amended by clarifications 5 (containers recreated, not restarted) and 7
+  *Mutable state*, *Hooks* — decision **9**, amended by clarifications 5 (containers recreated, not restarted) and 8
   (task 1).
 - [03](../../specs/2026-10-22-canary-eval-ladder-design/03-controls-suite.md), *Probes*, `isolation` row: the
   restore it checks (the probe itself is slice 3).
@@ -46,7 +46,7 @@ runs `docker exec` or `docker cp` on these services), so a recreated container i
 ### Task 1: Verify the promptfoo hooks and the volumes
 
 **Files:** Create: `docs/knowledge/promptfoo-extension-hooks.md`. Modify: `docs/knowledge/README.md` (index line),
-`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/clarifications.md` (entry 7),
+`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/clarifications.md` (entry 8),
 `.../05-isolation.md` (*Hooks*), `.../README.md` (decision 9 row, *Latest clarification*).
 
 **Interfaces:** Consumes: promptfoo 0.124.1 (`node_modules/promptfoo/dist/src/`), `handoff.vm_argv(dir)`.
@@ -166,12 +166,12 @@ the container names match, every container to recreate has a Compose working dir
 sandbox's `/opt/agent` from the clone are `rw=false`). **If false:** add each missing volume to `VOLUMES` (task 2) and to its `test_volumes_match_the_compose_files`
 expectation, and record it as a ruling in the handoff; a renamed container goes into `CONTAINERS`.
 
-- [ ] **Step 5: Clarification 7, folded into part 05 (only if step 2 showed assertions before `afterEach`)**
+- [ ] **Step 5: Clarification 8, folded into part 05 (only if step 2 showed assertions before `afterEach`)**
 
 Append to `clarifications.md`:
 
 ```markdown
-7. **The state diff is taken by the agent provider after the run** (2026-10-22; slice 2). promptfoo 0.124.1 runs
+8. **The state diff is taken by the agent provider after the run** (2026-10-22; slice 2). promptfoo 0.124.1 runs
    the assertions before `afterEach` (`docs/knowledge/promptfoo-extension-hooks.md`), so a diff recorded there
    never reaches `injection.followed`. The `beforeEach` hook writes the baseline to the file named by
    `SPE_EVAL_BASELINE` (default `platform/promptfoo-evals/reports/.baseline.json`); the agent provider reads it
@@ -192,19 +192,19 @@ In `05-isolation.md`, *Hooks*, replace the `beforeEach` and `afterEach` bullets 
   aborts the eval: no test runs on unrestored state.
 - the agent provider, after its run: the state diff against that baseline, in the response's
   `metadata.state_diff`, for `injection.followed` ([04](04-agent-suite-and-scoring.md)) and for the report ("the
-  agent registered a workflow"). promptfoo runs the assertions before `afterEach` (clarification 7).
+  agent registered a workflow"). promptfoo runs the assertions before `afterEach` (clarification 8).
 - `afterEach`: logs the state diff's counts; it changes nothing.
 ```
 
 In the spec `README.md`: decision 9's row reads "…restored by a `beforeEach` hook; the agent provider records the
-state diff after the run (clarification 7)", and the status line reads `**Latest clarification:** 7.`
+state diff after the run (clarification 8)", and the status line reads `**Latest clarification:** 8.`
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add docs/knowledge/promptfoo-extension-hooks.md docs/knowledge/README.md \
   docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/{clarifications.md,05-isolation.md,README.md}
-git commit -s -m "Verify promptfoo hook order; the provider takes the state diff (clarification 7)"
+git commit -s -m "Verify promptfoo hook order; the provider takes the state diff (clarification 8)"
 ```
 
 ### Task 2: Snapshot and restore
@@ -711,7 +711,7 @@ sink_requests_added: [{method, host, path, body}] | None}` with `descriptors: {p
 provider's entry point, slice 5); `record_restore_seconds(dir, seconds) -> float` (median);
 `extension_hook(hook_name, context) -> None`; CLI `python3 isolation.py snapshot|exists|restore|sh`.
 
-**Decisions:** 9 as amended by clarification 7: `test_before_each_restores_then_writes_baseline_and_restore_seconds`,
+**Decisions:** 9 as amended by clarification 8: `test_before_each_restores_then_writes_baseline_and_restore_seconds`,
 `test_baseline_and_state_diff`; the API reading on recorded JSON: `test_state_script_against_recorded_api`; Review
 Focus 3 (a restore that fails must stop the run): `test_before_each_restore_failure_raises_and_leaves_no_baseline`;
 the diff never silently empty: `test_state_read_failure_is_an_error`, `test_a_shrunk_receiver_log_is_an_error`;

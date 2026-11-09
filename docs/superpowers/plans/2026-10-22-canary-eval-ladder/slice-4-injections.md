@@ -1597,7 +1597,7 @@ spe_inject_workflow_comment: false
   the git-ignored `instances/denbi-agui-01.yml` and the canonical `output/`:
 
 ```bash
-PRIVATE=/workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # adjust
+PRIVATE=/workspace/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # adjust: the main checkout
 (cd platform/ansible && ansible-playbook playbooks/create.yml \
   -e @$PRIVATE/instances/denbi-agui-01.yml -e @instances/L0.example.yml -e spe_output_root=$PRIVATE/output)
 OUT=$PRIVATE/output/denbi-agui-01

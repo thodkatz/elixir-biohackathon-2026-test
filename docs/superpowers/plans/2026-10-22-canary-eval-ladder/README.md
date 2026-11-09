@@ -134,14 +134,14 @@ N = 9. Slices are sequential; each starts from `main` after the previous one mer
 | n/N | Branch | Tasks | Delivers | Reviewer checks | File | Status |
 |---|---|---|---|---|---|---|
 | 1/9 | `impl/canary-eval-ladder-1-scoring` | 1–5 | the six metrics, the manifest schema, the matrix, the catalogue lint; decisions 7 (lint), 8, 11. ~1,550 lines, half of them tests: over the size target, kept whole because every module is offline and independent | `uv run --group dev pytest -q` in `platform/promptfoo-evals` | [slice-1-scoring.md](slice-1-scoring.md) | merged #3 (`abdf63f`) |
-| 2/9 | `impl/canary-eval-ladder-2-isolation` | 1–4 | snapshot, restore, state diff and hooks; restore time measured; decision 9 | offline tests; the measured restore time in the handoff | [slice-2-isolation.md](slice-2-isolation.md) | planned |
-| 3/9 | `impl/canary-eval-ladder-3-controls` | 1–5 | controls suite, `hardening.json`, `run.sh`, the run labels in `handoff.py` and `matrix.py` (clean and injected pairs); decisions 1 (probes), 5, 6, 10 | offline provider, run script and matrix tests; `npm run eval:controls` on the de.NBI VM: all `open` | [slice-3-controls.md](slice-3-controls.md) | planned |
-| 4/9 | `impl/canary-eval-ladder-4-injections` | 1–6 | three payloads planted, `injections.json`, the test receiver, `L0.example.yml` and the clean overlay; decisions 2 (test), 3, 4, 8 (receiver) | `pytest platform/dev/tests -k "injection or ladder or eval_sink"` | [slice-4-injections.md](slice-4-injections.md) | planned |
-| 5/9 | `impl/canary-eval-ladder-5-agent-suite` | 1–4 | `agent.yaml` and the first catalogue; the first L0 runs, clean and injected, and their matrix; decision 7 | the lint; the committed matrix at L0 (`L0 clean`, `L0`) | [slice-5-agent-suite.md](slice-5-agent-suite.md) | planned |
-| 6/9 | `impl/canary-eval-ladder-6-l1` | 1–5 | `spe_harden_trs_readonly`; L1 runs, injected and clean | controls suite at L1; `L1` and `L1 clean` columns | [slice-6-l1.md](slice-6-l1.md) | planned |
-| 7/9 | `impl/canary-eval-ladder-7-l2` | 1–3 | `spe_harden_data_tiers`; L2 run | controls suite at L2; L2 column | [slice-7-l2.md](slice-7-l2.md) | planned |
-| 8/9 | `impl/canary-eval-ladder-8-l3` | 1–3 | `spe_harden_egress`; L3 run | controls suite at L3; L3 column | [slice-8-l3.md](slice-8-l3.md) | planned |
-| 9/9 | `impl/canary-eval-ladder-9-airlock` | 1–3 | the L5 airlock module and switch; decision 12 | airlock unit tests; `airlock` probe `closed` with the switch on | [slice-9-airlock.md](slice-9-airlock.md) | planned |
+| 2/9 | `impl/canary-eval-ladder-2-isolation` | 1–4 | snapshot, restore, state diff and hooks; restore time measured; decision 9. ~980 lines in the plan's code blocks, about half tests | offline tests; the measured restore time in the handoff | [slice-2-isolation.md](slice-2-isolation.md) | planned |
+| 3/9 | `impl/canary-eval-ladder-3-controls` | 1–5 | controls suite, `hardening.json`, `run.sh`, the run labels in `handoff.py` and `matrix.py` (clean and injected pairs); decisions 1 (probes), 5, 6, 10. ~1,600 lines, about half tests: over the target, kept whole because the probes, `run.sh` and the run labels share one contract (`hardening.json` and the hand-off) that one controls run on de.NBI checks; split task 5's `handoff.py`/`matrix.py` half off if the code alone passes 3,000 | offline provider, run script and matrix tests; `npm run eval:controls` on the de.NBI VM: all `open` | [slice-3-controls.md](slice-3-controls.md) | planned |
+| 4/9 | `impl/canary-eval-ladder-4-injections` | 1–6 | three payloads planted, `injections.json`, the test receiver, `L0.example.yml` and the clean overlay; decisions 2 (test), 3, 4, 8 (receiver). ~1,180 lines, about half tests and golden renders: over the target, kept whole because the payloads, their manifest, the receiver and the clean overlay are one L0 build, checked together by one rebuild of the de.NBI VM | `pytest platform/dev/tests -k "injection or ladder or eval_sink"` | [slice-4-injections.md](slice-4-injections.md) | planned |
+| 5/9 | `impl/canary-eval-ladder-5-agent-suite` | 1–4 | `agent.yaml` and the first catalogue; the first L0 runs, clean and injected, and their matrix; decision 7. ~620 lines | the lint; the committed matrix at L0 (`L0 clean`, `L0`) | [slice-5-agent-suite.md](slice-5-agent-suite.md) | planned |
+| 6/9 | `impl/canary-eval-ladder-6-l1` | 1–5 | `spe_harden_trs_readonly`; L1 runs, injected and clean. ~560 lines | controls suite at L1; `L1` and `L1 clean` columns | [slice-6-l1.md](slice-6-l1.md) | planned |
+| 7/9 | `impl/canary-eval-ladder-7-l2` | 1–3 | `spe_harden_data_tiers`; L2 run. ~170 lines | controls suite at L2; L2 column | [slice-7-l2.md](slice-7-l2.md) | planned |
+| 8/9 | `impl/canary-eval-ladder-8-l3` | 1–3 | `spe_harden_egress`; L3 run. ~270 lines | controls suite at L3; L3 column | [slice-8-l3.md](slice-8-l3.md) | planned |
+| 9/9 | `impl/canary-eval-ladder-9-airlock` | 1–3 | the L5 airlock module and switch; decision 12. ~410 lines | airlock unit tests; `airlock` probe `closed` with the switch on | [slice-9-airlock.md](slice-9-airlock.md) | planned |
 
 L4 (the typed tool server) has its own spec ([out-of-scope](../../specs/2026-10-22-canary-eval-ladder-design/out-of-scope.md)).
 `L4.example.yml`, `L5.example.yml` and the L4/L5 runs belong to that spec's plan, which slice 9 hands them to:
@@ -166,7 +166,7 @@ The input classes the spec implies that most likely bite a user; each has its te
 
 ## Proposed spec clarifications
 
-- Slice 2: the state diff is taken by the agent provider after the run, because promptfoo runs assertions
+- Slice 2 (clarification 8): the state diff is taken by the agent provider after the run, because promptfoo runs assertions
   before `afterEach`; `afterEach` only logs it (amends decision 9, part 05 *Hooks*).
 - Slice 4: payloads target `wes-drs-smoke` if `gatk-hc-chr20` cannot be installed on de.NBI (part 02), only if
   slice 4's task 1 finds that.
@@ -194,7 +194,9 @@ Plan-wide decisions taken after the plan merged; a slice's own rulings go in its
   to render `spe_frontend_dir/docker-compose.yml` from a template again, which reverses part of #35.
 - **2026-11-09, runs on de.NBI need no OK** — the user's standing OK of 2026-11-09 (`AGENTS.md`, *Setup*).
   *Decision:* the agent-suite steps of slices 5–8 that stopped to ask now just run, once the controls suite
-  agrees. *Cost if wrong:* an unattended session spends de.NBI quota.
+  agrees; a run that fails is fixed and run again without asking. *Why:* de.NBI runs cost no money, only rate
+  limits, and every ladder run is on de.NBI; a stop before each run would hold the unattended loop for an answer
+  the user has given once for all. *Cost if wrong:* an unattended session spends de.NBI quota.
 - **2026-11-09, `biohackathon` knowledge 0015 folded: matched clean and injected runs at L0 and L1** (spec
   clarification 7). *Decision:* at L0 and L1 the whole suite runs in two conditions, `injected` (the level file)
   and `clean` (plus `instances/no-injections.example.yml`, created and tested in slice 4, task 6); L2–L5 run
@@ -203,12 +205,13 @@ Plan-wide decisions taken after the plan merged; a slice's own rulings go in its
   slice 5, tasks 3 and 4 (the dry run's labels; both L0 runs, clean first); slice 6, task 5 (both L1 runs,
   injected first); slices 7 and 8, the expected columns. *Why:* 0015, accepted by the user; clarification 6's
   control (the injection tests only, at L0 only) could not show clean direct disclosure or any L1 comparison.
-  *Cost if wrong:* about 88 more de.NBI runs (rate, not money) and two more in-place rebuilds per level for L0
-  and L1; slice 3 grows by about 400 lines (half of them tests): if that passes the hard size limit, task 5's
+  *Cost if wrong:* 104 more de.NBI runs (the catalogue's 13 tests: 13 × 5 at L0, 13 × 3 at L1; rate, not
+  money) and one extra in-place rebuild each at L0 and L1; slice 3 grows by about 400 lines (half of them tests): if that passes the hard size limit, task 5's
   `handoff.py`/`matrix.py` half becomes its own PR before `run.sh`.
-- **2026-11-09, 0015's one-fixture runs deferred — user's call 2026-11-09:** exposure-fingerprint attribution
-  covers most of it; *cost if wrong:* a leak with two exposed payloads stays unattributed until those runs are
-  scheduled (`BACKLOG.md`). No test carries a `surface` or fixture field, and the catalogue lint is unchanged.
+- **2026-11-09, 0015's one-fixture runs deferred.** *Decision:* no run plants one fixture at a time; no test
+  carries a `surface` or fixture field, and the catalogue lint is unchanged (`BACKLOG.md` holds the runs). *Why:*
+  the user's call, 2026-11-09: exposure-fingerprint attribution (`injection.followed`) covers most of it.
+  *Cost if wrong:* a leak with two exposed payloads stays unattributed until those runs are scheduled.
 - **2026-11-09, `hardening.json` keeps `injections` as true, false or `"mixed"`.** *Decision:* not the list of
   planted fixture ids 0015's labels suggested. *Why:* with one-fixture runs deferred, only all-on and all-off are
   ladder runs, and the merged `check_hardening`, `matrix.counts` and the `L<n> clean` column already handle that;
@@ -237,6 +240,20 @@ Plan-wide decisions taken after the plan merged; a slice's own rulings go in its
   argument is a usage error (it took `--filter-metadata group=injection` for clarification 6's control). *Why:*
   both conditions run the whole suite, and a filtered run would be filed and rendered as a whole condition.
   *Cost if wrong:* debugging one test needs `npm run eval:agent -- --filter-…` by hand, outside the ladder.
+
+- **2026-11-09, slice 2's clarification is 8.** *Decision:* slice 2, task 1 adds the state-diff clarification
+  as entry 8 (task text, commit message, the spec README's *Latest clarification*), not 7. *Why:* this plan
+  refresh (#59) took 7 for 0015; slices 3, 4 and 6 number theirs from *Latest clarification*, so none shifts.
+  *Cost if wrong:* a duplicate entry number in `clarifications.md`, caught by slice 2's review.
+- **2026-11-09, `handoff.read_hosts` reads the `frontends` list** (`b210508`). *Decision:* `read_hosts` parses
+  one list of scalars (`key:` then `- item` lines at column 0, or `[]`), and `conftest.hosts()` writes
+  `"frontends": ["agui"]` in place of the flat `frontend`. `hardening.json` keeps `frontend` as a string
+  (`spe_frontends | join(',')`, slice 3). *Why:* since #39 the handoff role writes `frontends: {{ spe_frontends }}`,
+  which `to_nice_yaml` renders as a block list; `read_hosts` refused it as nested, so every real hand-off failed
+  in `api_host`, `vm_argv` and `load_hardening`. No plan task builds `hosts.yml` other than through
+  `conftest.hosts()`. *Cost if wrong:* a later hand-off key that is a mapping or a nested list is still refused
+  (a configuration error, never a pass); `read_hosts` then needs a real YAML parser, which the standard library
+  lacks.
 
 ## Handoffs
 

@@ -1013,6 +1013,11 @@ def test_injections_all_on(tmp_path):
     on = {k: True for k in ("spe_inject_trs_description", "spe_inject_drs_description",
                             "spe_inject_workflow_comment")}
     assert build(tmp_path, on)["injections"] is True
+
+
+def test_injections_mixed(tmp_path):
+    # One switch on, the others off: neither ladder condition; check_hardening refuses it (spec part 06).
+    assert build(tmp_path, {"spe_inject_trs_description": True})["injections"] == "mixed"
 ```
 
 - [ ] **Step 2: Run, expect FAIL**

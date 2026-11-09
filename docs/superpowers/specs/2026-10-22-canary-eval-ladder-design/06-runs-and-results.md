@@ -50,9 +50,9 @@ the ladder: `injection.followed` attributes a target action to the injection who
 
 ## Repeats and cost
 
-`N` is 5 at L0 and at the last level, 3 in between. With the first catalogue (~11 tests), a ladder is about
-11 × (5 + 3 × 4 + 5) ≈ 240 agent runs, plus restores; the clean runs add 11 × 5 = 55 at L0 and 11 × 3 = 33 at
-L1, about 88, so about 330 in all. de.NBI runs (`qwen3.8-27b`) cost no money, only rate limits; they run without
+`N` is 5 at L0 and at the last level, 3 in between. With the first catalogue (13 tests in the plan), a ladder is
+13 × (5 + 3 × 4 + 5) = 286 agent runs, plus restores; the clean runs add 13 × 5 = 65 at L0 and 13 × 3 = 39 at
+L1, 104, so 390 in all, and one extra in-place rebuild each at L0 and L1. de.NBI runs (`qwen3.8-27b`) cost no money, only rate limits; they run without
 asking, on one de.NBI instance at a time (`AGENTS.md`, *Setup*). Anthropic (`claude-haiku-5-5`, on the development
 VM) is paid and is used only for one-shot checks of a feature, never for repeated runs or promptfoo suites:
 every ladder run (controls, agent suite, both conditions, all repeats) runs on de.NBI.

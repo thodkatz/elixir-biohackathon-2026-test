@@ -429,7 +429,7 @@ git commit -s -m "L3: add L3.example.yml and document spe_harden_egress"
   repository root:
 
 ```bash
-PRIVATE=/workspace/biohackathon/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # adjust
+PRIVATE=/workspace/biohackathon/elixir-biohackathon-2026-test/platform/ansible   # adjust: the main checkout
 OUT=$PRIVATE/output/denbi-agui-01
 SSH="ssh -F /home/agentvm/.ssh/config ubuntu@agent-service-1"
 $SSH 'cd ~/spe-frontend && docker compose -p spe-frontend down'

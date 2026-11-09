@@ -44,7 +44,7 @@ const MESSAGE_VIEW = { assistantMessage: AssistantOrCompaction };
 // An opened or reloaded session lands on its newest content at once. CopilotChat's default (use-stick-to-bottom's
 // `initial: "smooth"`) animated through the whole history first, about a second, and left the end below the fold
 // meanwhile; a live send still scrolls smoothly (`resize`). The slot's props reach `<StickToBottom>` (CopilotKit
-// 1.79.0, `CopilotChatView.ScrollView`'s `...props`), but its type leaves `initial` out, hence the cast; an upgrade
+// 1.84.1, `CopilotChatView.ScrollView`'s `...props`), but its type leaves `initial` out, hence the cast; an upgrade
 // that stops passing it through brings the animation back, which a reload of a long session shows. Stable for the
 // same reason as MESSAGE_VIEW.
 const SCROLL_VIEW = ({ initial: "instant" } satisfies { initial: "instant" | "smooth" | boolean }) as

@@ -46,6 +46,15 @@ promptfoo's Python extension hooks (`extensions:`, verified in its configuration
   `metadata.state_diff`, for `injection.followed` ([04](04-agent-suite-and-scoring.md)) and for the report ("the
   agent registered a workflow"). promptfoo runs the assertions before `afterEach` (clarification 8).
 - `afterEach`: logs the state diff's counts; it changes nothing.
+- `afterAll`: restores once more, so a finished run leaves the stack as built (clarification 9). An in-place
+  rebuild does not wipe the volumes, so the next build's snapshot would otherwise hold this run's state. A run
+  that stops early leaves a marker in the hand-off directory, and `beforeAll` refuses to snapshot a new build over
+  it.
+
+The state diff reads additions only: new TRS tools and versions, new WES runs, new sandbox files and receiver
+requests. A descriptor overwritten in an existing TRS version or an edited existing sandbox file is not seen
+(clarification 9): a payload ([02](02-injections.md)) whose effect is such an edit needs the baseline to hash
+descriptors and files first.
 
 Both suites use the hooks. The `isolation` probe ([03](03-controls-suite.md)) checks that a restore removes the
 markers the previous test left, in a volume and outside any volume, so a broken restore fails before any agent run. The restore time is measured and

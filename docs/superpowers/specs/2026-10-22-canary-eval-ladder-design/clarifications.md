@@ -91,3 +91,12 @@ Decision log, append-only (`.methodology/shared/guides/spec-and-plan-layout.md`,
    covers `weskit-workflows` (WESkit's TRS workflow cache), and restores the sandbox volume from the snapshot
    rather than recreating it empty. *Reason:* verified hook order; the compose template has a volume the table
    missed. *Amends:* decision 9, part 05 *Hooks* and *Mutable state*. *Status:* folded.
+
+9. **A run ends with a restore; a dirty build is not snapshotted** (2026-11-09; slice 2, #60's review). Nothing
+   restored after the last test, and an in-place rebuild keeps the volumes, so the next condition's "fresh baseline
+   snapshot taken after the build" ([06](06-runs-and-results.md)) would hold the previous run's TRS tools and
+   sandbox files. `afterAll` restores to the build's snapshot; a marker in the hand-off directory, written once a
+   test has run and cleared by a full restore, makes `beforeAll` refuse a new build's snapshot while a previous
+   build's run is unrestored (an override exists for a stack known to be clean). The state diff reads additions
+   only, a known limit. *Reason:* review finding; part 06's clean snapshot needs it. *Amends:* part 05 *Hooks*.
+   *Status:* folded.

@@ -335,6 +335,45 @@ def test_reset_takes_a_symlinked_compose_file_down_through_its_link(pf, tmp_path
     assert {"name": "spe-frontend", "file": str(link)} in plan["projects"]
 
 
+def linked_frontend(c, tmp_path):
+    """The frontend's docker-compose.yml linked into the clone, as create.yml leaves it."""
+    c["paths"]["repo_dir"] = str(tmp_path / "srv" / "sperange")
+    created(c)
+    link = Path(c["projects"]["spe-frontend"])
+    instance_dir = Path(c["paths"]["repo_dir"]) / "platform" / "instance"
+    instance_dir.mkdir(parents=True)
+    (instance_dir / "compose.yml").write_text("services: {}\n")
+    link.unlink()
+    link.symlink_to(instance_dir / "compose.yml")
+    return link, instance_dir
+
+
+def test_reset_accepts_an_overlay_from_the_recorded_clone(pf, tmp_path):
+    # up.yml and spe-apply add -f <repo_dir>/platform/instance/compose.eval-sink.yml to spe-frontend.
+    c = reset_cfg(tmp_path)
+    link, instance_dir = linked_frontend(c, tmp_path)
+    overlay = instance_dir / "compose.eval-sink.yml"
+    overlay.write_text("services: {}\n")
+    host = running(c)
+    host.project_files["spe-frontend"] = {str(link), str(overlay)}
+    plan = pf.reset_plan(c, host)
+    assert plan["problems"] == []
+    assert {"name": "spe-frontend", "file": str(link)} in plan["projects"]
+
+
+def test_reset_refuses_an_overlay_shaped_file_from_another_directory(pf, tmp_path):
+    c = reset_cfg(tmp_path)
+    link, _ = linked_frontend(c, tmp_path)
+    other = tmp_path / "other" / "platform" / "instance" / "compose.eval-sink.yml"
+    other.parent.mkdir(parents=True)
+    other.write_text("services: {}\n")
+    host = running(c)
+    host.project_files["spe-frontend"] = {str(link), str(other)}
+    plan = pf.reset_plan(c, host)
+    assert any("spe-frontend" in p and str(other) in p for p in plan["problems"])
+    assert plan["projects"] == []
+
+
 def test_reset_with_compose_link_pointing_outside_owned_paths_is_refused(pf, tmp_path):
     c = reset_cfg(tmp_path)
     created(c)

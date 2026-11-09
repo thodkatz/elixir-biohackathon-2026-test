@@ -24,11 +24,15 @@ and every compose project must be recorded and built from its own file (an
 unrecorded one is skipped only when neither its file nor a container of it
 exists: a project added after the host was built, like spe-eval-sink). A
 project's file is the path given (a link is kept, so Compose reads the .env
-beside it); the checks use its resolved target.
+beside it); the checks use its resolved target. Besides that file, a project's
+containers may list only the overlays sandbox/tasks/up.yml and spe-apply pass
+with -f, platform/instance/compose.*.yml in the repository clone the manifest
+records (paths.repo_dir); any other config file is foreign and refuses the reset.
 """
 from __future__ import annotations
 
 import base64
+import fnmatch
 import json
 import os
 import shutil
@@ -246,6 +250,15 @@ def reset_plan(cfg: dict, host) -> dict:
         paths.append(real)
 
     owned = [os.path.realpath(p) for p in cfg["paths"].values() if not unsafe(p)]
+    # Overlays (compose.eval-sink.yml) live in the recorded clone's platform/instance/.
+    recorded_repo = recorded_paths.get("repo_dir")
+    overlay_dir = os.path.join(os.path.realpath(recorded_repo), "platform", "instance") if recorded_repo else None
+
+    def overlay(f: str) -> bool:
+        r = os.path.realpath(f)
+        return overlay_dir is not None and os.path.dirname(r) == overlay_dir \
+            and fnmatch.fnmatchcase(os.path.basename(r), "compose.*.yml")
+
     projects: list[dict] = []
     for name, file in sorted(cfg.get("projects", {}).items()):
         if name not in recorded_projects:
@@ -260,7 +273,7 @@ def reset_plan(cfg: dict, host) -> dict:
             problems.append(f"compose project {name}: file {file} lies outside this instance's paths")
             continue
         built_from = host.project_config_files(name)
-        foreign = sorted(f for f in built_from if os.path.realpath(f) != real)
+        foreign = sorted(f for f in built_from if os.path.realpath(f) != real and not overlay(f))
         if foreign:
             problems.append(f"compose project {name} has containers from {', '.join(foreign)}, not {file}")
             continue

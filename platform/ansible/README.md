@@ -42,7 +42,7 @@ switches, the model (below).
 ansible-playbook playbooks/create.yml -e @instances/NAME.yml -e @instances/L0.example.yml </dev/null
 ```
 
-A level file never carries `spe_instance`, `spe_seed` or `spe_existing_*`: those name the host, and belong only
+A level file never carries `spe_instance`, `spe_seed`, `spe_provision` or `spe_existing_*`: those name the host, and belong only
 in the private instance file it is layered on. `L<n>.example.yml` is `L0.example.yml` plus exactly the switch of
 each level 1..*n* in the hardening ladder's order (checked by `platform/dev/tests/test_ladder.py`); every level
 builds the same instance in place and all of them share one `output/<instance>/`. Layering

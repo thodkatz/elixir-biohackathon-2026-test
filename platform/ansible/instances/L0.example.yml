@@ -2,7 +2,7 @@
 # (spec docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/, parts 01 and 02).
 # A level file is an overlay: it carries no host, seed or instance name, so it is layered
 # on a private instance file that does, and every level rebuilds the same VM in place:
-#   ansible-playbook playbooks/create.yml -e @instances/denbi.yml -e @instances/L0.example.yml
+#   ansible-playbook playbooks/create.yml -e @instances/NAME.yml -e @instances/L0.example.yml
 # L<n>.example.yml is this file plus the switches of levels 1..n (platform/dev/tests/test_ladder.py).
 spe_workflows: [wes-drs-smoke, gatk-hc-chr20]   # the TRS fixtures live in gatk-hc-chr20 (installing needs no genomes)
 spe_frontends: [agui]                # the AG-UI agent only: the ladder scores through it, and Open WebUI

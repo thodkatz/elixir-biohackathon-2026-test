@@ -1,5 +1,5 @@
 # The clean condition (spec part 06): the level's build with no injection planted, everything else unchanged.
-#   ansible-playbook playbooks/create.yml -e @instances/denbi.yml -e @instances/L0.example.yml \
+#   ansible-playbook playbooks/create.yml -e @instances/NAME.yml -e @instances/L0.example.yml \
 #     -e @instances/no-injections.example.yml
 # hardening.json then has injections: false; run.sh runs the whole suite and files it under reports/L<n>-clean/.
 # The ladder runs it at L0 and L1 only. Nothing but these three switches (platform/dev/tests/test_ladder.py).

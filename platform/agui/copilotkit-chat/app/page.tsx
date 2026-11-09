@@ -162,10 +162,10 @@ function Chat() {
   // session is in it (its first run recorded), the URL names it.
   const applyList = useCallback((list: SessionMeta[]) => {
     if (!listOrder.accept(list)) return; // older than one already applied
-    // The list loads again: a failed refresh's error goes, any other stays.
+    // The list loads again: a failed list fetch's error (a refresh's, or a run end's) goes, any other stays.
     const failed = listError.current;
     listError.current = null;
-    if (failed !== null) setError((e) => afterListApplied(e, failed));
+    setError((e) => afterListApplied(e, failed));
     sessionsRef.current = list;
     setSessions(list);
     const { live: next, startNew } = listed(liveRef.current, new Set(list.map((s) => s.id)));

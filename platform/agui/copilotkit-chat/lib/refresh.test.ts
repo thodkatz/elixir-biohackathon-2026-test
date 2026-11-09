@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EMPTY, runStarted } from "./live-sessions.ts";
 import { POLL_MS, afterListApplied, needsPoll } from "./refresh.ts";
+import { LIST_FAILED } from "./run-watch.ts";
 import type { SessionMeta } from "./sessions.ts";
 
 const row = (id: string, running: boolean): SessionMeta => ({
@@ -33,4 +34,11 @@ test("a list applied clears the list's own error, and no other", () => {
   assert.equal(afterListApplied("“A”: scripted model failure", "Failed to fetch"), "“A”: scripted model failure");
   assert.equal(afterListApplied("Failed to fetch", null), "Failed to fetch");
   assert.equal(afterListApplied(null, "Failed to fetch"), null);
+});
+
+test("a list applied also clears a run end's failed list fetch, bare or with its session's title", () => {
+  assert.equal(afterListApplied(LIST_FAILED, null), null);
+  assert.equal(afterListApplied(`“A”: ${LIST_FAILED}`, null), null);
+  assert.equal(afterListApplied(`“A”: ${LIST_FAILED}`, "Failed to fetch"), null);
+  assert.equal(afterListApplied("“A”: this session could not be saved", null), "“A”: this session could not be saved");
 });

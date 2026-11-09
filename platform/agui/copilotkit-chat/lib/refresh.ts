@@ -4,6 +4,7 @@
 // shows none. Pure: no React, no clock.
 import { runningIds } from "./live-sessions.ts";
 import type { Live } from "./live-sessions.ts";
+import { LIST_FAILED } from "./run-watch.ts";
 import type { SessionMeta } from "./sessions.ts";
 
 export const POLL_MS = 2000;
@@ -14,8 +15,11 @@ export function needsPoll(list: readonly SessionMeta[], live: Live): boolean {
   return false;
 }
 
-/** The error bar's text once a fetched list is applied: a failed refresh's own error goes (the list loads
- *  again), any other error stays. `listError` is the text the last failed refresh showed, if any. */
+/** The error bar's text once a fetched list is applied: a failed list fetch's error goes (the list loads
+ *  again), any other error stays. `listError` is the text the last failed refresh showed, if any; a run end's
+ *  failed fetch shows LIST_FAILED (lib/run-watch.ts), bare or after its session's title (lib/run-error.ts). */
 export function afterListApplied(shown: string | null, listError: string | null): string | null {
-  return listError !== null && shown === listError ? null : shown;
+  if (listError !== null && shown === listError) return null;
+  if (shown === LIST_FAILED || shown?.endsWith(`”: ${LIST_FAILED}`)) return null;
+  return shown;
 }

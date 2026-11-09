@@ -125,6 +125,8 @@ function Chat() {
   // late, older list would otherwise mark a session the newer one showed as gone, for good.
   const listOrder = useRef(new ListOrder()).current;
   const fetchList = useRef(listOrder.wrap(fetchSessionList)).current;
+  // A session's stored messages, for a rejoined run's end (lib/run-watch.ts): the same GET as open()'s.
+  const fetchMessages = useCallback(async (id: string) => (await fetchSession(id))?.messages ?? null, []);
 
   // The text a failed list refresh put in the error bar, until a list is applied again (applyList).
   const listError = useRef<string | null>(null);
@@ -376,6 +378,7 @@ function Chat() {
           key={id}
           id={id}
           fetchList={fetchList}
+          fetchMessages={fetchMessages}
           initialMessages={initial.current.get(id) ?? []}
           onReady={onAgentReady}
           onRunStarted={onRunStarted}

@@ -137,3 +137,12 @@ CopilotKit 1.84.1, `@ag-ui/client` 1.0.2, the fake agent; script and output in
 - **A left session's save failure is named too**: `“<title>”: this session could not be saved` (slice 3, task 3,
   2026-11-09). *Why:* it is that session's run's failure, and an unnamed one shown while another chat is open would
   mislead. *Cost if wrong:* one prefix.
+- **A rejoined run's end sets the chat to the journal's messages (`GET`) when they differ** (#62's review, finding
+  1; a departure from task 2's rule that the merge alone keeps the chat). *Why:* `rejoinedMessages` appends every
+  replayed message the history lacks, and the runtime's replay also holds past runs in memory on a branch the
+  journal's tip has left, so at the run's end the chat could differ from `GET` (decision 42's acceptance says equal).
+  `watchRuns`, once `waitNotRunning` says saved, fetches `GET /api/sessions/{id}` (`fetchMessages`) and sets it on the
+  agent, before `onRecorded`/`onEnded`; not once a newer run has started (it would cut that run's stream). A failed
+  or 404 `GET` keeps the chat as the replay left it, with no error bar: the run is saved and listed, and the next
+  opening reads the journal. *Cost if wrong:* one more `GET` per rejoined run; a silent `GET` failure leaves the
+  extra messages shown until the session is opened again.

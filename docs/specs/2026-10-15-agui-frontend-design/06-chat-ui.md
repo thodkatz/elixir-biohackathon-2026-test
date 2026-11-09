@@ -148,7 +148,8 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   another tab), the session's holder component rejoins the run by calling the runtime's `connect` itself
   (`connectAgent`, not through `CopilotChat`) and streams the rest of it live, each message shown once: a message
   the runtime's replay repeats (the thread's past runs it still holds in memory, then the current run from its
-  start) is matched by id against the journal's history, not shown again. Only a session answered `running`
+  start) is matched by id against the journal's history, not shown again; once the run is saved, the chat is
+  set to the journal's messages (`GET`) where it still differs. Only a session answered `running`
   connects; any other opens from the journal alone, with no `connect`. A connect that fails leaves the chat on the
   journal's history, and its error shows in the error bar (*Errors*). The rejoined chat is the session's own
   chat: its stop button ends the run, and while the run lasts its composer is as in any running chat. An open session with no run in this page that a list fetch shows

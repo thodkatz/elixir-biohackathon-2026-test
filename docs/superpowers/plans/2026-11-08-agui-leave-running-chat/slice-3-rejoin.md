@@ -78,7 +78,10 @@ tab; stop in the rejoined chat journals `cancelled`; opening a session not runni
   subscriber made before `connectAgent` is called, so it also catches `connectAgent`'s own `setMessages([])`; not
   only from the replay's first event, which slice 1 found fails) **and once after it resolves**, setting the
   messages only when the result differs; then it joins `live.streaming` (`runStarted`) until the run ends. Why,
-  and the ordering race this rests on: [`progress.md`](progress.md), *Verdicts*.
+  and the ordering race this rests on: [`progress.md`](progress.md), *Verdicts*. At the run's end, once the list
+  shows it saved, the holder sets the agent's messages to `GET /api/sessions/{id}`'s when they differ (the replay
+  can bring past runs of a branch the journal's tip has left), unless a newer run has started; a failed `GET`
+  keeps the chat, with no error bar (`lib/run-watch.ts`; progress.md, *Rulings while building*).
 - Task 3's `check_rejoin` checks the streamed text grows during the run (the slow-step count rises between ticks),
   not only its final count, which shows each step once (the race's symptom is repeated text).
 

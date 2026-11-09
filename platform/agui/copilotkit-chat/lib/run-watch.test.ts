@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { Message } from "@ag-ui/client";
 import type { SessionMeta } from "./sessions.ts";
 import type { ListResult } from "./reconcile.ts";
 import { watchRuns } from "./run-watch.ts";
@@ -12,10 +13,15 @@ const row = (ran: string): SessionMeta => ({
 });
 
 // A fake agent: the test fires its run events by hand.
-function fakeAgent() {
+function fakeAgent(messages: Message[] = []) {
   let s: Parameters<RunSource["subscribe"]>[0] = {};
-  const agent: RunSource = { subscribe: (x) => { s = x; return { unsubscribe: () => { s = {}; } }; } };
-  return { agent, start: () => s.onRunInitialized?.(), end: () => s.onRunFinalized?.() };
+  const sets: Message[][] = [];
+  const agent: RunSource = {
+    messages,
+    setMessages: (m) => { sets.push(m); agent.messages = m; },
+    subscribe: (x) => { s = x; return { unsubscribe: () => { s = {}; } }; },
+  };
+  return { agent, sets, start: () => s.onRunInitialized?.(), end: () => s.onRunFinalized?.() };
 }
 
 // A list fetch the test answers by hand, one pending call at a time.
@@ -30,8 +36,8 @@ const tick = () => new Promise((r) => setImmediate(r));
 
 function options(fetchList: RunWatchOptions["fetchList"], ended: string[]): RunWatchOptions {
   return {
-    id: ID, fetchList, onList: () => {}, onError: () => {}, onStarted: () => {}, onRecorded: () => {},
-    onEnded: (id) => ended.push(id),
+    id: ID, fetchList, fetchMessages: async () => null, onList: () => {}, onError: () => {}, onStarted: () => {},
+    onRecorded: () => {}, onEnded: (id) => ended.push(id),
   };
 }
 
@@ -121,4 +127,53 @@ test("watchRuns: only the run a rejoin starts is a rejoin; a connect that never 
   await tick();
   assert.deepEqual(ended, [ID]);
   assert.equal(f.pending.length, 0);
+});
+
+// At a rejoined run's end the chat is set to the journal's messages (GET) when they differ: the replay may have
+// appended past runs the runtime holds in memory on a branch the journal's tip has left.
+const msg = (id: string, content: string): Message => ({ id, role: "user", content });
+
+async function rejoinedEnd(shown: Message[], fetchMessages: RunWatchOptions["fetchMessages"], restart = false) {
+  const { agent, sets, start, end } = fakeAgent(shown);
+  const ended: string[] = [];
+  const errors: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const w = watchRuns(agent, () => ({
+    ...options(async () => listed(false), ended),
+    fetchMessages: async (id) => { await gate; return fetchMessages(id); },
+    onError: (m) => errors.push(m),
+  }));
+  w.rejoining();
+  start();
+  end();
+  if (restart) { await tick(); start(); } // a send while the end's GET is pending
+  release();
+  for (let i = 0; i < 5; i++) await tick();
+  return { sets, ended, errors };
+}
+
+test("watchRuns: a rejoined run's end sets the journal's messages when the chat's differ", async () => {
+  const journal = [msg("a", "q"), msg("b", "answer")];
+  const r = await rejoinedEnd([msg("a", "q"), msg("x", "a past branch"), msg("b", "answer")], async () => journal);
+  assert.deepEqual(r, { sets: [journal], ended: [ID], errors: [] });
+});
+
+test("watchRuns: a rejoined run's end leaves the messages when they equal the journal's", async () => {
+  const journal = [msg("a", "q"), msg("b", "answer")];
+  const r = await rejoinedEnd(structuredClone(journal), async () => journal);
+  assert.deepEqual(r, { sets: [], ended: [ID], errors: [] });
+});
+
+test("watchRuns: a rejoined run's end keeps the chat, with no error, when its GET fails or finds nothing", async () => {
+  const shown = [msg("a", "q"), msg("x", "a past branch")];
+  const failed = await rejoinedEnd(shown, async () => { throw new Error("Failed to fetch"); });
+  assert.deepEqual(failed, { sets: [], ended: [ID], errors: [] });
+  const gone = await rejoinedEnd(shown, async () => null);
+  assert.deepEqual(gone, { sets: [], ended: [ID], errors: [] });
+});
+
+test("watchRuns: a rejoined run's end does not set messages once a newer run has started", async () => {
+  const r = await rejoinedEnd([msg("a", "q"), msg("x", "past")], async () => [msg("a", "q")], true);
+  assert.deepEqual(r.sets, []);
 });

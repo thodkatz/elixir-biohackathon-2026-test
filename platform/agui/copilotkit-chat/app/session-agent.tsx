@@ -19,6 +19,8 @@ type Props = {
   id: string;
   /** The page's list fetch: every list goes through one, so an older one arriving late is not applied. */
   fetchList: FetchList;
+  /** The session's stored messages (`GET`), set on the agent at a rejoined run's end (lib/run-watch.ts). */
+  fetchMessages: (id: string) => Promise<Message[] | null>;
   /** Put on the agent once it is ready: the session's stored messages, or [] for a New chat. */
   initialMessages: Message[];
   /** The registered agent exists: the page may draw CopilotChat on it. */
@@ -43,7 +45,7 @@ type Props = {
 const RUN_FAILED = "The agent run failed.";
 
 export function SessionAgent({
-  id, fetchList, initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages,
+  id, fetchList, fetchMessages, initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages,
   rejoin, onRejoined,
 }: Props): null {
   const { copilotkit } = useCopilotKit();
@@ -77,6 +79,7 @@ export function SessionAgent({
   const { noteRunError, rejoining, rejoined } = useRunReconcile(agent, {
     id,
     fetchList,
+    fetchMessages,
     onList: (list) => latest.current.onList(list),
     onError: (message) => latest.current.onError(id, message),
     onStarted: (sid) => latest.current.onRunStarted(sid),

@@ -36,6 +36,9 @@ start reads this section; keep it short.
   reopened mid-run streams, the whole chat re-renders per message change (`page.tsx`, `midRun`); a ms race between
   AG-UI's subscriber copy and the page's streaming state could still freeze one such chat — waits because none
   was seen to fail, and `leave-running` step 3 catches a freeze.
+- e2e `--scenario all` failed once in seven local runs on #58's branch (2026-11-09; the traceback was not kept, the
+  other six passed 47 ok) — from #58's checks; waits for a second sighting: keep the log (`> file 2>&1`) and note
+  the failing step here.
 
 - Carry `docs/knowledge/subagent-stall-after-usage-limit.md` to agent-methodology's `tooling-gotchas.md`, then drop the
   local note at the next `methodology update` — from #57's methodology review (finding 7); waits because it is a

@@ -31,6 +31,12 @@ start reads this section; keep it short.
 
 <!-- - <item> — from <PR #n / review thread / spec Inputs for>, waits because <reason>. -->
 
+- AG-UI chat, minor polish from #58's review (finding 5): opening a session no holder keeps shows *Loading…* for
+  one render; no unit test drives `SessionAgent` with the page (only e2e `leave-running` does); while a chat
+  reopened mid-run streams, the whole chat re-renders per message change (`page.tsx`, `midRun`); a ms race between
+  AG-UI's subscriber copy and the page's streaming state could still freeze one such chat — waits because none
+  was seen to fail, and `leave-running` step 3 catches a freeze.
+
 - Carry `docs/knowledge/subagent-stall-after-usage-limit.md` to agent-methodology's `tooling-gotchas.md`, then drop the
   local note at the next `methodology update` — from #57's methodology review (finding 7); waits because it is a
   change to another repository, its own unit.

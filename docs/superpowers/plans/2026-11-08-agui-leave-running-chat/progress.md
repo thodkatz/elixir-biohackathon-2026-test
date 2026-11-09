@@ -114,3 +114,11 @@ CopilotKit 1.84.1, `@ag-ui/client` 1.0.2, the fake agent; script and output in
   decision 41 is slice 2's: `@ag-ui/client` copies its subscribers at a run's start, so a chat reopened mid-run
   froze; the holder now forwards message changes, and the page redraws the open chat only while it was mounted
   mid-run. *Cost if wrong:* a missed case freezes again; `leave-running` step 3 catches it.
+- **The early-output comment asks a second question, no gate: should the open row show its running spinner?**
+  (slice 2, task 4 step 5 names only the first). *Why:* the open row, and every row on a touch screen, shows `⋯`
+  in the mark's place (§6 *Layout*), so the user never sees the mark there (#58's review, finding 2). *Cost if
+  wrong:* none; a *no* keeps §6 as it is.
+- **Only a session's latest run ends it** (`lib/run-watch.ts`, #58's review, finding 1): the watch moves out of
+  `use-run-reconcile.ts` into a tested module. *Why:* a run started while the previous run's list was pending was
+  dropped from `streaming` when that list came back, and a switch then unmounted its holder mid-run. *Cost if
+  wrong:* none found: an older run's end only skips `onEnded`, which the newer one calls.

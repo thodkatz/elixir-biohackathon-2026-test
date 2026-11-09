@@ -88,7 +88,7 @@ Every task's requirements include these.
 | `CHAT/app/rejoin-check/page.tsx` (removed before merge), `evidence/slice-1/` | 1 | the rejoin check (42), its script and output |
 | `progress.md`; spec `clarifications.md`, `06-chat-ui.md`, README decision 42 | 1 | the verdict; clarification 28 if it changes the spec |
 | `CHAT/lib/live-sessions.ts`, `lib/live-sessions.test.ts` | 2 | the owner of the page's live sessions (40) |
-| `CHAT/app/session-agent.tsx`, `app/page.tsx`, `app/use-run-reconcile.ts` | 2 | one holder and agent per live session; switching enabled (26, 40, 41) |
+| `CHAT/app/session-agent.tsx`, `app/page.tsx`, `app/use-run-reconcile.ts`, `lib/run-watch.ts` | 2 | one holder and agent per live session; switching enabled (26, 40, 41) |
 | `CHAT/app/sidebar.tsx`, `app/chat-header.tsx`, `app/row-menu.tsx`, `app/icons.tsx`, `app/globals.css`, `lib/sidebar-view.ts` | 2 | the running mark, Delete disabled per running session (44) |
 | `platform/dev/e2e/sessions.py`, `evidence/slice-2/` | 2, 3 | Playwright for 26, 40–44; the early-output screenshot |
 | `CHAT/lib/reconcile.ts`, `lib/refresh.ts`, `lib/rejoin.ts` and their tests | 3 | refresh and polling (44), rejoin (42) |

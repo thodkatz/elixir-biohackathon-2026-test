@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EMPTY, runStarted } from "./live-sessions.ts";
-import { POLL_MS, afterListApplied, needsPoll } from "./refresh.ts";
+import { POLL_MS, afterListApplied, needsPoll, stillFailed } from "./refresh.ts";
 import { LIST_FAILED } from "./run-watch.ts";
 import type { SessionMeta } from "./sessions.ts";
 
@@ -41,4 +41,12 @@ test("a list applied also clears a run end's failed list fetch, bare or with its
   assert.equal(afterListApplied(`“A”: ${LIST_FAILED}`, null), null);
   assert.equal(afterListApplied(`“A”: ${LIST_FAILED}`, "Failed to fetch"), null);
   assert.equal(afterListApplied("“A”: this session could not be saved", null), "“A”: this session could not be saved");
+});
+
+test("a failed rejoin is forgotten once a list shows its session not running, or not at all", () => {
+  const failed = new Set(["a", "b", "c"]);
+  const next = stillFailed(failed, [row("a", true), row("b", false)]);
+  assert.deepEqual([...next], ["a"]);
+  const same = new Set(["a"]);
+  assert.equal(stillFailed(same, [row("a", true)]), same, "unchanged: the same set");
 });

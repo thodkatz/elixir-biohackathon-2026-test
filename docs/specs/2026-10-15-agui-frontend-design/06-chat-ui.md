@@ -151,7 +151,8 @@ Plain React and CSS in `app/` (no new dependencies); all session data is rendere
   start) is matched by id against the journal's history, not shown again; once the run is saved, the chat is
   set to the journal's messages (`GET`) where it still differs. Only a session answered `running`
   connects; any other opens from the journal alone, with no `connect`. A connect that fails leaves the chat on the
-  journal's history, and its error shows in the error bar (*Errors*). The rejoined chat is the session's own
+  journal's history, and its error shows in the error bar (*Errors*); it is not tried again until a list
+  shows the session no longer `running`. The rejoined chat is the session's own
   chat: its stop button ends the run, and while the run lasts its composer is as in any running chat. An open session with no run in this page that a list fetch shows
   `running` (a run started on it from another tab) is rejoined the same way, so its composer is never offered
   for a send the runtime would refuse. **New chat:** a fresh `crypto.randomUUID()`, a new agent and an empty history; the session

@@ -23,3 +23,12 @@ export function afterListApplied(shown: string | null, listError: string | null)
   if (shown === LIST_FAILED || shown?.endsWith(`”: ${LIST_FAILED}`)) return null;
   return shown;
 }
+
+/** The sessions whose rejoin failed before its run started, still not to be rejoined: each poll's list would
+ *  otherwise connect again (one /info and /connect every POLL_MS). One goes once a list shows it not running,
+ *  or not at all; `failed` itself when none goes. */
+export function stillFailed(failed: ReadonlySet<string>, list: readonly SessionMeta[]): ReadonlySet<string> {
+  const running = new Set(list.filter((s) => s.running).map((s) => s.id));
+  if ([...failed].every((id) => running.has(id))) return failed;
+  return new Set([...failed].filter((id) => running.has(id)));
+}

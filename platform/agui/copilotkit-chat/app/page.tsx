@@ -25,7 +25,7 @@ import {
 import type { Live } from "../lib/live-sessions.ts";
 import { ListOrder } from "../lib/list-order.ts";
 import { TitleTrigger, fetchSessionList, waitListed } from "../lib/reconcile.ts";
-import { POLL_MS, afterListApplied, needsPoll } from "../lib/refresh.ts";
+import { POLL_MS, afterListApplied, needsPoll, stillFailed } from "../lib/refresh.ts";
 import { runErrorText } from "../lib/run-error.ts";
 import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
@@ -99,6 +99,9 @@ function Chat() {
     rejoiningRef.current = next;
     setRejoiningState(next);
   }, []);
+  // The held sessions whose connect ended before its run started (it failed, its error in the bar): not
+  // rejoined again until a list shows them not running (lib/refresh.ts, stillFailed), or each poll would.
+  const rejoinFailed = useRef<ReadonlySet<string>>(new Set());
   // Bumped by every open()/startNew() call, so a response from a call that is no longer the
   // latest (a second click while the first's fetch is still in flight) is ignored on arrival.
   const requestRef = useRef(0);
@@ -140,6 +143,8 @@ function Chat() {
     setAgentsReady((r) => ([...r].every((id) => keep.has(id)) ? r : new Set([...r].filter((id) => keep.has(id)))));
     const r = rejoiningRef.current;
     if (![...r].every((id) => keep.has(id))) setRejoining(new Set([...r].filter((id) => keep.has(id))));
+    const f = rejoinFailed.current;
+    if (![...f].every((id) => keep.has(id))) rejoinFailed.current = new Set([...f].filter((id) => keep.has(id)));
   }, [setRejoining]);
 
   // The open session has a run going that this page does not stream: its holder connects to it. Its chat is
@@ -147,10 +152,14 @@ function Chat() {
   const rejoin = useCallback((id: string) => {
     const now = liveRef.current;
     if (now.open !== id || !isHeld(now, id) || now.streaming.has(id) || rejoiningRef.current.has(id)) return;
+    if (rejoinFailed.current.has(id)) return;
     midRun.current = id;
     setRejoining(new Set(rejoiningRef.current).add(id));
   }, [setRejoining]);
   const onRejoined = useCallback((id: string) => {
+    // No run started (a run that did is in `streaming` until its end's list): the connect failed first.
+    const now = liveRef.current;
+    if (isHeld(now, id) && !now.streaming.has(id)) rejoinFailed.current = new Set(rejoinFailed.current).add(id);
     if (!rejoiningRef.current.has(id)) return;
     const next = new Set(rejoiningRef.current);
     next.delete(id);
@@ -168,6 +177,7 @@ function Chat() {
     setError((e) => afterListApplied(e, failed));
     sessionsRef.current = list;
     setSessions(list);
+    rejoinFailed.current = stillFailed(rejoinFailed.current, list);
     const { live: next, startNew } = listed(liveRef.current, new Set(list.map((s) => s.id)));
     setLive(next);
     if (startNew) startNewRef.current();

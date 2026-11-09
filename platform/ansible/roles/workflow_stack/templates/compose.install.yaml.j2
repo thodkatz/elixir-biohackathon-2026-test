@@ -43,6 +43,9 @@ services:
       BROKER_URL: redis://result_broker:6379
       FLASK_APP: weskit
       WESKIT_WORKFLOWS: /workflows
+{% if spe_harden_trs_readonly %}
+      WESKIT_REQUEST_VALIDATION_CONFIG: /home/weskit/weskit_config/request-validation.yaml
+{% endif %}
       WESKIT_CONTAINER_MOUNTS: '[{"source":"/drs-data","target":"/drs-data","mode":"ro"},{"source":"/data-share","target":"/data-share","mode":"ro"}]'
     volumes:
     - ../config/weskit_config:/home/weskit/weskit_config:ro
@@ -71,6 +74,38 @@ services:
     - traefik.http.routers.weskit_rest.service=weskit_rest
     - traefik.http.services.weskit_rest.loadbalancer.server.port=5000
     restart: unless-stopped
+{% if spe_harden_trs_readonly %}
+  wes-guard:
+    image: {{ spe_wes_guard_image }}
+    restart: unless-stopped
+    depends_on:
+    - rest
+    user: 65534:65534
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    volumes:
+    - ./wes_guard.py:/app/wes_guard.py:ro
+    command:
+    - python3
+    - /app/wes_guard.py
+    - --listen
+    - 0.0.0.0:8080
+    - --upstream
+    - rest:5000
+    networks:
+    - weskit
+    labels:
+    - traefik.enable=true
+    - traefik.http.routers.wes_write.rule=(PathPrefix(`/ga4gh/wes`) || PathPrefix(`/weskit/v1`)) && !Method(`GET`, `HEAD`)
+    - traefik.http.routers.wes_write.priority=1000
+    - traefik.http.routers.wes_write.entrypoints=websecure
+    - traefik.http.routers.wes_write.tls=true
+    - traefik.http.routers.wes_write.service=wes_guard
+    - traefik.http.services.wes_guard.loadbalancer.server.port=8080
+{% endif %}
   database:
     image: {{ spe_mongo_image }}
     networks:

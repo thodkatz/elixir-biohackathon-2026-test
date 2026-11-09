@@ -87,7 +87,8 @@ spe_mongo_image: mongo:5.0.33           # WESkit database
 spe_redis_image: redis:6.2.24-alpine    # WESkit result broker
 spe_traefik_image: traefik:v2.11
 spe_filer_mongo_image: mongo:3.6        # drs-filer and trs-filer databases
-spe_stack_images: "{{ [spe_mongo_image, spe_redis_image, spe_traefik_image, spe_filer_mongo_image] }}"
+spe_wes_guard_image: python:3.12-alpine   # L1 WES write guard (spe_harden_trs_readonly)
+spe_stack_images: "{{ [spe_mongo_image, spe_redis_image, spe_traefik_image, spe_filer_mongo_image] + ([spe_wes_guard_image] if spe_harden_trs_readonly else []) }}"
 spe_prefetch_images: "{{ spe_stack_images + ([spe_frontend_webui_image] if 'openwebui' in spe_frontends else []) }}"
 # sha256 of every data file, computed in the background after seeding and read
 # by the DRS registration (role drs_register).

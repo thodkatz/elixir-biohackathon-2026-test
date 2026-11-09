@@ -40,3 +40,29 @@ def test_on_admin_entrypoint_is_published_on_localhost_only():
 def test_operator_trs_writes_follow_the_switch():
     assert load_vars()["spe_trs_write_api"] == "https://10.0.2.245/ga4gh/trs/v2"
     assert load_vars(**ON)["spe_trs_write_api"] == "https://127.0.0.1:8443/ga4gh/trs/v2"
+
+
+def test_on_wes_writes_go_through_the_guard():
+    c = compose(**ON)
+    lab = labels(c["services"]["wes-guard"])
+    assert lab["traefik.http.routers.wes_write.rule"] == \
+        "(PathPrefix(`/ga4gh/wes`) || PathPrefix(`/weskit/v1`)) && !Method(`GET`, `HEAD`)"
+    assert c["services"]["wes-guard"]["read_only"] is True
+    assert c["services"]["rest"]["environment"]["WESKIT_REQUEST_VALIDATION_CONFIG"].endswith("request-validation.yaml")
+    assert "wes-guard" not in compose()["services"]
+
+
+def test_on_smk_engine_environment_is_not_client_settable():
+    def api(**sw):
+        cfg = yaml.safe_load(render("workflow_stack", "weskit_config.yaml.j2", **sw))
+        params = cfg["workflow_engines"]["SMK"]["9.16.3"]["default_parameters"]
+        return next(p["api"] for p in params if p["name"] == "engine-environment")
+    assert api() is True and api(**ON) is False
+
+
+def test_request_validation_accepts_only_trs():
+    import re
+    rule = yaml.safe_load(render("workflow_stack", "request-validation.yaml.j2", **ON))["run_request"]["workflow_url"]
+    rx = re.compile(rule["regex"])
+    assert rx.match("trs://trs-filer.weskit.internal:8080/wes-drs-smoke/1.0/NFL/main.nf")
+    assert not any(rx.match(u) for u in ["main.nf", "file:main.nf", "trs://x:8080/t/1/NFL/main.nf"])

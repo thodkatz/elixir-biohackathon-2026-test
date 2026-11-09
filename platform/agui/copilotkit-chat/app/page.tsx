@@ -15,10 +15,10 @@ import {
   useCopilotKit,
   useDefaultRenderTool,
 } from "@copilotkit/react-core/v2";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { HTMLAttributes } from "react";
 import { askTitle, fetchSession, fetchSessions, removeSession, updateSession } from "../lib/client.ts";
-import { EMPTY, held, isHeld, listed, openSession, runEnded, runStarted } from "../lib/live-sessions.ts";
+import { EMPTY, held, isHeld, listed, openSession, runEnded, runningIds as runningIdsOf, runStarted } from "../lib/live-sessions.ts";
 import type { Live } from "../lib/live-sessions.ts";
 import { ListOrder } from "../lib/list-order.ts";
 import { TitleTrigger, fetchSessionList, waitListed } from "../lib/reconcile.ts";
@@ -279,6 +279,9 @@ function Chat() {
     }
   }, [onDeleted]);
   const knownTags = [...new Set(sessions.flatMap((s) => s.tags))].sort();
+  // The sidebar's running mark and Delete's refusal (decision 44): the list's own `running` ids ∪ this
+  // page's streaming ones (lib/live-sessions.ts).
+  const runningIds = useMemo(() => runningIdsOf(sessions, live), [sessions, live]);
 
   return (
     <div className="spe-layout">
@@ -306,7 +309,7 @@ function Chat() {
         onChanged={refresh}
         onDeleted={onDeleted}
         onError={setError}
-        running={false}
+        runningIds={runningIds}
         ready={ready}
       />
       <div className="spe-page">
@@ -314,7 +317,7 @@ function Chat() {
           key={active ?? "none"}
           session={active === null ? undefined : (sessions.find((s) => s.id === active) ?? null)}
           knownTags={knownTags}
-          running={false}
+          runningIds={runningIds}
           ready={ready}
           onPatch={patchOpen}
           onDelete={() => void deleteOpen()}

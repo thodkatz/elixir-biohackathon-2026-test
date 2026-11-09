@@ -19,7 +19,7 @@ import { refocusIfLost } from "../lib/menu.ts";
 import { filterSessions, sections } from "../lib/sidebar-view.ts";
 import type { ViewFilter } from "../lib/sidebar-view.ts";
 import { DeleteDialog } from "./delete-dialog";
-import { Ellipsis, PencilSquare, SidebarToggle } from "./icons";
+import { Ellipsis, PencilSquare, SidebarToggle, Spinner } from "./icons";
 import { Popover } from "./popover";
 import { RenameInput, RowMenu } from "./row-menu";
 import { HiddenToggle, SearchBox } from "./session-filters";
@@ -34,8 +34,9 @@ type SidebarProps = {
   onChanged: () => Promise<unknown>; // resolves once the list is fetched again
   onDeleted: (id: string) => void;
   onError: (message: string) => void;
-  /** The open session has a run in progress: its Delete is disabled. Switching and New chat stay enabled. */
-  running: boolean;
+  /** Every session with a run in progress, open or not (lib/live-sessions.ts): each of their rows shows the
+   *  running mark and has its Delete disabled. Switching and New chat stay enabled during a run. */
+  runningIds: ReadonlySet<string>;
   /** False until the page is safe to click: hydrated, the agent runtime connected, and the page's own
    *  first-load `startNew()`/`open()` has actually run (not just become due). Every button here
    *  starts an action, so each stays disabled until then rather than risk a click landing before
@@ -72,7 +73,7 @@ const writeStoredWidth = (width: number): void => {
 };
 
 
-export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChanged, onDeleted, onError, running, ready }: SidebarProps) {
+export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChanged, onDeleted, onError, runningIds, ready }: SidebarProps) {
   const [busy, setBusy] = useState<Busy | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   // DEFAULT_WIDTH on the server and on the first client render (so there is no hydration
@@ -279,13 +280,14 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
   const row = (s: SessionMeta) => {
     const mine = busy?.id === s.id ? busy : null;
     const popoverOpen = mine?.mode === "menu" || mine?.mode === "tags";
+    const running = runningIds.has(s.id);
     const classes = ["spe-row"];
     if (s.id === activeId) classes.push("spe-row-active");
     if (s.hidden) classes.push("spe-row-hidden");
     if (popoverOpen) classes.push("spe-row-menu-open");
     if (mine?.mode === "rename") classes.push("spe-row-renaming");
     return (
-      <li key={s.id} className={classes.join(" ")} data-session-id={s.id}>
+      <li key={s.id} className={classes.join(" ")} data-session-id={s.id} data-running={running || undefined}>
         {mine?.mode === "rename" ? (
           <RenameInput
             value={mine.draft}
@@ -301,6 +303,9 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
             {s.pinned && <span className="spe-pin spe-sr-only">Pinned: </span>}
             <span className="spe-row-title">{s.title}</span>
           </button>
+        )}
+        {running && mine?.mode !== "rename" && (
+          <span className="spe-row-running"><Spinner /><span className="spe-sr-only">Running</span></span>
         )}
         <button
           type="button"
@@ -373,7 +378,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
             onTags={() => setBusy({ id: busySession.id, mode: "tags", draft: "", suggest: false, error: null })}
             onHide={() => choose(busySession, { hidden: !busySession.hidden })}
             onDelete={() => setBusy({ id: busySession.id, mode: "delete" })}
-            deleteDisabled={running && busySession.id === activeId}
+            deleteDisabled={runningIds.has(busySession.id)}
           />
         </Popover>
       )}

@@ -56,9 +56,10 @@ So a session does one bounded piece of work and hands off:
   `methodology handoff new <dir> <slug>`, a knowledge note or the investigation's output),
   commit, and end the session, **even in the middle of a unit**. The next session
   starts fresh from the handoff; with `AGENT_AUTO_CONTINUE=true`, start it yourself with
-  `methodology next <handoff path>` (under `chain.sh`, in this terminal or a new `dtach`
-  one), then stop. A new parallel session (a fresh unit's worktree) starts only with `methodology next --new
-  "<prompt>"`, never a bare `claude`/`claudeN`: only `chain.sh` moves a session off an exhausted account.
+  `methodology next <handoff path>` (it launches the next session on agent-deck), then stop. A new parallel
+  session (a fresh unit's worktree) starts only with `methodology next --new "<prompt>"`, never a bare
+  `claude`/`claudeN`: only a session `methodology next` starts can be seen, reported and resumed (on deck: seen by `methodology
+  status` once it reads deck).
 - **A fresh session starts the same way every time:** read the handoff (only the newest:
   `methodology handoff newest <plan>/handoffs` when the unit has a plan, else
   `methodology handoff newest docs/handoffs`, if there is one), `git status`, `git log --oneline -5`, `methodology worktree --prune` (merged units' worktrees, and the main checkout up to its upstream),
@@ -67,8 +68,8 @@ So a session does one bounded piece of work and hands off:
   runs only at the budget, and `methodology next --unit` only at a unit's end.
 - **Other sessions are the supervisor's, not yours.** Don't watch or poll other sessions with `methodology status` (one
   check that a session you just started came up is fine), and rescue one only when the user asks or the
-  supervisor can't reach it: the supervisor's timer (`supervise.sh`) acts on unattended ones, a person on their
-  own. A handoff never asks the next session to watch one (`sessions-and-context.md`, *Other sessions are not a
+  supervisor can't reach it: the supervisor's timer (`supervise.sh`) reports unattended ones to the inbox, and a person acts on
+  them and on their own. A handoff never asks the next session to watch one (`sessions-and-context.md`, *Other sessions are not a
   session's work*).
 - **Investigations and audits are scoped.** Each one answers a written question into a file. Wide reading
   goes to subagents, which return short summaries; a repo-wide audit is a fan-out of scoped subagent tasks
@@ -201,12 +202,23 @@ to things. Who is working on what is shown by the open PRs, not here (*Claiming 
 Each unit's PR updates its track's line; the last slice removes it. An open upstream PR also gets a line while it
 is open (`docs/guides/contributing-upstream.md`, step 6).
 
-- **Canary evaluation ladder** (biohackathon 0013): spec (#1) and plan (#2) merged. **Next: slice 1/9**
-  `impl/canary-eval-ladder-1-scoring`. Handoff: `ls docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs | tail -1`.
+- **Canary evaluation ladder** (biohackathon 0013, 0014, 0015): spec (#1), plan (#2), slices 1–2 (#3, #60) merged;
+  restore measured on de.NBI (median 45.6 s). **Next: slice 3/9** `impl/canary-eval-ladder-3-controls`.
+  Handoff: `methodology handoff newest docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs`.
 - **AG-UI: leave a running chat** (living AG-UI spec, clarification 27): spec (#55) and plan (#56)
   merged; slices 1 (#57, rejoin verdict *live*) and 2 (#58) merged. **Next:** slice 3/3
   `impl/agui-leave-running-chat-3-rejoin`.
   Handoff: `methodology handoff newest docs/superpowers/plans/2026-11-08-agui-leave-running-chat/handoffs`.
+- **Upstream PR kraatz #28** (`contrib/agui-archive-markdown`): archive Markdown wording, autolinks, refusal
+  reason, bad timestamps; waits on upstream's review.
+- **Upstream PR kraatz #29** (`contrib/agui-chat-ui-polish`): reopened sessions land on their end, menu focus;
+  waits on upstream's review.
+- **Upstream PR kraatz #30** (`contrib/denbi-example-data-root`): denbi example's local `spe_data_root` and API
+  IP; waits on upstream's review.
+- **Upstream PR kraatz #31** (`contrib/agui-tool-group-steps`): tool calls grouped across model steps; waits on
+  upstream's review.
+- **Upstream PR kraatz #32** (`contrib/agui-title-on-send`): a new session titled as its first run starts; waits
+  on upstream's review.
 - **Not scheduled**: `BACKLOG.md` holds every deferred item without a slice; its *Next*, the ones due soon or
   waiting on the user.
 
@@ -238,7 +250,7 @@ new template), how the person tests it, and how a tested change becomes a templa
 - **Commit each coherent change** with a short imperative subject, and add a body saying why when the subject doesn't. Run `git status` and `git diff --staged` first, and stage files by name rather than with `git add -A`.
 - **Never commit secrets**: real instance files (`platform/ansible/instances/*.yml` other than `example.yml` and `*.example.yml`, ignored by git) carry the seed that reproduces every canary. Also never commit `platform/ansible/output/`, `canaries.json`, keys, `clouds.yaml` or `.env` files.
 - **Never rewrite `main`'s history or force-push it.**
-- **Paid model calls need the human's OK** before they run. On this repository's development VM the agent uses Anthropic with `claude-haiku-5-5`, pinned by `spe_agent_allowed_models` in that VM's instance file (a spend guard for that VM). Other setups choose their own provider and model.
+- **Paid model calls need the human's OK** before they run. On this repository's development VM the agent uses Anthropic with `claude-haiku-5-5`, pinned by `spe_agent_allowed_models` in that VM's instance file (a spend guard for that VM). It is paid: use it only for a one-shot check of a feature, never for repeated runs or a promptfoo suite. Those run on de.NBI (`qwen3.8-27b`), which costs no money, only rate; what needs asking for them is in *Setup*. Other setups choose their own provider and model.
 - **Follow the plan's rulings discipline**: when work departs from a plan, record the decision, why, and its cost if wrong in that plan's progress file.
 
 ### Worktrees and deploying
@@ -335,7 +347,7 @@ The rules that bite most often:
   (`development-workflow.md`, *Choosing a mode*).
 - **Claim before you work**: the unit's branch pushed to `origin` plus a draft PR, worked on in its own worktree,
   `.claude/worktrees/<branch, / as ->` of the main checkout (`methodology worktree <branch>`
-  makes it; `git worktree list` shows them all). **One PR open at a time per track**, and dependent work waits
+  makes it and claims it; `git worktree list` shows them all). **One PR open at a time per track**, and dependent work waits
   until that PR has merged.
 - **One review round, by the reviewer in *Reviewers***: local reviewer subagents, or a CI reviewer and, if it's
   out, the fallbacks there, in order; a mechanical PR (a pointer, copied or regenerated files) has none. Address every finding, then **merge it yourself**
@@ -345,7 +357,7 @@ The rules that bite most often:
   track's line in *Current work*. Don't start the next unit in the same session: once the PR merged and cleanup is
   done, write a second, short handoff on `main` that names the unit's own handoff (now on `main`, and the next
   session reads only this one) and adds what only the merge settled (its commit, the review round); commit, push
-  and start it with `methodology next --unit <branch> <handoff>` from the main checkout; the track's last unit
+  and start it with `methodology next --unit <next unit's branch> <handoff>` from the main checkout; the track's last unit
   ends with `methodology next --end`. Hand off earlier when the context budget says so. Told to stop ("stop
   here", "finish this, then stop", "pause"), finish the step, commit and push, write a handoff (`methodology
   handoff new`, where the budget's goes), commit and push it, then `methodology next --end`:
@@ -414,3 +426,9 @@ depends on it.
 Quota-heavy runs to ask about before starting (*Don't stop for approval*): **any promptfoo evaluation or other
 run that makes paid model calls** (*Project rules*), and **creating or destroying cloud instances**
 (`playbooks/create.yml` / `destroy.yml` against de.NBI or another OpenStack).
+
+Standing OK from the user (2026-11-09), so neither is asked about: **one de.NBI instance at a time** may be
+created, rebuilt and destroyed without asking, and evaluations on it (de.NBI `qwen3.8-27b`, no cost) may run,
+the canary ladder's included. **Anthropic stays a few calls**: on the development VM, only a one-shot check of a
+feature (*Project rules*), never a suite or repeats, even though the account has a spend limit. A second
+instance, another cloud, or more than a few Anthropic calls still needs the user's OK.

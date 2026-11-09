@@ -12,10 +12,29 @@ start reads this section; keep it short.
 
 <!-- - <item> — from <investigation / review / handoff>; <waits on the user: what> | <due: why soon>. -->
 
+- AG-UI chat: does a reply that finished while away need a mark of its own, and should the open row show its running
+  spinner? Two no-gate questions on #58's early output (issuecomment-6730913819), nothing built — waits on the user:
+  an answer; a *yes* is a change with a spec §6 clarification.
+
 ## Unscheduled
 
 <!-- - <item> — from <PR #n / review thread / spec Inputs for>, waits because <reason>. -->
 
+- AG-UI chat, minor polish from #58's review (finding 5): opening a session no holder keeps shows *Loading…* for
+  one render; no unit test drives `SessionAgent` with the page (only e2e `leave-running` does); while a chat
+  reopened mid-run streams, the whole chat re-renders per message change (`page.tsx`, `midRun`); a ms race between
+  AG-UI's subscriber copy and the page's streaming state could still freeze one such chat — waits because none
+  was seen to fail, and `leave-running` step 3 catches a freeze.
+- AG-UI chat: a switch away between a rejoin's start and its connect's `onRunInitialized` drops the holder while the
+  connect goes on, and its end reaches no page state (`platform/agui/copilotkit-chat/app/session-agent.tsx`, the rejoin effect) —
+  from #62's task 2 review (Minor 4); waits because the window is short and the poll still clears the mark.
+- AG-UI chat: between a list showing a session `running` and its connect's `onRunInitialized`, the open chat's
+  composer is offered, though §6 says never; a send there is refused by the runtime, and while `rejoining` is set its
+  run would end through `waitNotRunning` (`platform/agui/copilotkit-chat/lib/run-watch.ts`) — from #62's review
+  (finding 4); waits because the window is short and the send is refused, not lost.
+- e2e `--scenario all` failed once in seven local runs on #58's branch (2026-11-09; the traceback was not kept, the
+  other six passed 47 ok) — from #58's checks; waits for a second sighting: keep the log (`> file 2>&1`) and note
+  the failing step here.
 - Canary ladder: clean runs above L1. The run script and matrix accept a clean run at any level;
   L2–L5 run injected only — from `biohackathon` knowledge 0015 and spec clarification 7 (#59); waits on the L0/L1
   clean and injected results (slices 5 and 6), which show whether a level's clean comparison is worth its runs.
@@ -24,6 +43,7 @@ start reads this section; keep it short.
   *Rulings*) — from spec clarification 7 (#59), deferred by the user (2026-11-09) because
   slice 1's `injection.followed` already attributes by the exposed payload's fingerprint and target; schedule if
   L0/L1 results show runs where two payloads were exposed and asked for the same action.
+
 - Carry `docs/knowledge/subagent-stall-after-usage-limit.md` to agent-methodology's `tooling-gotchas.md`, then drop the
   local note at the next `methodology update` — from #57's methodology review (finding 7); waits because it is a
   change to another repository, its own unit.

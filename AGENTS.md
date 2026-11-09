@@ -202,10 +202,9 @@ to things. Who is working on what is shown by the open PRs, not here (*Claiming 
 Each unit's PR updates its track's line; the last slice removes it. An open upstream PR also gets a line while it
 is open (`docs/guides/contributing-upstream.md`, step 6).
 
-- **Canary evaluation ladder** (biohackathon 0013): slices 1–3 merged. **Next: slice 4/9** `impl/canary-eval-ladder-4-injections`. Handoff: `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/2026-11-09T0349Z-slice-3-done.md`.
-- **AG-UI: leave a running chat** (living AG-UI spec, clarification 27): spec (#55) and plan (#56)
-  merged; slice 1 (#57) merged, rejoin verdict *live*. **Next:** slice 2/3 `impl/agui-leave-running-chat-2-agents`.
-  Handoff: `methodology handoff newest docs/superpowers/plans/2026-11-08-agui-leave-running-chat/handoffs`.
+- **Canary evaluation ladder** (biohackathon 0013, 0014, 0015): spec (#1), plan (#2), slices 1–3 (#3, #60, #61)
+  merged; L0 controls agree on de.NBI. **Next: slice 4/9** `impl/canary-eval-ladder-4-injections`.
+  Handoff: `methodology handoff newest docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs`.
 - **Upstream PR kraatz #28** (`contrib/agui-archive-markdown`): archive Markdown wording, autolinks, refusal
   reason, bad timestamps; waits on upstream's review.
 - **Upstream PR kraatz #29** (`contrib/agui-chat-ui-polish`): reopened sessions land on their end, menu focus;

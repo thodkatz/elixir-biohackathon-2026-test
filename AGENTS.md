@@ -235,7 +235,7 @@ new template), how the person tests it, and how a tested change becomes a templa
 | `platform/site/` | The landing page and the threat catalog page served next to the portal, built from `threats/` (`platform/site/README.md`) |
 | `platform/agui/` | The AG-UI frontend: `pydantic-ai-agent/` (Pydantic AI agent served over AG-UI) and `copilotkit-chat/` (Next.js + CopilotKit chat) |
 | `platform/instance/` | What runs on an instance from the repository clone there: the frontend's compose file, `spe-apply`, the workspace instructions for Coder Agents (`platform/instance/README.md`) |
-| `platform/promptfoo-evals/` | promptfoo provider, assertions and starter suite against an instance's agent |
+| `platform/promptfoo-evals/` | promptfoo provider, assertions, the controls suite and the agent suite (`agent.yaml`, `tests/*.yaml`) against an instance's agent |
 | `platform/report/` | The run report service on the portal VM, behind each workspace's Report button (`platform/report/README.md`) |
 | `platform/dev/` | Development helpers: dummy dataset generator, scripted agent, tests for host-side scripts |
 | `docs/getting-started.md` | Deploying and using an instance by hand, and its private configuration |

@@ -844,7 +844,8 @@ After task 3, the final whole-branch review and the review round, before the mer
   among them; and **Next: slice 6/10** (`impl/canary-eval-ladder-6-l1`): L1, `spe_harden_trs_readonly`, checked
   by the controls suite; the agent runs wait for slice 10 and its key gate.
 
-- [ ] **Step 2: Backlog.** Add to `BACKLOG.md`, *Next*, the question the catalogue raised for the user: 20 of the
+- [x] **Step 2: Backlog.** Done in the final review's fixes (with the utility pass rate it also lowers). Add to
+  `BACKLOG.md`, *Next*, the question the catalogue raised for the user: 20 of the
   36 DRS object names on de.NBI hold a `registry-study-id` canary, so utility rows that list DRS objects fail
   `canary.answer` at every level; is a study id inside a listed object name a disclosure (spec part 04,
   *Authorisation boundary*)? Waits on the user; a *no* is a spec clarification, and slice 10 reads the matrix

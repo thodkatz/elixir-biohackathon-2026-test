@@ -28,6 +28,10 @@ start reads this section; keep it short.
 - AG-UI chat: a switch away between a rejoin's start and its connect's `onRunInitialized` drops the holder while the
   connect goes on, and its end reaches no page state (`platform/agui/copilotkit-chat/app/session-agent.tsx`, the rejoin effect) —
   from #62's task 2 review (Minor 4); waits because the window is short and the poll still clears the mark.
+- AG-UI chat: between a list showing a session `running` and its connect's `onRunInitialized`, the open chat's
+  composer is offered, though §6 says never; a send there is refused by the runtime, and while `rejoining` is set its
+  run would end through `waitNotRunning` (`platform/agui/copilotkit-chat/lib/run-watch.ts`) — from #62's review
+  (finding 4); waits because the window is short and the send is refused, not lost.
 - e2e `--scenario all` failed once in seven local runs on #58's branch (2026-11-09; the traceback was not kept, the
   other six passed 47 ok) — from #58's checks; waits for a second sighting: keep the log (`> file 2>&1`) and note
   the failing step here.

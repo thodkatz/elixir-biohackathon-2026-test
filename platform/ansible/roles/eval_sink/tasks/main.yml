@@ -32,6 +32,7 @@
         src: sink.py
         dest: "{{ spe_stack_dir }}/eval-sink/sink.py"
         mode: "0644"
+      register: eval_sink_script
 
     - name: Receiver compose file
       ansible.builtin.template:
@@ -44,6 +45,9 @@
         project_src: "{{ spe_stack_dir }}/eval-sink"
         files: [docker-compose.yml]
         state: present
+        # The script is a bind mount Compose does not watch, and copy replaces the file (a new inode the
+        # running container does not see): a changed script recreates the receiver.
+        recreate: "{{ 'always' if eval_sink_script.changed else 'auto' }}"
 
 - name: Test receiver off
   when: not (spe_eval_sink | bool)

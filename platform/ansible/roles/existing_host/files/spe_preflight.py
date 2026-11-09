@@ -20,7 +20,9 @@ and the output {"problems": [...], "paths": [...], "projects": [{name, file}]}
 names exactly what may be removed: the marker and the manifest must name this
 instance and mode, every path must be the one recorded, safe, not a symlink,
 not a mount or holding one, clear of Docker's data root and the shared paths,
-and every compose project must be recorded and built from its own file. A
+and every compose project must be recorded and built from its own file (an
+unrecorded one is skipped only when neither its file nor a container of it
+exists: a project added after the host was built, like spe-eval-sink). A
 project's file is the path given (a link is kept, so Compose reads the .env
 beside it); the checks use its resolved target.
 """
@@ -247,6 +249,10 @@ def reset_plan(cfg: dict, host) -> dict:
     projects: list[dict] = []
     for name, file in sorted(cfg.get("projects", {}).items()):
         if name not in recorded_projects:
+            # A project added after this host was built (spe-eval-sink) that never ran here: nothing to take down.
+            if not os.path.lexists(file) and not host.project_config_files(name) \
+                    and name not in host.running_projects():
+                continue
             problems.append(f"compose project {name} is not recorded in the manifest")
             continue
         real = os.path.realpath(file)

@@ -40,7 +40,8 @@ spe_manage_docker: true       # false: Docker belongs to someone else on this ho
 # What this instance occupies on a host: checked before an existing host is
 # configured, recorded in /etc/spe-instance.json, and the only things destroy.yml resets.
 # spe-eval-sink (the test receiver, spe_eval_sink) is always listed, so every manifest names it and
-# destroy.yml's reset takes it down whatever the switch was; the reset skips it when its file is absent.
+# destroy.yml's reset takes it down whatever the switch was; the reset skips it when its file is absent
+# and nothing of it runs, also on a host whose manifest predates it.
 spe_compose_projects: [workflow-stack, spe-frontend, spe-eval-sink]
 spe_frontend_ports: >-
   {{ ([spe_webui_local_port] if 'openwebui' in spe_frontends else [])

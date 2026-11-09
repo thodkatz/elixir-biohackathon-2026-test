@@ -365,6 +365,42 @@ def test_reset_of_project_not_in_manifest_is_refused(pf, tmp_path):
     assert any("spe-frontend" in p for p in plan["problems"])
 
 
+def unrecorded_eval_sink(c):
+    """A host built before spe-eval-sink was a project: the manifest and the host lack it, destroy.yml names it."""
+    c["projects"]["spe-eval-sink"] = c["paths"]["stack_dir"] + "/eval-sink/docker-compose.yml"
+    created(c, projects=["spe-frontend", "workflow-stack"])
+    Path(c["projects"]["spe-eval-sink"]).unlink()
+    return ResetHost(project_files={n: {c["projects"][n]} for n in ("workflow-stack", "spe-frontend")},
+                     projects_running={"workflow-stack", "spe-frontend"})
+
+
+def test_reset_skips_an_unrecorded_project_that_never_ran_here(pf, tmp_path):
+    c = reset_cfg(tmp_path)
+    plan = pf.reset_plan(c, unrecorded_eval_sink(c))
+    assert plan["problems"] == []
+    assert [p["name"] for p in plan["projects"]] == ["spe-frontend", "workflow-stack"]
+
+
+def test_reset_of_an_unrecorded_project_with_its_file_is_refused(pf, tmp_path):
+    c = reset_cfg(tmp_path)
+    host = unrecorded_eval_sink(c)
+    Path(c["projects"]["spe-eval-sink"]).write_text("services: {}\n")
+    plan = pf.reset_plan(c, host)
+    assert any("spe-eval-sink" in p and "not recorded" in p for p in plan["problems"])
+
+
+@pytest.mark.parametrize("how", ["running", "created"])
+def test_reset_of_an_unrecorded_project_with_containers_is_refused(pf, tmp_path, how):
+    c = reset_cfg(tmp_path)
+    host = unrecorded_eval_sink(c)
+    if how == "running":
+        host.projects_running.add("spe-eval-sink")
+    else:
+        host.project_files["spe-eval-sink"] = {c["projects"]["spe-eval-sink"]}
+    plan = pf.reset_plan(c, host)
+    assert any("spe-eval-sink" in p and "not recorded" in p for p in plan["problems"])
+
+
 def test_reset_with_compose_file_outside_owned_paths_is_refused(pf, tmp_path):
     c = reset_cfg(tmp_path)
     created(c)

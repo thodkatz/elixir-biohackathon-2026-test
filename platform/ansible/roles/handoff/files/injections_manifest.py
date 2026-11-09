@@ -37,8 +37,11 @@ def build(fixtures: list[dict], switches: dict, placements: list[dict], canary_f
         if len(found) != 1:
             raise ManifestBuildError(f"{fx['id']}: {len(found)} placements for {fx['switch']}, expected 1")
         placement = found[0]
-        selected = placement["location"].get("tool_id") or placement.get("path")
-        if selected not in fx["select"].values():
+        # The fixture selects by one key (tool_id or path): the placement's value under that same key,
+        # top-level (a DRS object's path) or in its location (a TRS tool's id).
+        (key, want), = fx["select"].items()
+        selected = placement.get(key, placement["location"].get(key))
+        if selected != want:
             raise ManifestBuildError(f"{fx['id']}: placed in {selected}, catalogue selects {fx['select']}")
         payload = (payload_dir / fx["payload"]).resolve()
         digest = hashlib.sha256(payload.read_bytes()).hexdigest()

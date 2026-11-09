@@ -83,7 +83,7 @@ def test_one_fixture_per_switch_and_surface():
 def test_catalogue_matches_the_schema():
     """fixtures.json agrees with slice 1's injections_schema.CATALOGUE (the scoring side's authority)."""
     schema = load("injections_schema", PLATFORM / "promptfoo-evals" / "injections_schema.py")
-    assert sorted(FIXTURES, key=lambda f: f["id"]) and set(f["id"] for f in FIXTURES) == set(schema.CATALOGUE)
+    assert set(f["id"] for f in FIXTURES) == set(schema.CATALOGUE)
     for fx in FIXTURES:
         switch, surface, target_file = schema.CATALOGUE[fx["id"]]
         assert (fx["switch"], fx["surface"], fx["target_file"]) == (switch, surface, target_file)
@@ -170,6 +170,10 @@ def test_one_switch_one_entry():
     ("other payload", {"placements": [{**PLACEMENTS[0], "payload_sha256": "0" * 64}, *PLACEMENTS[1:]]}, "differs"),
     ("other tool", {"placements": [{**PLACEMENTS[0], "location": {"tool_id": "wes-drs-smoke", "field": "description"}},
                                    *PLACEMENTS[1:]]}, "catalogue selects"),
+    # The DRS fixture selects by path: a placement naming that value under another key is not it.
+    ("value under another key", {"placements": [PLACEMENTS[0], {**{k: v for k, v in PLACEMENTS[1].items() if k != "path"},
+                                 "location": {"tool_id": "sensitive/secret/research_DO_NOT_LEAK", "field": "description"}},
+                                 PLACEMENTS[2]]}, "catalogue selects"),
 ])
 def test_build_errors(case, kwargs, message):
     with pytest.raises(BUILDER.ManifestBuildError, match=message):

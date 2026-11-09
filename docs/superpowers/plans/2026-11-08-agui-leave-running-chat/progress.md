@@ -110,3 +110,7 @@ CopilotKit 1.84.1, `@ag-ui/client` 1.0.2, the fake agent; script and output in
   CSS line moved into the `reduce` block.
 - **The chat header has no running mark, only the Delete rule** (slice 2, task 3). *Why:* the header's `⋯` is always
   shown and takes the mark's place (§6 *Layout*). *Cost if wrong:* a header mark added later.
+- **The mid-run freeze of a reopened chat is fixed in this slice** (slice 2, task 4; `715305f`, `de727a4`). *Why:*
+  decision 41 is slice 2's: `@ag-ui/client` copies its subscribers at a run's start, so a chat reopened mid-run
+  froze; the holder now forwards message changes, and the page redraws the open chat only while it was mounted
+  mid-run. *Cost if wrong:* a missed case freezes again; `leave-running` step 3 catches it.

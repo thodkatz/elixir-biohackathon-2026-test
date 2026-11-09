@@ -20,6 +20,7 @@ import type { HTMLAttributes } from "react";
 import { askTitle, fetchSession, fetchSessions, removeSession, updateSession } from "../lib/client.ts";
 import { EMPTY, held, isHeld, listed, openSession, runEnded, runStarted } from "../lib/live-sessions.ts";
 import type { Live } from "../lib/live-sessions.ts";
+import { ListOrder } from "../lib/list-order.ts";
 import { TitleTrigger, fetchSessionList, waitListed } from "../lib/reconcile.ts";
 import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
@@ -104,6 +105,11 @@ function Chat() {
   // false once the runtime is there, including with an empty session list.
   const ready = useHydrated() && connected && active !== null;
 
+  // Every list fetch is stamped as it starts, and only a list newer than the last applied is applied: a
+  // late, older list would otherwise mark a session the newer one showed as gone, for good.
+  const listOrder = useRef(new ListOrder()).current;
+  const fetchList = useRef(listOrder.wrap(fetchSessionList)).current;
+
   const startNewRef = useRef<() => void>(() => {});
   const setLive = useCallback((next: Live) => {
     liveRef.current = next;
@@ -117,6 +123,7 @@ function Chat() {
   // ids left it (an open session that left it while idle is replaced by a new one), and once the open
   // session is in it (its first run recorded), the URL names it.
   const applyList = useCallback((list: SessionMeta[]) => {
+    if (!listOrder.accept(list)) return; // older than one already applied
     sessionsRef.current = list;
     setSessions(list);
     const { live: next, startNew } = listed(liveRef.current, new Set(list.map((s) => s.id)));
@@ -126,17 +133,17 @@ function Chat() {
       const id = liveRef.current.open;
       if (id && list.some((s) => s.id === id)) showInUrl(id);
     }
-  }, [setLive]);
+  }, [listOrder, setLive]);
   const refresh = useCallback(async (): Promise<SessionMeta[] | null> => {
     try {
-      const list = await fetchSessions();
+      const list = await listOrder.track(() => fetchSessions(), (l) => l);
       applyList(list);
       return list;
     } catch (e) {
       setError(messageOf(e));
       return null;
     }
-  }, [applyList]);
+  }, [applyList, listOrder]);
 
   // A New chat's first run, as it starts: the list is fetched until it has the session (the server lists it
   // once the run's question is on disk, before the agent answers), so the sidebar and header show the first
@@ -154,14 +161,14 @@ function Chat() {
   const onRunStarted = useCallback((id: string) => {
     setLive(runStarted(liveRef.current, id));
     if (!titles.current.take(id)) return;
-    waitListed(fetchSessionList, id)
+    waitListed(fetchList, id)
       .then(({ list, listed: isListed }) => {
         applyList(list);
         if (isListed) askFor(id);
         else titles.current.started(id);
       })
       .catch(() => titles.current.started(id));
-  }, [applyList, askFor, setLive]);
+  }, [applyList, askFor, fetchList, setLive]);
   const onRecorded = useCallback((id: string) => {
     if (titles.current.take(id)) askFor(id);
   }, [askFor]);
@@ -279,6 +286,7 @@ function Chat() {
         <SessionAgent
           key={id}
           id={id}
+          fetchList={fetchList}
           initialMessages={initial.current.get(id) ?? []}
           onReady={onAgentReady}
           onRunStarted={onRunStarted}

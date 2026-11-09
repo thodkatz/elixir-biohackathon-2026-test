@@ -7,6 +7,7 @@
 import type { Message } from "@ag-ui/client";
 import { UseAgentUpdate, isAbortError, useAgent } from "@copilotkit/react-core/v2";
 import { useEffect, useRef } from "react";
+import type { FetchList } from "../lib/reconcile.ts";
 import type { SessionMeta } from "../lib/sessions.ts";
 import { useRunReconcile } from "./use-run-reconcile";
 
@@ -14,6 +15,8 @@ export const agentIdOf = (id: string) => `spe-${id}`;
 
 type Props = {
   id: string;
+  /** The page's list fetch: every list goes through one, so an older one arriving late is not applied. */
+  fetchList: FetchList;
   /** Put on the agent once it is ready: the session's stored messages, or [] for a New chat. */
   initialMessages: Message[];
   /** The registered agent exists: the page may draw CopilotChat on it. */
@@ -29,7 +32,7 @@ type Props = {
 
 const RUN_FAILED = "The agent run failed.";
 
-export function SessionAgent({ id, initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError }: Props): null {
+export function SessionAgent({ id, fetchList, initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError }: Props): null {
   // First a provisional agent (`isReady` false), then, on a later render, the registered one: messages set
   // on the provisional one are lost, so everything below waits for `isReady` and re-runs on a new agent.
   const { agent, isReady } = useAgent({
@@ -56,6 +59,7 @@ export function SessionAgent({ id, initialMessages, onReady, onRunStarted, onRun
   // A run's session is this holder's, whichever session is open when it starts or ends.
   const { noteRunError } = useRunReconcile(agent, {
     id,
+    fetchList,
     onList: (list) => latest.current.onList(list),
     onError: (message) => latest.current.onError(id, message),
     onStarted: (sid) => latest.current.onRunStarted(sid),

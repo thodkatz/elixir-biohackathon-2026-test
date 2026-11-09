@@ -7,10 +7,13 @@
 import type { AbstractAgent } from "@copilotkit/react-core/v2";
 import { useCallback, useEffect, useRef } from "react";
 import type { SessionMeta } from "../lib/sessions.ts";
-import { SAVE_FAILED_MESSAGE, fetchSessionList, isRefusal, reconcile } from "../lib/reconcile.ts";
+import { SAVE_FAILED_MESSAGE, isRefusal, reconcile } from "../lib/reconcile.ts";
+import type { FetchList } from "../lib/reconcile.ts";
 
 type Options = {
   id: string;
+  /** The page's list fetch, stamped with its order (lib/list-order.ts). */
+  fetchList: FetchList;
   onList: (list: SessionMeta[]) => void;
   onError: (message: string) => void;
   onStarted: (id: string) => void;
@@ -44,13 +47,13 @@ export function useRunReconcile(agent: AbstractAgent, opts: Options) {
         const { id } = latest.current;
         const done = () => latest.current.onEnded(id);
         if (ended.refused) {
-          fetchSessionList()
+          latest.current.fetchList()
             .then(({ list }) => latest.current.onList(list))
             .catch(() => latest.current.onError(LIST_FAILED))
             .finally(done);
           return;
         }
-        reconcile(fetchSessionList, id, ended.startMs)
+        reconcile(latest.current.fetchList, id, ended.startMs)
           .then(({ list, saved }) => {
             latest.current.onList(list);
             if (saved) latest.current.onRecorded(id);

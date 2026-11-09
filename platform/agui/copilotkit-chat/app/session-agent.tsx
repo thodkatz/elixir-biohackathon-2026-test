@@ -28,11 +28,14 @@ type Props = {
   onRecorded: (id: string) => void;
   onList: (list: SessionMeta[]) => void;
   onError: (id: string, message: string) => void;
+  /** The agent's messages changed (a run's stream). A chat drawn on this agent after its run started is not
+   *  among that run's subscribers (AG-UI copies them as a run starts), so the page re-renders it from here. */
+  onMessages: (id: string) => void;
 };
 
 const RUN_FAILED = "The agent run failed.";
 
-export function SessionAgent({ id, fetchList, initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError }: Props): null {
+export function SessionAgent({ id, fetchList, initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages }: Props): null {
   // First a provisional agent (`isReady` false), then, on a later render, the registered one: messages set
   // on the provisional one are lost, so everything below waits for `isReady` and re-runs on a new agent.
   const { agent, isReady } = useAgent({
@@ -41,8 +44,8 @@ export function SessionAgent({ id, fetchList, initialMessages, onReady, onRunSta
     threadId: id,
     updates: [UseAgentUpdate.OnRunStatusChanged],
   });
-  const latest = useRef({ initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError });
-  latest.current = { initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError };
+  const latest = useRef({ initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages });
+  latest.current = { initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages };
 
   // Once per holder: a later agent object (none in practice) would otherwise be reset to a history older
   // than the run it has streamed.
@@ -76,6 +79,8 @@ export function SessionAgent({ id, fetchList, initialMessages, onReady, onRunSta
         noteRunError(message);
         latest.current.onError(id, message || RUN_FAILED);
       },
+      // Subscribed before any run of this holder's starts, so every run's changes reach it.
+      onMessagesChanged: () => latest.current.onMessages(id),
       onRunFailed: ({ error }) => {
         if (isAbortError(error)) return;
         noteRunError(error.message);

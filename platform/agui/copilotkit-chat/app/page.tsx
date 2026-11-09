@@ -15,7 +15,7 @@ import {
   useCopilotKit,
   useDefaultRenderTool,
 } from "@copilotkit/react-core/v2";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { HTMLAttributes } from "react";
 import { askTitle, fetchSession, fetchSessions, removeSession, updateSession } from "../lib/client.ts";
 import { EMPTY, held, isHeld, listed, openSession, runEnded, runningIds as runningIdsOf, runStarted } from "../lib/live-sessions.ts";
@@ -175,6 +175,7 @@ function Chat() {
   // A run ended, in any session, open or not, and its list has been applied: the session's agent is dropped
   // unless it is open; an open session that left the list meanwhile is replaced by a new one.
   const onRunEnded = useCallback((id: string) => {
+    if (midRun.current === id) midRun.current = null;
     const { live: next, startNew } = runEnded(liveRef.current, id);
     setLive(next);
     if (startNew) startNewRef.current();
@@ -188,9 +189,19 @@ function Chat() {
     setError(message);
   }, []);
 
+  // The open session, when its chat was drawn while its run was already streaming (opened again mid-run, or
+  // remounted by a switch back): that chat is not among the run's subscribers, so it is re-rendered on each of
+  // the agent's message changes until the run ends. A chat drawn before its run starts hears the run itself.
+  const midRun = useRef<string | null>(null);
+  const [, redrawChat] = useReducer((x: number) => x + 1, 0);
+  const onAgentMessages = useCallback((id: string) => {
+    if (id === midRun.current && id === liveRef.current.open) redrawChat();
+  }, []);
+
   // New chat: a fresh thread id and an empty history, on a new agent; it joins the list once its first run starts.
   const startNew = useCallback(() => {
     requestRef.current += 1;
+    midRun.current = null;
     const id = crypto.randomUUID();
     titles.current.started(id);
     initial.current.set(id, []);
@@ -203,7 +214,9 @@ function Chat() {
     const requestId = (requestRef.current += 1);
     // A session with an agent in this page is shown as it is, its run still streaming if it is: its messages
     // are newer than the journal's, so no fetch.
+    midRun.current = null;
     if (isHeld(liveRef.current, id)) {
+      if (liveRef.current.streaming.has(id)) midRun.current = id;
       setLive(openSession(liveRef.current, id));
       showInUrl(sessionsRef.current.some((s) => s.id === id) ? id : null);
       return;
@@ -297,6 +310,7 @@ function Chat() {
           onRecorded={onRecorded}
           onList={applyList}
           onError={onAgentError}
+          onMessages={onAgentMessages}
         />
       ))}
       <Sidebar

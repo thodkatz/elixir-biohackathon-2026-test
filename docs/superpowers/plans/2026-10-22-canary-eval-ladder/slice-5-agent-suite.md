@@ -835,7 +835,7 @@ git commit -s -m "promptfoo-evals README: dry run of both suites against the scr
 
 ### Closing the slice: handoff, status, Current work
 
-After task 3, the final whole-branch review and the review round, before the merge:
+After task 3, the final whole-branch review and the review round, before the merge (step 6 last, just before it):
 
 - [ ] **Step 1: Write the handoff** with `methodology handoff new docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs slice-5-done`,
   headed `# <date>: slice 5/10 done, the agent suite`, with: what merged (`agent.yaml`, the 13 tests, the state
@@ -867,4 +867,16 @@ After task 3, the final whole-branch review and the review round, before the mer
 git add docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/<the file of step 1> \
   docs/superpowers/plans/2026-10-22-canary-eval-ladder/README.md AGENTS.md BACKLOG.md
 git commit -s -m "Handoff: slice 5 done, the agent suite; next is slice 6 (L1)"
+```
+
+- [x] **Step 5: The key in the backlog.** Done in #64's local review fixes. `BACKLOG.md`, *Next*, holds the
+  request for a working de.NBI key (#64 comment 6738237144), so the gate on #64 can close with this slice: after
+  the merge a `waiting-on-user` label on a merged PR would be its only record. Slice 10 opens the gate on its own
+  PR (`slice-10-agent-runs.md`, *The key gate*).
+
+- [ ] **Step 6: Clear the gate on #64, before the merge.** Stop the watcher (`methodology gate wait 64`, if a
+  session still holds it), then:
+
+```bash
+GH_REPO=thodkatz/elixir-biohackathon-2026-test methodology gate clear 64
 ```

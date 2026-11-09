@@ -465,6 +465,7 @@ $SSH 'docker compose -p spe-frontend exec -T agent python3 -c "import socket; so
 
 ```bash
 export SPE_HANDOFF_DIR=$OUT
+npm ci   # a fresh worktree has no promptfoo
 npm run eval:controls
 jq -r '.results.results[] | "\(.vars.probe)\t\(.response.metadata.state)\t\(.success)"' reports/controls.json
 ```

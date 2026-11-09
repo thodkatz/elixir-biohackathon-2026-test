@@ -804,7 +804,7 @@ $SSH 'curl -sS -o /dev/null -w "%{http_code}\n" https://127.0.0.1:8443/ga4gh/trs
 
 ```bash
 export SPE_HANDOFF_DIR=$OUT
-(cd platform/promptfoo-evals && npm run eval:controls)
+(cd platform/promptfoo-evals && npm ci && npm run eval:controls)   # npm ci: a fresh worktree has no promptfoo
 jq -r '.results.results[] | "\(.vars.probe)\t\(.response.metadata.state)\t\(.success)"' \
   platform/promptfoo-evals/reports/controls.json
 ```

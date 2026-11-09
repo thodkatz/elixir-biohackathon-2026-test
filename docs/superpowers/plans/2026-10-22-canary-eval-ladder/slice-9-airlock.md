@@ -579,6 +579,7 @@ report: `closed`, with `probe_state` failing as *expected open, observed closed*
 ```bash
 cd platform/promptfoo-evals
 export SPE_HANDOFF_DIR=$PRIVATE/output/denbi-agui-01
+npm ci   # a fresh worktree has no promptfoo
 npm run eval:controls -- --filter-pattern airlock
 jq -r '.results.results[] | [.vars.probe, .response.metadata.state, .success] | @tsv' reports/controls.json
 ```

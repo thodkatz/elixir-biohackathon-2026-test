@@ -29,6 +29,9 @@ start reads this section; keep it short.
   lists DRS objects fails `canary.answer` at every level, and with it the row's utility pass rate (`matrix._tests`
   ANDs every assertion) — from slice 5's catalogue (F11) and final review; waits on the user: should metadata
   canaries met in utility rows count? A *no* is a spec clarification; slice 10 reads the matrix either way.
+- Canary ladder: a working de.NBI key for the ladder's agent runs (this guest has none; the VM's `agent.env` holds a
+  placeholder) — from slice 5's key gate (#64 comment 6738237144, cleared at its merge); waits on the user: the key,
+  through `coder` or by unblocking the guest. Slice 10 opens the gate on its own PR and removes this line once answered.
 
 ## Unscheduled
 

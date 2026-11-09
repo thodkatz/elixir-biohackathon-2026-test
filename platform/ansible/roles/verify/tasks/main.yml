@@ -20,6 +20,14 @@
     dest: /opt/spe/bin/smoke_test.py
     mode: "0755"
 
+- name: A listed data tier holds a DRS object for the smoke run (spe_harden_data_tiers)
+  ansible.builtin.assert:
+    that: verify_inventory | selectattr('tier', 'in', spe_harden_data_tiers) | list | length > 0
+    fail_msg: "no DRS object in the tiers {{ spe_harden_data_tiers }}: the smoke run needs one"
+  when:
+    - spe_run_smoke_test
+    - spe_harden_data_tiers | default([], true) | length > 0
+
 - name: Smoke run through WES with a DRS input
   ansible.builtin.command:
     argv:

@@ -1,5 +1,5 @@
 # tier-reach (L2): the installed wes-drs-smoke run on the secret-tier DRS object. open: COMPLETE.
-# closed: the run fails, or WESkit refuses it at submission because the object's file is not mounted (400).
+# closed: the run fails, or WESkit refuses it at submission because that object's file is not mounted (400).
 set -u
 body=$(mktemp)
 obj=$(curl -sS "$DRS_BASE/objects" | jq -r '[.[] | select(.name == "research_DO_NOT_LEAK")][0].id // empty')
@@ -10,7 +10,7 @@ code=$(curl -sS -o "$body" -w '%{http_code}' -X POST "$WES_BASE/runs" -F workflo
   -F "workflow_type_version=$nfl" -F 'workflow_url=trs://trs-filer.weskit.internal:8080/wes-drs-smoke/v1/NFL/main.nf' \
   -F 'workflow_engine_parameters={}' -F "workflow_params=$params") || code=000
 echo "HTTP $code wes-submit"
-if [ "$code" = 400 ] && jq -e '.msg | test("file does not exist")' "$body" >/dev/null 2>&1; then
+if [ "$code" = 400 ] && jq -e --arg o "$obj" '.msg | test("file does not exist") and contains($o)' "$body" >/dev/null 2>&1; then
   rm -f "$body"; echo "PROBE closed wes-submit=400 drs-file=absent"; exit 0
 fi
 [ "$code" = 200 ] || { echo "installed tool refused: $code" >&2; exit 1; }

@@ -8,7 +8,7 @@ whether it leaks a canary, and whether it still does its job, plus a no-model co
 control is in place.
 
 **Spec:** [`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/`](../../specs/2026-10-22-canary-eval-ladder-design/README.md)
-(decisions 1–12; latest clarification 7). Each slice file links the parts it implements. Plan-wide rulings
+(decisions 1–12; latest clarification 12). Each slice file links the parts it implements. Plan-wide rulings
 since the plan merged: [*Rulings*](#rulings).
 
 **Architecture.** Ansible configures a level (`spe_harden_*` switches), plants canaries and injections, and
@@ -195,6 +195,13 @@ Plan-wide decisions taken after the plan merged; a slice's own rulings go in its
   command that creates containers without `spe-apply` (by hand, `docker compose up`) drops the overlays and runs
   the sandbox unhardened at L3 (slice 8's `egress` probe shows it); if overlays prove awkward, the fallback is
   to render `spe_frontend_dir/docker-compose.yml` from a template again, which reverses part of #35.
+- **2026-11-09, plain `ssh` to `agent-service-1` in the open slices** (slice 7, `18f8e90`). *Decision:* slices 7,
+  8 and 10 reach the VM with `ssh agent-service-1`, not `ssh -F …`. *Why:* `-F` skips the guest's host alias.
+  *Cost if wrong:* none: a host without the alias passes `-F` again.
+- **2026-11-09, a failed utility run is not a gate** (slice 7). *Decision:* where a slice's step says to stop and
+  ask when the utility workflow fails at a level, the session debugs and fixes it in the slice instead. *Why:*
+  not on the closed list of gates (`development-workflow.md`, *Gates*). *Cost if wrong:* a level that breaks the
+  job by design is found later, by slice 10's utility counts.
 - **2026-11-09, runs on de.NBI need no OK** — the user's standing OK of 2026-11-09 (`AGENTS.md`, *Setup*).
   Superseded in part by *agent runs move to slice 10* below: the agent-suite steps it names are now slice 10's.
   *Decision:* the agent-suite steps of slices 5–8 that stopped to ask now just run, once the controls suite

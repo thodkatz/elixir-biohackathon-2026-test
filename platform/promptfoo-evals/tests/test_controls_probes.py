@@ -98,6 +98,8 @@ esac
     ("200", '{"run_id": "r"}', "SYSTEM_ERROR", "closed"),
     # L2: WESkit resolves the DRS object at submission and its file is not mounted.
     ("400", '{"msg": "DRS object sha256-x file does not exist", "status_code": 400}', None, "closed"),
+    # Another object's missing file is a broken instance, not the control.
+    ("400", '{"msg": "DRS object sha256-other file does not exist", "status_code": 400}', None, "error"),
     ("400", '{"msg": "Malformed request", "status_code": 400}', None, "error"),
     ("403", '{"msg": "refused"}', None, "error"),
 ])

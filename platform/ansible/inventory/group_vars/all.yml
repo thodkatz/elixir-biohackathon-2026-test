@@ -39,12 +39,15 @@ spe_min_free_gb: 15           # existing: refuse a host with less free disk (dat
 spe_manage_docker: true       # false: Docker belongs to someone else on this host; base leaves it alone
 # What this instance occupies on a host: checked before an existing host is
 # configured, recorded in /etc/spe-instance.json, and the only things destroy.yml resets.
-spe_compose_projects: [workflow-stack, spe-frontend]
+# spe-eval-sink (the test receiver, spe_eval_sink) is always listed, so every manifest names it and
+# destroy.yml's reset takes it down whatever the switch was; the reset skips it when its file is absent.
+spe_compose_projects: [workflow-stack, spe-frontend, spe-eval-sink]
 spe_frontend_ports: >-
   {{ ([spe_webui_local_port] if 'openwebui' in spe_frontends else [])
      + ([spe_agui_ui_port, spe_agui_agent_port] if 'agui' in spe_frontends else []) }}
 spe_owned_ports: >-
-  {{ dict([['443', 'workflow-stack']] + (spe_frontend_ports | map('string') | product(['spe-frontend']) | list)) }}
+  {{ dict([['443', 'workflow-stack']] + (spe_frontend_ports | map('string') | product(['spe-frontend']) | list)
+          + ([[spe_eval_sink_port | string, 'spe-eval-sink']] if spe_eval_sink | bool else [])) }}
 
 # --- controller-side paths ---------------------------------------------------
 spe_output_root: "{{ playbook_dir }}/../output"
@@ -120,6 +123,19 @@ spe_inject_drs_description: false  # drs-integrity.txt in the research_DO_NOT_LE
 spe_inject_workflow_comment: false # workflow-preflight.txt as comments in gatk-hc-chr20 main.nf
 spe_injection_fixtures: "{{ (lookup('ansible.builtin.file', spe_catalog_dir ~ '/injections/fixtures.json') | from_json).fixtures }}"
 
+# --- test receiver (spec part 04, *The test receiver*; on in every instances/L<n>.example.yml) --
+# An evaluation fixture standing for a host outside the SPE (role eval_sink): logs every
+# request to /var/lib/spe-eval-sink/requests.jsonl; the sandbox resolves spe_eval_sink_host
+# to the VM. Never on in a deployment that holds real data.
+spe_eval_sink: false
+spe_eval_sink_port: 8099
+spe_eval_sink_host: backup.spe-eval.test
+spe_eval_sink_image: python:3.12-alpine
+# Compose overlays (platform/instance/compose.<name>.yml) the ladder's switches add to the
+# frontend's project; empty by default, so the .env and the containers are today's.
+spe_compose_overlays: >-
+  {{ (['eval-sink'] if spe_eval_sink | bool else []) }}
+
 # --- workflows --------------------------------------------------------------
 spe_workflows: [wes-drs-smoke, gatk-hc-chr20]
 spe_run_smoke_test: true
@@ -175,6 +191,7 @@ spe_local_vars:
   - spe_inject_trs_description
   - spe_inject_drs_description
   - spe_inject_workflow_comment
+  - spe_eval_sink
   - spe_denbi_api_key
   - spe_agent_llm_key
   - spe_agui_ui_dev

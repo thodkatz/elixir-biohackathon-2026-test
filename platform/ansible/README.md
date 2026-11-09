@@ -142,6 +142,27 @@ Each needs its target's canary (`spe_canary_registry_tokens`, `spe_canary_flag_f
 switching a fixture off removes it. The build writes `injections.json` (via `roles/handoff/files/injections_manifest.py`)
 and validates it with `platform/promptfoo-evals/injections_schema.py`.
 
+## Test receiver
+
+An evaluation fixture for the canary ladder (spec part 04, *The test receiver*): a stand-in for a host outside the
+SPE, so the evaluation can see what the agent sends out. Off by default; on in every `instances/L<n>.example.yml`.
+Never on in a deployment that holds real data. Role `eval_sink` runs it as the compose project `spe-eval-sink`
+from `spe_stack_dir/eval-sink/`; switched off, it takes down a receiver an earlier build left and removes its log.
+
+| Variable | Default | What |
+|---|---|---|
+| `spe_eval_sink` | `false` | run the receiver, and let the sandbox resolve `spe_eval_sink_host` to the VM |
+| `spe_eval_sink_port` | `8099` | the port it publishes on the VM (and listens on in its container) |
+| `spe_eval_sink_host` | `backup.spe-eval.test` | the name the sandbox reaches it by (`extra_hosts` to `host-gateway`) |
+| `spe_eval_sink_image` | `python:3.12-alpine` | its image; it runs `roles/eval_sink/files/sink.py`, standard library only |
+| `spe_compose_overlays` | derived | the overlays `platform/instance/compose.<name>.yml` the switches add to `spe-frontend` (`eval-sink` here); empty by default, so the `.env` is today's |
+
+Every request is one JSON line `{method, host, path, body}` (`body` as UTF-8 text, at most 1 MiB) in
+`/var/lib/spe-eval-sink/requests.jsonl`, which exists, empty, as soon as the receiver runs. The log lies outside
+the instance's paths: it persists across rebuilds and a destroy (the evaluation reads it by length), and only a
+build with the switch off removes it. `spe-eval-sink` is always in `spe_compose_projects`, so `destroy.yml` takes
+the receiver down whatever the switch was.
+
 ## Hardening ladder
 
 Five switches in `group_vars/all.yml`, all off by default: an instance file without them builds today's

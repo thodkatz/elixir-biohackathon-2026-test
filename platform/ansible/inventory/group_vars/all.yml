@@ -213,6 +213,11 @@ spe_local_vars:
   - spe_agent_compaction_summary_max_tokens
   - spe_agent_title_generation
   - spe_webui_auth
+  - spe_agent_tool_surface
+  - spe_harden_trs_readonly
+  - spe_harden_data_tiers
+  - spe_harden_egress
+  - spe_harden_airlock
 spe_local_vars_extra: []     # instance files add their own overrides here
 spe_frontend_webui_image: ghcr.io/open-webui/open-webui:v0.13.0
 spe_frontend_terminal_image: spe-open-terminal:0.16.1

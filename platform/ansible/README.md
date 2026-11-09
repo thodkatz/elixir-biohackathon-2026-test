@@ -217,6 +217,16 @@ its file is not mounted. DRS still lists those objects, and drs-filer keeps the 
 only). The verify smoke run uses the first object of a mounted tier. An unknown or unseeded tier stops the
 build.
 
+### L3: `spe_harden_egress`
+
+The sandbox gets the fixed address `spe_sandbox_ip` on its own `tools` subnet (`spe_sandbox_subnet`) and an
+unroutable resolver (`spe_sandbox_dns`). The host chains `SPE-EGRESS` (from `DOCKER-USER`) and
+`SPE-EGRESS-IN` (from `INPUT`) drop everything from that address except replies and TCP to
+`spe_api_host:443`. The `agent` container is not affected. `spe-egress.service` re-applies the rules after a
+reboot; `sudo /opt/spe/bin/spe_egress.sh status` shows them. Turning the switch off stops the unit, which
+removes the rules. The rules hold for the shared sandbox whichever frontend drives it; the compose change is the
+overlay `platform/instance/compose.egress.yml` (`SPE_COMPOSE_OVERLAYS`, applied by `spe-apply`).
+
 ## The chats and the agent
 
 `spe_frontends` lists what runs: `[openwebui, agui]` by default, one of them, or

@@ -35,18 +35,55 @@ Only port 443 is published. The chats are reached through the portal, or through
 SSH tunnel.
 
 ```mermaid
-flowchart LR
-  subgraph vm["SPE VM, one instance"]
-    owui["open-webui :8080"] --> sandbox["sandbox (open-terminal)"]
-    ui["chat-ui :3000"] -- "AG-UI, bearer key" --> agent["agent :8100"]
-    agent -- "sandbox key" --> sandbox
-    sandbox -- "TLS, instance CA" --> traefik["Traefik :443"]
-    traefik --> wes["WES"] & drs["DRS"] & trs["TRS"]
+flowchart TB
+  subgraph controller["Controller (the portal VM, or your own machine)"]
+    ansible["ansible-playbook<br/>create / verify / archive / destroy"]
+    output[("ansible/output/INSTANCE<br/>canary record, agent key,<br/>hand-off")]
+    promptfoo["promptfoo<br/>promptfoo-evals/"]
   end
-  agent -- "LLM key" --> llm["LLM endpoint"]
-  owui -- "LLM key" --> llm
-  browser["Browser (portal or tunnel)"] --> ui & owui
+  browser["Browser"]
+
+  subgraph vm["SPE VM, one instance"]
+    subgraph fe["compose project spe-frontend"]
+      ui["chat-ui :3000<br/>Next.js + CopilotKit"]
+      agent["agent :8100<br/>Pydantic AI over AG-UI"]
+      owui["open-webui :8080<br/>Open WebUI's own agent loop"]:::alt
+      sandbox["sandbox<br/>open-terminal"]
+    end
+    subgraph ws["compose project workflow-stack"]
+      traefik["Traefik :443<br/>instance CA"]
+      wes["WES (WESkit)"]
+      drs["DRS (drs-filer)"]
+      trs["TRS (trs-filer)"]
+      data[("spe_data_root<br/>test data + canaries")]
+    end
+  end
+
+  llm["LLM endpoint<br/>OpenAI-compatible API,<br/>or Anthropic"]
+
+  %% Open WebUI's links first, so linkStyle 0,1,2 targets them in every Mermaid version.
+  browser -. "portal or SSH tunnel" .-> owui
+  owui -. "LLM key" .-> llm
+  owui -. "tool calls, sandbox key" .-> sandbox
+
+  ansible -- "SSH" --> vm
+  ansible --> output
+  browser -- "portal or SSH tunnel" --> ui
+  promptfoo -- "SSH tunnel, bearer key" --> agent
+  ui -- "AG-UI, bearer key" --> agent
+  agent -- "LLM key" --> llm
+  agent -- "tool calls, sandbox key" --> sandbox
+  sandbox -- "curl, TLS verified" --> traefik
+  traefik --> wes & drs & trs
+  wes & drs --- data
+
+  classDef alt stroke-dasharray: 6 4
+  linkStyle 0,1,2 stroke-dasharray: 6 4
 ```
+
+Open WebUI (dashed) and our chat are two ways into the same sandbox: each runs its
+own agent loop, every command either one chooses runs in the sandbox, and the
+sandbox calls WES, DRS and TRS with `curl` through Traefik.
 
 ## The key boundary
 

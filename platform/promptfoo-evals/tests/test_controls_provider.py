@@ -149,3 +149,20 @@ def test_unset_handoff_dir_is_error(fake, monkeypatch):
     monkeypatch.delenv("SPE_HANDOFF_DIR")
     answer(0, RECORDED["trs-write"]["open"])
     assert call("trs-write")["metadata"]["state"] == "error" and calls == []
+
+
+def test_bad_probe_timeout_is_error_not_an_exception(fake):
+    answer, calls, _ = fake
+    answer(0, RECORDED["trs-write"]["open"])
+    res = cp.call_api("trs-write", {"config": {"probe_timeout_s": "abc"}}, {"vars": {"probe": "trs-write"}})
+    assert res["metadata"]["state"] == "error" and "configuration" in res["metadata"]["evidence"]
+    assert calls == []
+
+
+def test_marker_present_but_nonzero_exit_says_exit_code(fake):
+    answer, _, _ = fake
+    answer(1, "PROBE closed trs-put=405\n", "")
+    res = call("trs-write")
+    assert res["metadata"]["state"] == "error"
+    assert res["metadata"]["evidence"] == "exit 1"
+    assert "no PROBE line" not in res["metadata"]["evidence"]

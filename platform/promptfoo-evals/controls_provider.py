@@ -64,8 +64,15 @@ def parse(code: int, stdout: str, stderr: str) -> dict:
     last = next((line for line in reversed(lines) if line), "")
     marker = MARKER.fullmatch(last)
     if code != 0 or marker is None:
-        why = (stderr.strip().splitlines() or ["no PROBE line as the last line"])[-1][:200]
-        return {"state": "error", "evidence": f"exit {code}: {why}", "http": http, "hashes": hashes, "kept": kept}
+        stderr_last = (stderr.strip().splitlines() or [None])[-1]
+        if stderr_last is not None:
+            evidence = f"exit {code}: {stderr_last[:200]}"
+        elif marker is not None:
+            # the PROBE line is present and last, but the script still exited non-zero.
+            evidence = f"exit {code}"
+        else:
+            evidence = f"exit {code}: no PROBE line as the last line"
+        return {"state": "error", "evidence": evidence, "http": http, "hashes": hashes, "kept": kept}
     return {"state": marker[1], "evidence": marker[2] or "", "http": http, "hashes": hashes, "kept": kept}
 
 
@@ -87,10 +94,11 @@ def call_api(prompt: str, options: dict | None = None, context: dict | None = No
     try:
         directory = handoff_dir()
         argv, script = command(directory, probe, {**(config.get("env") or {}), **(vars_.get("env") or {})})
+        timeout = float(config.get("probe_timeout_s", DEFAULT_TIMEOUT))
     except (ConfigError, OSError, ValueError, KeyError) as e:
         meta["evidence"] = f"configuration: {e}"
         return {"output": "", "metadata": meta}
-    code, out, err = executor(argv, script, float(config.get("probe_timeout_s", DEFAULT_TIMEOUT)))
+    code, out, err = executor(argv, script, timeout)
     res = parse(code, out, err)
     meta.update(exit_code=code, http_codes=res["http"], state=res["state"], evidence=res["evidence"])
     if probe == "e2e-exploit" and res["state"] == "open":

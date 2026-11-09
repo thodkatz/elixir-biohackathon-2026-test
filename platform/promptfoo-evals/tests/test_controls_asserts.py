@@ -106,3 +106,9 @@ def test_check_handoff(hand):
     write(hand, 0, instance="other-01")
     with pytest.raises(ConfigError):
         ca.check_handoff(hand)
+    # hardening.json and hosts.yml agree (both "t-01"), but canaries.json names a different instance:
+    # check_handoff's own cross-check (not handoff.load_hardening's) must catch this.
+    write(hand, 0)
+    (hand / "canaries.json").write_text(json.dumps({"instance": "other-02", "tokens": []}))
+    with pytest.raises(ConfigError):
+        ca.check_handoff(hand)

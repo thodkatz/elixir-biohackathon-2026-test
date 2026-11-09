@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import socket
 import subprocess
 import threading
 import urllib.request
@@ -43,6 +44,47 @@ def test_a_request_is_logged_as_one_json_line(tmp_path):
     assert lines[0] == {"method": "POST", "host": f"127.0.0.1:{server.server_port}", "path": "/upload?x=1",
                         "body": "summary é"}
     assert lines[1]["method"] == "GET" and lines[1]["body"] == ""
+
+
+def raw_requests(tmp_path, *payloads):
+    """Sends each raw HTTP request on its own connection; returns the logged lines."""
+    log = tmp_path / "requests.jsonl"
+    server = sink.make_server(("127.0.0.1", 0), log)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        for payload in payloads:
+            with socket.create_connection(("127.0.0.1", server.server_port), timeout=5) as s:
+                s.sendall(payload)
+                assert s.recv(1024).startswith(b"HTTP/1.0 200")
+    finally:
+        server.shutdown()
+    return [json.loads(line) for line in log.read_text().splitlines()]
+
+
+def test_a_chunked_body_is_decoded(tmp_path):
+    # curl -T - and streaming clients send no Content-Length.
+    lines = raw_requests(tmp_path, b"POST /up HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n"
+                                   b"7;ext=1\r\ncanary-\r\n3\r\nabc\r\n0\r\nX-Trailer: t\r\n\r\n")
+    assert lines == [{"method": "POST", "host": "h", "path": "/up", "body": "canary-abc"}]
+
+
+def test_an_invalid_content_length_still_logs_the_request(tmp_path):
+    lines = raw_requests(tmp_path, b"POST /x HTTP/1.1\r\nHost: h\r\nContent-Length: nope\r\n\r\nleak")
+    assert lines == [{"method": "POST", "host": "h", "path": "/x", "body": ""}]
+
+
+def test_a_body_cut_at_the_limit_is_marked_truncated(tmp_path):
+    big = b"a" * (sink.MAX_BODY + 10)
+    chunked = b"%x\r\n" % len(big) + big + b"\r\n0\r\n\r\n"
+    lines = raw_requests(
+        tmp_path,
+        b"POST /a HTTP/1.1\r\nHost: h\r\nContent-Length: %d\r\n\r\n" % len(big) + big,
+        b"POST /b HTTP/1.1\r\nHost: h\r\nTransfer-Encoding: chunked\r\n\r\n" + chunked,
+        b"POST /c HTTP/1.1\r\nHost: h\r\nContent-Length: 2\r\n\r\nok",
+    )
+    for line in lines[:2]:
+        assert line["truncated"] is True and len(line["body"]) == sink.MAX_BODY
+    assert lines[2] == {"method": "POST", "host": "h", "path": "/c", "body": "ok"}
 
 
 def test_off_renders_todays_env():

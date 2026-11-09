@@ -1,7 +1,10 @@
-// The session API's handlers, framework-free: the Next.js routes in
-// app/api/sessions/ only call these. Error bodies are generic; details go to the server log.
-import { ValidationError, isDeleted, isSessionId, parsePatch } from "./sessions.ts";
-import type { SessionStore, SessionView } from "./sessions.ts";
+// The session API's handlers, framework-free: the Next.js routes in app/api/sessions/ only call these.
+// Metadata only: PATCH, DELETE and POST .../title append a meta line; no route changes a message. Error
+// bodies are generic; details go to the server log.
+import { ValidationError, codeOf, isSessionId, parsePatch } from "./sessions.ts";
+import type { Journals } from "./sessions.ts";
+import { TitleUnavailable, firstQuestion } from "./title.ts";
+import type { Titler } from "./title.ts";
 
 const MAX_BODY = 16 * 1024;
 
@@ -10,11 +13,16 @@ function fail(status: number, error: string): Response {
 }
 
 function serverError(what: string, error: unknown): Response {
-  console.error(`sessions api: ${what}:`, error instanceof Error ? error.message : error);
+  console.error(`sessions api: ${what}:`, codeOf(error));
   return fail(500, "the session store failed; see the chat-ui logs");
 }
 
 class TooLarge extends Error {}
+
+// A JSON `Content-Type`, ignoring any `; charset=...` suffix.
+function isJsonContentType(request: Request): boolean {
+  return (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase() === "application/json";
+}
 
 // Reads at most MAX_BODY bytes; a larger body is refused without reading the rest.
 async function readBody(request: Request): Promise<string> {
@@ -37,27 +45,25 @@ async function readBody(request: Request): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-export async function listSessions(store: SessionStore): Promise<Response> {
+export async function listSessions(journals: Journals): Promise<Response> {
   try {
-    return Response.json(await store.list());
+    return Response.json(await journals.list());
   } catch (error) {
     return serverError("list", error);
   }
 }
 
-export async function getSession(store: SessionStore, id: string): Promise<Response> {
+export async function getSession(journals: Journals, id: string): Promise<Response> {
   if (!isSessionId(id)) return fail(400, "invalid session id");
   try {
-    const record = await store.read(id);
-    if (!record || isDeleted(record)) return fail(404, "no such session");
-    const { deleted_at: _deleted, runs: _runs, ...view } = record;
-    return Response.json(view satisfies SessionView);
+    const view = await journals.get(id);
+    return view ? Response.json(view) : fail(404, "no such session");
   } catch (error) {
     return serverError(`read ${id}`, error);
   }
 }
 
-export async function patchSession(store: SessionStore, id: string, request: Request): Promise<Response> {
+export async function patchSession(journals: Journals, id: string, request: Request): Promise<Response> {
   if (!isSessionId(id)) return fail(400, "invalid session id");
   let patch;
   try {
@@ -68,18 +74,66 @@ export async function patchSession(store: SessionStore, id: string, request: Req
     return serverError(`read body for ${id}`, error);
   }
   try {
-    const meta = await store.patch(id, patch, new Date());
+    const meta = await journals.patch(id, patch);
     return meta ? Response.json(meta) : fail(404, "no such session");
   } catch (error) {
     return serverError(`patch ${id}`, error);
   }
 }
 
-export async function deleteSession(store: SessionStore, id: string): Promise<Response> {
+export async function deleteSession(journals: Journals, id: string): Promise<Response> {
   if (!isSessionId(id)) return fail(400, "invalid session id");
   try {
-    return (await store.softDelete(id, new Date())) ? new Response(null, { status: 204 }) : fail(404, "no such session");
+    return (await journals.softDelete(id)) ? new Response(null, { status: 204 }) : fail(404, "no such session");
   } catch (error) {
     return serverError(`delete ${id}`, error);
+  }
+}
+
+// POST /api/sessions/{id}/title: once a run of the session has added a user message (from its run_start, so
+// while that run is still going) and the session has no title of its own (no meta title: neither a rename nor
+// an earlier model title), the agent writes one from that first question, read from the journal; it is
+// appended only if still no title is set (a rename meanwhile wins). Answers the
+// metadata, unchanged when nothing was written. The agent failing is logged, not an error for the browser.
+// No body is needed, so without this check the request would be a CORS simple request (no preflight) that
+// another site could trigger freely, each call a paid model call while the agent keeps failing; requiring a
+// JSON Content-Type forces a preflight.
+export async function titleSession(journals: Journals, id: string, titler: Titler, request: Request): Promise<Response> {
+  if (!isSessionId(id)) return fail(400, "invalid session id");
+  if (!isJsonContentType(request)) return fail(415, "Content-Type must be application/json");
+  let messages;
+  try {
+    const state = await journals.meta(id);
+    if (!state) return fail(404, "no such session");
+    if (state.titled) return Response.json(state.meta);
+    const conv = await journals.load(id, { outsideQueue: true });
+    messages = conv && firstQuestion(conv);
+    if (!messages) return Response.json(state.meta);
+  } catch (error) {
+    return serverError(`read ${id}`, error);
+  }
+  let title: string;
+  try {
+    title = parsePatch({ title: await titler(id, messages) }).title!;
+  } catch (error) {
+    // The status or the error's name only: the agent's detail may quote the model.
+    const why = error instanceof TitleUnavailable ? error.message : codeOf(error);
+    console.warn(`sessions api: title ${id}: no title (${why})`);
+    return unchanged(journals, id);
+  }
+  try {
+    const meta = await journals.titleIfUntitled(id, title);
+    return meta ? Response.json(meta) : fail(404, "no such session");
+  } catch (error) {
+    return serverError(`title ${id}`, error);
+  }
+}
+
+async function unchanged(journals: Journals, id: string): Promise<Response> {
+  try {
+    const state = await journals.meta(id);
+    return state ? Response.json(state.meta) : fail(404, "no such session");
+  } catch (error) {
+    return serverError(`read ${id}`, error);
   }
 }

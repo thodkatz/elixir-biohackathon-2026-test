@@ -11,19 +11,33 @@
           - spe_instance is string and spe_instance | length > 0
           - spe_seed is not none
           - spe_provision in ['openstack', 'existing']
-          - spe_frontend | default('', true) in ['', 'none', 'openwebui', 'agui']
+          - spe_frontends is sequence and spe_frontends is not string
+          - spe_frontends | difference(['openwebui', 'agui']) | length == 0
         fail_msg: >-
           set spe_instance and spe_seed (pass -e @instances/<name>.yml); spe_provision is
-          openstack or existing; spe_frontend is none, openwebui or agui
+          openstack or existing; spe_frontends is a list of openwebui and/or agui (both by
+          default, [] for none)
   roles:
     - { role: os_provision, tags: [always], when: spe_provision == 'openstack' }
     - { role: existing_host, tags: [always], when: spe_provision == 'existing' }
+  post_tasks:
+    # The run report of a portal workspace lives here on the controller, not on the
+    # VM (roles/run_report, platform/report); nothing for hand-made instances.
+    - name: Run report on the controller
+      ansible.builtin.import_role:
+        name: run_report
+      tags: [always]
+      when: spe_coder_workspace_id | length > 0 and not spe_local_apply
 
 # The VM's work runs in overlapping lanes. As soon as Docker is up, the package
 # install, the image pulls and the image builds (stack, sandbox, AG-UI) start in
 # the background; the data copy and the seeding run meanwhile; every consumer
 # joins the job it needs right before it needs it (the *_from: wait tasks).
 # Each tag still selects one stage for a re-run against an existing instance.
+# On the instance itself, `spe-apply stack|all|ansible` runs this playbook with
+# the vars file role repo wrote at creation (spe_local_apply: true): no clone, no
+# data copy, no hand-off; the stack, registrations and frontend roles re-apply the
+# clone's current state.
 - name: Configure the API instance
   hosts: spe_api
   gather_facts: false
@@ -59,13 +73,14 @@
           vars:
             spe_preflight_cfg:
               instance: "{{ spe_instance }}"
-              provision: "{{ spe_provision }}"
+              provision: "{{ spe_manifest_provision }}"
               marker: /etc/spe-instance
               manifest: /etc/spe-instance.json
               paths:
                 stack_dir: "{{ spe_stack_dir }}"
                 frontend_dir: "{{ spe_frontend_dir }}"
                 data_root: "{{ spe_data_root }}"
+                repo_dir: "{{ spe_repo_dir }}"
               ports: "{{ spe_owned_ports }}"
               projects: "{{ spe_compose_projects }}"
               min_free_gb: "{{ spe_min_free_gb | int }}"
@@ -103,6 +118,11 @@
         name: prefetch
       tags: [stack, frontend]
 
+    - name: Repository clone (what the frontend runs from)
+      ansible.builtin.import_role:
+        name: repo
+      tags: [frontend]
+
     - name: Certificate and trust anchor
       ansible.builtin.import_role:
         name: tls
@@ -112,7 +132,7 @@
       ansible.builtin.import_role:
         name: sandbox
       tags: [frontend]
-      when: spe_frontend in ['openwebui', 'agui']
+      when: spe_frontends | length > 0
 
     - name: Stack sources and image builds in the background
       ansible.builtin.import_role:
@@ -125,7 +145,7 @@
         name: agui
         tasks_from: build
       tags: [frontend]
-      when: spe_frontend == 'agui'
+      when: "'agui' in spe_frontends"
 
     - name: Data copy and seeding
       ansible.builtin.import_role:
@@ -153,17 +173,40 @@
         name: trs_install
       tags: [trs]
 
-    - name: OpenWebUI frontend
+    # The frontends: each writes its configuration, one `spe-apply up` starts them
+    # all with the shared sandbox, then each sets up what needs it running.
+    - name: Open WebUI configuration
+      ansible.builtin.import_role:
+        name: openwebui
+        tasks_from: config
+      tags: [frontend]
+      when: "'openwebui' in spe_frontends"
+
+    - name: AG-UI configuration
+      ansible.builtin.import_role:
+        name: agui
+        tasks_from: config
+      tags: [frontend]
+      when: "'agui' in spe_frontends"
+
+    - name: Frontend containers up
+      ansible.builtin.import_role:
+        name: sandbox
+        tasks_from: up
+      tags: [frontend]
+      when: spe_frontends | length > 0
+
+    - name: Open WebUI frontend
       ansible.builtin.import_role:
         name: openwebui
       tags: [frontend]
-      when: spe_frontend == 'openwebui'
+      when: "'openwebui' in spe_frontends"
 
     - name: AG-UI frontend
       ansible.builtin.import_role:
         name: agui
       tags: [frontend]
-      when: spe_frontend == 'agui'
+      when: "'agui' in spe_frontends"
 
     - name: Hand-off files
       ansible.builtin.import_role:
@@ -174,3 +217,10 @@
       ansible.builtin.import_role:
         name: verify
       tags: [verify]
+
+    - name: Local re-apply tooling ready (collections installed in the background)
+      ansible.builtin.import_role:
+        name: repo
+        tasks_from: wait
+      tags: [frontend]
+      when: not spe_local_apply

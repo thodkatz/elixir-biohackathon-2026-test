@@ -165,25 +165,6 @@ data "coder_parameter" "smoke_test" {
   order        = 7
 }
 
-data "coder_parameter" "frontend" {
-  name         = "frontend"
-  display_name = "Chat frontend"
-  description  = "openwebui: Open WebUI runs the agent loop (chats and the run report are archived on stop). agui: our own Pydantic AI agent with a CopilotKit chat (platform/agui)."
-  type         = "string"
-  form_type    = "radio"
-  default      = "openwebui"
-  mutable      = true
-  order        = 8
-  option {
-    name  = "Open WebUI"
-    value = "openwebui"
-  }
-  option {
-    name  = "AG-UI agent (Pydantic AI + CopilotKit)"
-    value = "agui"
-  }
-}
-
 # --- derived values -----------------------------------------------------------
 locals {
   instance = lower("cw-${data.coder_workspace_owner.me.name}-${data.coder_workspace.me.name}")
@@ -192,19 +173,19 @@ locals {
 
   ansible_vars = merge(
     {
-      spe_instance          = local.instance
-      spe_seed              = local.seed
-      spe_flavor            = data.coder_parameter.flavor.value
-      spe_samples           = jsondecode(data.coder_parameter.samples.value)
-      spe_tiers             = jsondecode(data.coder_parameter.tiers.value)
-      spe_workflows         = jsondecode(data.coder_parameter.workflows.value)
-      spe_run_smoke_test    = tobool(data.coder_parameter.smoke_test.value)
-      spe_frontend          = data.coder_parameter.frontend.value
-      spe_coder_owner       = data.coder_workspace_owner.me.name
-      spe_coder_owner_email = data.coder_workspace_owner.me.email
-      spe_coder_workspace   = data.coder_workspace.me.name
-      spe_coder_agent_token = nonsensitive(coder_agent.main.token)
-      spe_coder_init_script = local.agent_init_script
+      spe_instance           = local.instance
+      spe_seed               = local.seed
+      spe_flavor             = data.coder_parameter.flavor.value
+      spe_samples            = jsondecode(data.coder_parameter.samples.value)
+      spe_tiers              = jsondecode(data.coder_parameter.tiers.value)
+      spe_workflows          = jsondecode(data.coder_parameter.workflows.value)
+      spe_run_smoke_test     = tobool(data.coder_parameter.smoke_test.value)
+      spe_coder_owner        = data.coder_workspace_owner.me.name
+      spe_coder_owner_email  = data.coder_workspace_owner.me.email
+      spe_coder_workspace    = data.coder_workspace.me.name
+      spe_coder_workspace_id = data.coder_workspace.me.id
+      spe_coder_agent_token  = nonsensitive(coder_agent.main.token)
+      spe_coder_init_script  = local.agent_init_script
     },
     { for k, _ in local.canary_types : "spe_canary_${k}" => contains(local.canaries, k) },
   )
@@ -217,9 +198,28 @@ locals {
 }
 
 # --- agent + app --------------------------------------------------------------
+locals {
+  owner_name = contains(["", "default"], data.coder_workspace_owner.me.full_name) ? data.coder_workspace_owner.me.name : data.coder_workspace_owner.me.full_name
+}
+
 resource "coder_agent" "main" {
   os   = "linux"
   arch = "amd64"
+  # The home: Coder Agents reads AGENTS.md there, which role repo links to
+  # platform/instance/workspace/AGENTS.md (the workspace guide: what applies
+  # where, the hand-over). A pointer from the clone's AGENTS.md was not followed.
+  # Skills come from ~/.agents/skills. The clone is ~/sperange.
+  dir = "/home/ubuntu"
+
+  # Commits made in the clone (by Coder Agents or over the terminal) carry the
+  # workspace owner's identity: the full name from the account settings, else
+  # the username (Coder reports "default" when no full name is set).
+  env = {
+    GIT_AUTHOR_NAME     = local.owner_name
+    GIT_AUTHOR_EMAIL    = data.coder_workspace_owner.me.email
+    GIT_COMMITTER_NAME  = local.owner_name
+    GIT_COMMITTER_EMAIL = data.coder_workspace_owner.me.email
+  }
 
   display_apps {
     vscode          = false
@@ -230,14 +230,16 @@ resource "coder_agent" "main" {
   }
 }
 
-# One app per frontend; only the selected one exists, so the dashboard shows a
-# single button. Both are bound to 127.0.0.1 on the VM and reached through the
-# agent (share = owner: only the workspace owner may open them).
+# Every workspace runs both chat frontends against the same sandbox and stack
+# (Ansible's spe_frontends default); the person opens the one to use. Both are
+# bound to 127.0.0.1 on the VM and reached through the agent (share = owner:
+# only the workspace owner may open them). Open WebUI keeps chats and notes,
+# archived on stop; the AG-UI chat shows every tool call as a card. The run
+# report is the "Report" app below, on the portal VM.
 resource "coder_app" "openwebui" {
-  count        = data.coder_parameter.frontend.value == "openwebui" ? 1 : 0
   agent_id     = coder_agent.main.id
   slug         = "openwebui"
-  display_name = "OpenWebUI"
+  display_name = "Open WebUI"
   icon         = "/icon/openai.svg"
   url          = "http://localhost:8080"
   subdomain    = true
@@ -251,11 +253,10 @@ resource "coder_app" "openwebui" {
 }
 
 resource "coder_app" "chat" {
-  count        = data.coder_parameter.frontend.value == "agui" ? 1 : 0
   agent_id     = coder_agent.main.id
   slug         = "chat"
-  display_name = "Chat (AG-UI)"
-  icon         = "/icon/terminal.svg"
+  display_name = "AG-UI chat"
+  icon         = "/icon/widgets.svg"
   url          = "http://localhost:3000"
   subdomain    = true
   share        = "owner"
@@ -265,6 +266,34 @@ resource "coder_app" "chat" {
     interval  = 10
     threshold = 30
   }
+}
+
+# Report: the run report, kept on the portal VM by the report service
+# (platform/report), never on the instance. An external link, so it opens while
+# the workspace is stopped too; the report's owner and admins edit, everyone
+# logged in reads. create.yml writes the report at the first build.
+resource "coder_app" "report" {
+  agent_id     = coder_agent.main.id
+  slug         = "report"
+  display_name = "Report"
+  icon         = "/icon/folder.svg"
+  url          = "${data.coder_workspace.me.access_url}/reports/${data.coder_workspace.me.id}"
+  external     = true
+  open_in      = "tab"
+}
+
+# Rebuild: applies the clone to the running frontend (spe-apply: build the images
+# that changed, recreate the containers, wait for health) in a web terminal.
+# Edits to the runbook, the prompt and the agent's source are live without it;
+# see platform/instance/workspace/AGENTS.md. The web terminal reconnects when
+# its process ends and a reconnect runs the command again, so a bare command
+# would rebuild in a loop: the command ends in a shell instead.
+resource "coder_app" "rebuild" {
+  agent_id     = coder_agent.main.id
+  slug         = "rebuild"
+  display_name = "Rebuild"
+  icon         = "/icon/docker.svg"
+  command      = "spe-apply; echo; echo '== Rebuild finished. Close this tab, or use this shell.'; exec bash -l"
 }
 
 # --- the instance (Ansible) ----------------------------------------------------
@@ -310,8 +339,8 @@ resource "coder_metadata" "spe" {
     value = tostring(local.seed)
   }
   item {
-    key   = "frontend"
-    value = data.coder_parameter.frontend.value
+    key   = "run report"
+    value = "${data.coder_workspace.me.access_url}/reports/${data.coder_workspace.me.id}"
   }
   item {
     key   = "runs archive"

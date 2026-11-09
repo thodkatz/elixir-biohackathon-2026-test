@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, PositiveInt, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, ValidationError, model_validator
 from pydantic_ai.usage import UsageLimits
 
 class ConfigError(Exception):
@@ -68,11 +68,27 @@ class LimitsCfg(_Strict):
                            total_tokens_limit=self.total_tokens_limit)
 
 
+class CompactionCfg(_Strict):
+    enabled: bool = True
+    # The model's context window in tokens. Unset: only a provider's "too long" error compacts.
+    context_window_tokens: PositiveInt | None = None
+    trigger_ratio: float = Field(0.8, gt=0, lt=1)
+    summary_max_tokens: PositiveInt = 4096
+
+
+class TitleCfg(_Strict):
+    enabled: bool = True
+    # Room for a reasoning model to think first: qwen3.8-27b spends ~120 tokens before a ~13-token title.
+    max_tokens: PositiveInt = 1024
+
+
 class Config(_Strict):
     model: ModelCfg
     prompt: PromptCfg
     tools: ToolsCfg
     limits: LimitsCfg = LimitsCfg()
+    compaction: CompactionCfg = CompactionCfg()
+    title: TitleCfg = TitleCfg()
     run_log: Path = Path("/var/lib/spe-agent/runs.jsonl")
 
 

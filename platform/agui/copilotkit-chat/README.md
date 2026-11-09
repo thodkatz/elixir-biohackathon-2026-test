@@ -1,60 +1,68 @@
 # SPE chat UI
 
-Next.js 16.4.1 + CopilotKit 1.79.0 (v2 API), a thin client for the SPE agent.
-
-- `app/api/copilotkit/[[...slug]]/route.ts`: `CopilotRuntime` (`@copilotkit/runtime/v2`) in
-  multi-route mode (`/api/copilotkit/info`, `/api/copilotkit/agent/spe/run`, …) via
-  `createCopilotRuntimeHandler({ basePath: "/api/copilotkit" })`, with one agent `spe`: an
-  `HttpAgent` (`@ag-ui/client` 1.0.2) for `AGENT_URL` sending `Authorization: Bearer
-  $AGENT_API_KEY`. Both variables are server-side only (not `NEXT_PUBLIC_*`) and read on the
-  first request, so the build needs neither.
-- `app/page.tsx`: full-screen `CopilotChat` (`@copilotkit/react-core/v2`); every tool call is a
-  collapsible card (`useDefaultRenderTool`) with name, status, arguments and the first 40 lines
-  or 4000 characters of the result, rendered as text. Run errors appear in a bar above the chat.
-  No persistence: a reload starts a new conversation.
-- `lib/`: chat sessions on the server, plain TypeScript that `node --test` runs without Next.js
-  (see *Sessions*). `app/api/sessions/` wraps `lib/api.ts`.
-
-Telemetry is off in the image: `NEXT_TELEMETRY_DISABLED=1`, `COPILOTKIT_TELEMETRY_DISABLED=true`,
-`DO_NOT_TRACK=1` (the runtime's `/info` then tells the browser client the same).
-
-## Sessions
-
-Each conversation is a session: one JSON file, `/data/sessions/<id>.json`, on the `chat-sessions`
-volume (mounted at `/data`; the image creates `/data/sessions` owned by `node`). `<id>` is the
-AG-UI thread id, a lower-case UUID v4; nothing else ever names a file. The file holds the AG-UI
-`messages` as the last run ended with them, one `runs[]` entry per run (`completed`, `failed` or
-`cancelled`), and the metadata `title`, `tags`, `pinned`, `hidden` and `deleted_at`.
-
-- `lib/recorder.ts` records every run on the `spe` agent from its AG-UI stream (AG-UI middleware,
-  attached with `agent.use()`), whatever its outcome; one run per session at a time. It stores
-  messages and run metadata only, never request headers or the agent key.
-- `lib/sessions.ts` writes atomically (temporary file, then rename) and one session at a time,
-  through a queue on `globalThis` that every route bundle shares. The chat UI is one Node process;
-  a second one would need a file lock.
-- `/api/sessions`: `GET` lists metadata (newest first, at most 1000, deleted ones left out);
-  `GET`/`PATCH`/`DELETE /api/sessions/{id}` read one, change `title`, `tags`, `pinned` or `hidden`
-  (bodies up to 16 KB), or mark it deleted. A deleted session's file is kept. There is no `POST`:
-  a session exists once its first run is recorded. Errors are `{"error": "<message>"}`.
-
-The files hold whatever participants typed and tools returned, canary values included: treat the
-volume like the agent's run log.
+Next.js and CopilotKit (v2 API), a thin client for the SPE agent. It owns the
+conversation history: each session is an append-only journal on the server, and the
+agent is sent that history, never the browser's.
 
 ```bash
 npm ci && npm run build                       # type-checks too
-# against the scripted agent (no LLM): in ../pydantic-ai-agent
-#   uv run --group dev python ../../dev/fake_agent.py --port 18100 --key TEST_KEY
-# SPE_SESSIONS_DIR (default /data/sessions) must be an existing, writable directory, or every save fails
-SPE_SESSIONS_DIR=$(mktemp -d) AGENT_URL=http://127.0.0.1:18100/agent AGENT_API_KEY=TEST_KEY PORT=3000 \
-  node .next/standalone/server.js
-#   (copy .next/static to .next/standalone/.next/static first; the Dockerfile does)
-docker build -t spe-chat-ui .                 # node:24-slim, user node, port 3000
-npm test                                      # lib/*.test.ts with node --test (no model, no network)
-node scripts/check-built-server.mjs           # after npm run build: the built server against fake_agent.py
+npm test                                      # lib/*.test.ts with node --test, no model, no network
+docker build -t spe-chat-ui .                 # node:26-slim, user node, port 3000
+# the built server against the scripted agent:
+#   (cd ../pydantic-ai-agent && uv run --group dev python ../../dev/fake_agent.py --port 18100 --key TEST_KEY)
+SPE_SESSIONS_DIR=$(mktemp -d) AGENT_URL=http://127.0.0.1:18100/agent AGENT_API_KEY=TEST_KEY PORT=3000 NEXT_MANUAL_SIG_HANDLE=true \
+  node .next/standalone/server.js             # copy .next/static to .next/standalone/.next/static first
+node scripts/check-built-server.mjs           # the same, scripted
 ```
 
-The image runs with a read-only root filesystem when `/tmp` and `/app/.next/cache` are tmpfs
-(uid 1000), with `cap_drop: ALL` and `no-new-privileges`.
+`AGENT_URL` and `AGENT_API_KEY` are server-side only and read on the first request.
+Telemetry is off in the image. TypeScript stays at 6.x: `next build` uses its
+JavaScript API, which TypeScript 7 does not have.
 
-TypeScript is pinned to 6.0.3: TypeScript 7 has no JavaScript API, which `next build` uses for its
-type check.
+## Layout
+
+| Path | What |
+|---|---|
+| `app/api/copilotkit/[[...slug]]/route.ts` | `CopilotRuntime` with one agent `spe`, an `HttpAgent` for `AGENT_URL` with the bearer key, and the session recorder attached |
+| `app/api/sessions/` | The session API: list, read, patch metadata, delete, title |
+| `app/page.tsx`, `app/sidebar.tsx`, `app/tool-calls.tsx` | The chat, the sidebar, the tool-call cards |
+| `lib/` | Sessions on the server, plain TypeScript that `node --test` runs: `recorder.ts` (the run hook), `journal.ts`, `rebuild.ts`, `anchor.ts`, `sessions.ts`, `api.ts`, `export.ts`, `shutdown.ts` |
+| `scripts/export-journals.ts` | The archive's exporter: journals to one Open WebUI-shaped bundle |
+| `instrumentation.ts` | Installs the SIGTERM drain |
+
+## Sessions
+
+One journal per session, `/data/sessions/<id>.jsonl` on the `chat-sessions` volume;
+`<id>` is the AG-UI thread id, a UUID v4. Lines: `created`, per run `run_start`
+(the new user message, what the client sent that was not used, the request's other
+fields), every AG-UI `event`, `run_end` with the status (`completed`, `failed`,
+`cancelled`, `aborted`, `refused`), and `meta` lines for title, tags, pinned,
+hidden, deleted. Nothing rewrites a journal.
+
+- **The recorder** takes only the new user message from each request and sends the
+  agent the journal's history. Whatever else the client sent that differs is
+  journaled as ignored (`fabricated`, `edited`, `deleted`, `system`) and the browser
+  gets a `MESSAGES_SNAPSHOT` of what the agent saw. `run_start` is fsynced before
+  the agent is called. Runs on one session may overlap and become branches; the
+  chat reopens on the branch of the run that ended last. A run whose only new
+  message is `/compact` or `/compact <focus>` is a command: sent the history and
+  `forwardedProps.spe_command`, refused when there is nothing to compact.
+- **The session API**: `GET /api/sessions` (newest first, at most 1000, deleted
+  left out); `GET`, `PATCH` (`title`, `tags`, `pinned`, `hidden`; bodies up to 16 KB)
+  and `DELETE /api/sessions/{id}`; `POST /api/sessions/{id}/title` asks the agent for
+  a title and keeps it only if the session has none. No route creates a session or
+  changes a message.
+- **The sidebar**: New chat, titles grouped by day, search by title and `tag:<name>`,
+  pinned first, hidden behind *Show hidden*; a row menu with rename, pin, tags,
+  hide, delete; the menu gives focus back to its `⋯` when it closes (after a click
+  outside, only when the click left focus nowhere: `lib/menu.ts`, `refocusIfLost`).
+  `?session=<id>` in the URL reopens a session, which starts at its newest content
+  (`app/page.tsx`, `SCROLL_VIEW`).
+- **Shutdown**: on SIGTERM new runs are refused, runs in progress are cancelled and
+  journaled, the queue drains within 25 s, the process exits. The image sets
+  `NEXT_MANUAL_SIG_HANDLE=true` so Next.js does not exit first. The final archive
+  relies on it.
+
+The journals hold what participants typed and tools returned, canaries included:
+treat the volume like the agent's run log. `platform/dev/e2e/sessions.py` drives
+the sidebar in a browser against the scripted agent.

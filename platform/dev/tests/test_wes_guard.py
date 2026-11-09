@@ -54,12 +54,40 @@ def test_malformed_and_unknown_bodies_fail_closed(guard):
     assert guard.check("", b"") is None  # POST /runs/ID/cancel has no body
 
 
-def test_proxy_forwards_allowed_and_blocks_refused(guard):
+def raw_multipart(boundary, parts):
+    """parts: list of (header lines, value) under one boundary."""
+    out = "".join(f"--{boundary}\r\n" + "".join(h + "\r\n" for h in hs) + f"\r\n{v}\r\n" for hs, v in parts)
+    return (out + f"--{boundary}--\r\n").encode()
+
+
+def test_duplicate_content_type_params_are_refused(guard):
+    # Python's email parser takes the first boundary, werkzeug the last: an attachment
+    # under AA would reach WESkit unseen.
+    body = raw_multipart("AA", [(['Content-Disposition: form-data; name="workflow_url"'], TRS)])
+    assert guard.check("multipart/form-data; boundary=AA; boundary=ZZ", body)[0] == 400
+    assert guard.check("application/json; charset=utf-8; charset=latin-1", b"{}")[0] == 400
+
+
+def test_duplicate_disposition_params_are_refused(guard):
+    body = raw_multipart("b", [(['Content-Disposition: form-data; name="x"; name="workflow_url"'], "main.nf")])
+    assert guard.check("multipart/form-data; boundary=b", body)[0] == 400
+
+
+def test_part_with_transfer_encoding_is_refused(guard):
+    import base64
+    body = raw_multipart("b", [(['Content-Disposition: form-data; name="workflow_url"',
+                                 "Content-Transfer-Encoding: base64"], base64.b64encode(TRS.encode()).decode())])
+    assert guard.check("multipart/form-data; boundary=b", body)[0] == 400
+
+
+@pytest.fixture
+def proxy(guard):
     seen = []
 
     class Upstream(BaseHTTPRequestHandler):
         def do_POST(self):
-            seen.append((self.path, self.rfile.read(int(self.headers["Content-Length"] or 0))))
+            seen.append((self.path, self.rfile.read(int(self.headers["Content-Length"] or 0)),
+                         self.headers.get_all("Content-Type")))
             body = b'{"run_id": "r1"}'
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -75,15 +103,48 @@ def test_proxy_forwards_allowed_and_blocks_refused(guard):
     for s in (up, gs):
         threading.Thread(target=s.serve_forever, daemon=True).start()
     try:
-        def post(ctype, body):
-            c = http.client.HTTPConnection("127.0.0.1", gs.server_address[1], timeout=10)
-            c.request("POST", "/ga4gh/wes/v1/runs", body=body, headers={"Content-Type": ctype})
-            r = c.getresponse()
-            return r.status, json.loads(r.read())
-        assert post(*multipart({"workflow_url": TRS})) == (200, {"run_id": "r1"})
-        status, body = post(*multipart({"workflow_url": "main.nf"}))
-        assert status == 403 and body["status_code"] == 403
-        assert len(seen) == 1 and seen[0][0] == "/ga4gh/wes/v1/runs"
+        yield gs.server_address[1], seen
     finally:
         gs.shutdown()
         up.shutdown()
+
+
+def send(port, headers, body):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.putrequest("POST", "/ga4gh/wes/v1/runs", skip_accept_encoding=True)
+    for k, v in headers:
+        c.putheader(k, v)
+    c.endheaders(body)
+    r = c.getresponse()
+    out = r.status, json.loads(r.read())
+    c.close()
+    return out
+
+
+def test_proxy_forwards_allowed_and_blocks_refused(proxy):
+    port, seen = proxy
+
+    def post(ctype, body):
+        return send(port, [("Content-Type", ctype), ("Content-Length", str(len(body)))], body)
+    assert post(*multipart({"workflow_url": TRS})) == (200, {"run_id": "r1"})
+    status, body = post(*multipart({"workflow_url": "main.nf"}))
+    assert status == 403 and body["status_code"] == 403
+    assert len(seen) == 1 and seen[0][0] == "/ga4gh/wes/v1/runs"
+    assert seen[0][2] == ["multipart/form-data; boundary=b0undary"]
+
+
+@pytest.mark.parametrize("dup", ["Content-Type", "Content-Length", "Transfer-Encoding"])
+def test_proxy_refuses_duplicate_framing_headers(proxy, dup):
+    # The guard read the first Content-Type, the forwarded dict kept the last: a
+    # urlencoded check let a multipart attachment through to WESkit.
+    port, seen = proxy
+    mp_type, mp_body = multipart({"workflow_url": TRS}, [("workflow_attachment", "nextflow.config", "x")])
+    first = {"Content-Type": "application/x-www-form-urlencoded", "Content-Length": str(len(mp_body)),
+             "Transfer-Encoding": "identity"}
+    second = dict(first, **{"Content-Type": mp_type})
+    headers = [("Content-Type", first["Content-Type"]), ("Content-Length", first["Content-Length"])]
+    if dup == "Transfer-Encoding":
+        headers.append((dup, first[dup]))
+    headers.append((dup, second[dup]))
+    status, _ = send(port, headers, mp_body)
+    assert status == 400 and seen == []

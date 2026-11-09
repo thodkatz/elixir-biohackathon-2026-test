@@ -5,12 +5,16 @@ Traefik sends every WES request that is not GET or HEAD here. The guard refuses
 any file part (workflow_attachment) and any workflow_url that is not a TRS URI
 of the stack's own TRS, and forwards everything else to WESkit unchanged. The
 checks do not depend on the path, so path tricks cannot route around them.
-Standard library only.
+Where Python's parsers and WESkit's (werkzeug) could read a request differently,
+the guard refuses it: repeated Content-Type, Content-Length or Transfer-Encoding
+headers, repeated parameters in Content-Type or a part's Content-Disposition,
+and parts with a Content-Transfer-Encoding. Standard library only.
 """
 import argparse
 import http.client
 import json
 import re
+from email.message import Message
 from email.parser import BytesParser
 from email.policy import HTTP
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,12 +26,23 @@ HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", 
        "transfer-encoding", "upgrade", "host", "content-length"}
 NO_FILE = "workflow_attachment is not accepted here: run an installed TRS tool"
 NO_URL = "workflow_url must be a TRS URI of an installed tool"
+AMBIGUOUS = 400, "ambiguous request: repeated header parameter or part encoding"
+
+
+def _repeats_params(value: str) -> bool:
+    """True if a header value names a parameter twice (parsers disagree on which wins)."""
+    m = Message()
+    m["X"] = value
+    names = [k for k, _ in (m.get_params(header="X") or [])[1:]]
+    return len(names) != len(set(names))
 
 
 def check(content_type: str, body: bytes) -> tuple[int, str] | None:
     """None if the request may pass, else (status, reason)."""
     if not body:
         return None
+    if _repeats_params(content_type or ""):
+        return AMBIGUOUS
     ctype = (content_type or "").split(";")[0].strip().lower()
     urls: list[str] = []
     try:
@@ -39,6 +54,10 @@ def check(content_type: str, body: bytes) -> tuple[int, str] | None:
             for part in msg.iter_parts():
                 if part.defects:
                     return 400, "malformed multipart body"
+                # raw values: the HTTP policy drops a repeated parameter silently
+                disp = [v for k, v in part.raw_items() if k.lower() == "content-disposition"]
+                if "content-transfer-encoding" in part or len(disp) > 1 or any(map(_repeats_params, disp)):
+                    return AMBIGUOUS
                 name = part.get_param("name", header="content-disposition")
                 if part.get_filename() is not None or name == "workflow_attachment":
                     return 403, NO_FILE
@@ -80,6 +99,9 @@ def serve(host: str, port: int, up_host: str, up_port: int) -> ThreadingHTTPServ
             self.close_connection = True
 
         def _handle(self) -> None:
+            if any(len(self.headers.get_all(h) or []) > 1
+                   for h in ("Content-Type", "Content-Length", "Transfer-Encoding")):
+                return self._reply(400, "repeated Content-Type, Content-Length or Transfer-Encoding header")
             if "chunked" in self.headers.get("Transfer-Encoding", "").lower():
                 return self._reply(411, "chunked request bodies are not accepted")
             try:
@@ -89,14 +111,20 @@ def serve(host: str, port: int, up_host: str, up_port: int) -> ThreadingHTTPServ
             if length > MAX_BODY:
                 return self._reply(413, "request body too large")
             body = self.rfile.read(length)
-            verdict = check(self.headers.get("Content-Type", ""), body)
+            ctype = self.headers.get("Content-Type")
+            verdict = check(ctype or "", body)
             if verdict:
                 return self._reply(*verdict)
+            headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP | {"content-type"}}
+            if ctype is not None:
+                headers["Content-Type"] = ctype  # exactly the string that was checked
             conn = http.client.HTTPConnection(up_host, up_port, timeout=120)
-            headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
-            conn.request(self.command, self.path, body=body, headers=headers)
-            resp = conn.getresponse()
-            data = resp.read()
+            try:
+                conn.request(self.command, self.path, body=body, headers=headers)
+                resp = conn.getresponse()
+                data = resp.read()
+            finally:
+                conn.close()
             self.send_response(resp.status)
             for k, v in resp.getheaders():
                 if k.lower() not in HOP:

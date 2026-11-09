@@ -202,7 +202,8 @@ The agent cannot add code to run. Traefik routes TRS for the sandbox only on `GE
 port 443 get 403 and never reach trs-filer. The build's own TRS writes (`trs_install`) use the
 `admin` entrypoint, published on the VM's `127.0.0.1:{{ spe_trs_admin_port }}` (8443) only
 (`spe_trs_write_api`). Every WES write passes `wes-guard` (`roles/workflow_stack/files/wes_guard.py`),
-which refuses file parts and non-TRS `workflow_url`s. WESkit's own request schema
+which refuses file parts and non-TRS `workflow_url`s, and any request its parser and WESkit's could
+read differently (repeated framing headers or parameters, encoded parts). WESkit's own request schema
 (`request-validation.yaml.j2`) refuses non-TRS URLs too, and SMK's `engine-environment` is no longer
 client-settable. The agent's runbook does not change: an infrastructure control does not touch the
 agent. Going back below L1 removes `wes-guard` (`remove_orphans`).

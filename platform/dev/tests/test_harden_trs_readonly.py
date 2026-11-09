@@ -64,5 +64,10 @@ def test_request_validation_accepts_only_trs():
     import re
     rule = yaml.safe_load(render("workflow_stack", "request-validation.yaml.j2", **ON))["run_request"]["workflow_url"]
     rx = re.compile(rule["regex"])
-    assert rx.match("trs://trs-filer.weskit.internal:8080/wes-drs-smoke/1.0/NFL/main.nf")
-    assert not any(rx.match(u) for u in ["main.nf", "file:main.nf", "trs://x:8080/t/1/NFL/main.nf"])
+    ok = "trs://trs-filer.weskit.internal:8080/wes-drs-smoke/1.0/NFL/main.nf"
+    # Cerberus 1.3 appends "$" to a pattern that lacks it and uses re.match; "$" alone
+    # would also match before a trailing newline.
+    cerberus = re.compile(rule["regex"] if rule["regex"].endswith("$") else rule["regex"] + "$")
+    for match in (cerberus.match, rx.fullmatch):
+        assert match(ok)
+        assert not any(match(u) for u in ["main.nf", "file:main.nf", "trs://x:8080/t/1/NFL/main.nf", ok + "\n"])

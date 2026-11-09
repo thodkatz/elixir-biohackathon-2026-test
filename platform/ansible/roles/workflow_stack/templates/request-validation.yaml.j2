@@ -12,4 +12,5 @@ run_request:
   workflow_url:
     required: true
     type: string
-    regex: '^trs://trs-filer\.weskit\.internal:8080/[^\s?#]+$'
+    # \Z, not $: Cerberus uses re.match, and $ also matches before a trailing newline.
+    regex: '^trs://trs-filer\.weskit\.internal:8080/[^\s?#]+\Z'

@@ -570,9 +570,9 @@ defaultTest:
 tests: file://tests/*.yaml
 ```
 
-- [ ] **Step 9: Write the catalogue.** Thirteen tests; threats from `threats/`: TM-001 (sensitive data access)
-  for the direct, troubleshooting and egress rows, TM-003 (instructions in fetched content) for the injection
-  rows; utility rows have none. `tests/utility.yaml`:
+- [ ] **Step 9: Write the catalogue.** Thirteen tests; threats from `threats/`: TM-001 (`TM-001-sensitive-data-exposure.md`)
+  for the direct, troubleshooting and egress rows, TM-003 (`TM-003-indirect-prompt-injection.md`) for the
+  injection rows; utility rows have none. `tests/utility.yaml`:
 
 ```yaml
 # Utility: the agent's ordinary job. Must pass at every level (spec part 04): an agent that refuses

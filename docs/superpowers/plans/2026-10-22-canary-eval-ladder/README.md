@@ -8,7 +8,8 @@ whether it leaks a canary, and whether it still does its job, plus a no-model co
 control is in place.
 
 **Spec:** [`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/`](../../specs/2026-10-22-canary-eval-ladder-design/README.md)
-(decisions 1–12; latest clarification 6). Each slice file links the parts it implements.
+(decisions 1–12; latest clarification 6). Each slice file links the parts it implements. Plan-wide rulings
+since the plan merged: [*Rulings*](#rulings).
 
 **Architecture.** Ansible configures a level (`spe_harden_*` switches), plants canaries and injections, and
 writes the hand-off directory `platform/ansible/output/<instance>/` (`canaries.json`, `injections.json`,
@@ -63,7 +64,7 @@ that uses it, in the same PR.
 | `canaries.json` | handoff role (exists) | `{instance, seed, api_host, generated_at, study_ids, tokens: [{token, type, file, note}]}` |
 | `hosts.yml` | handoff role (exists) | `ssh_target`/`ssh_key`/`ssh_args` (existing) or `ssh_key` + `floating_ip` (openstack), `api_host`, `agent_url`, … |
 | `injections.json` | handoff role, slice 4 | spec part 02, *Hand-off*: `{schema_version: 1, injections: [...]}` |
-| `hardening.json` | handoff role, slice 3 | `{schema_version: 1, instance, level, switches: {spe_harden_trs_readonly, spe_harden_data_tiers, spe_harden_egress, spe_agent_tool_surface, spe_harden_airlock}, frontend, model_provider, model, commit, restore_seconds, injections}`; switch types: booleans, except `spe_harden_data_tiers` (a list of tier names, `[]` for all tiers) and `spe_agent_tool_surface`, which already exists (`shell` by default, `typed` for L4: the value the spec calls `ga4gh_typed`); `level` is the number of leading ladder controls switched on (L1…L5 in order), `restore_seconds` is `null` until the isolation hook measures it; `injections` is `true` when the three `spe_inject_*` switches are on, `false` when all are off (the clean control, clarification 6), `"mixed"` for a mix, which `handoff.check_hardening` refuses: not a ladder run |
+| `hardening.json` | handoff role, slice 3 | `{schema_version: 1, instance, level, switches: {spe_harden_trs_readonly, spe_harden_data_tiers, spe_harden_egress, spe_agent_tool_surface, spe_harden_airlock}, frontend, model_provider, model, commit, restore_seconds, injections}`; `frontend` is `spe_frontends` joined by `,` (`agui` at every level: the level files pin `spe_frontends: [agui]`); switch types: booleans, except `spe_harden_data_tiers` (a list of tier names, `[]` for all tiers) and `spe_agent_tool_surface`, which already exists (`shell` by default, `typed` for L4: the value the spec calls `ga4gh_typed`); `level` is the number of leading ladder controls switched on (L1…L5 in order), `restore_seconds` is `null` until the isolation hook measures it; `injections` is `true` when the three `spe_inject_*` switches are on, `false` when all are off (the clean control, clarification 6), `"mixed"` for a mix, which `handoff.check_hardening` refuses: not a ladder run |
 
 **Modules in `platform/promptfoo-evals/`** (all importable from the tests with `sys.path` set by `conftest.py`):
 
@@ -115,12 +116,12 @@ level instance files are overlays on the operator's instance file, without an in
 | `platform/promptfoo-evals/{handoff,injections_schema,metrics,matrix}.py`, `conftest.py`, `tests/test_{handoff,injections_schema,metrics,matrix,catalogue}.py` | 1 | scoring, offline |
 | `platform/promptfoo-evals/isolation.py`, `tests/test_isolation.py` | 2 | snapshot, restore, state diff, hooks |
 | `platform/promptfoo-evals/{controls_provider,controls_asserts}.py`, `controls.yaml`, `probes/*.sh`, `run.sh`, `package.json`, `tests/test_controls_*.py`; `platform/ansible/roles/handoff/` (`hardening.json`) | 3 | controls suite and the run script |
-| `roles/eval_sink/` (the test receiver), `platform/dev/tests/{test_eval_sink,ansible_render}.py`, `platform/ansible/catalog/injections/*.txt`, `roles/trs_install/files/trs_install.py`, `roles/drs_register/files/drs_register.py`, `roles/handoff/` (`injections.json`), `instances/L0.example.yml`, `catalog/injections/fixtures.json`, `roles/handoff/files/injections_manifest.py`, `platform/dev/tests/test_{injections,ladder}.py` | 4 | planting injections, the test receiver, the L0 example |
+| `roles/eval_sink/` (the test receiver), `platform/instance/compose.eval-sink.yml` and `SPE_COMPOSE_OVERLAYS` (`roles/sandbox/templates/frontend.env.j2`, `platform/instance/spe-apply`), `platform/dev/tests/{test_eval_sink,ansible_render}.py`, `golden/frontend.env.L0`, `platform/ansible/catalog/injections/*.txt`, `roles/trs_install/files/trs_install.py`, `roles/drs_register/files/drs_register.py`, `roles/handoff/` (`injections.json`), `instances/L0.example.yml`, `catalog/injections/fixtures.json`, `roles/handoff/files/injections_manifest.py`, `platform/dev/tests/test_{injections,ladder}.py` | 4 | planting injections, the test receiver, the L0 example |
 | `platform/promptfoo-evals/agent.yaml`, `tests/*.yaml`, `agui_provider.py` (state diff), `promptfooconfig.yaml` (removed), `instances/no-injections.example.yml`, `docs/results/canary-ladder-qwen3.8-27b.md`, `docs/results/qwen3.8-27b/L0{,-clean}.json` | 5 | agent suite, the first L0 run and its clean control |
-| `platform/ansible/roles/workflow_stack/templates/*` (Traefik: TRS read-only for the sandbox, operator writes on a localhost entrypoint; WESkit), a standard-library WES write guard, `roles/sandbox` runbook as a template, `instances/L1.example.yml`, `platform/dev/tests/golden/` (today's renders, for decision 3) | 6 | L1 |
+| `platform/ansible/roles/workflow_stack/templates/*` (Traefik: TRS read-only for the sandbox, operator writes on a localhost entrypoint; WESkit), a standard-library WES write guard, `instances/L1.example.yml`, `platform/dev/tests/golden/` (today's renders, for decision 3); the runbook `roles/sandbox/files/agent/AGENTS.md` stays as it is | 6 | L1 |
 | `platform/ansible/roles/workflow_stack/templates/compose.install.yaml.j2` (WESkit and worker mounts by tier), the verify smoke input, `instances/L2.example.yml` | 7 | L2 |
-| `platform/ansible/roles/agui/templates/docker-compose.yml.j2` (a fixed sandbox address), `DOCKER-USER` firewall rules, `instances/L3.example.yml` | 8 | L3 |
-| `platform/agui/pydantic-ai-agent/` (airlock), `roles/agui/templates/agent.env.j2` | 9 | L5 airlock |
+| `platform/instance/compose.egress.yml` (a fixed sandbox address, an overlay on `platform/instance/compose.yml`), `roles/egress/` (`DOCKER-USER` firewall rules), `instances/L3.example.yml` | 8 | L3 |
+| `platform/agui/pydantic-ai-agent/` (airlock), `roles/agui/templates/agent.env.j2`, `playbooks/create.yml` (refuses the airlock with `openwebui` in `spe_frontends`) | 9 | L5 airlock |
 
 ## PR slices
 
@@ -164,6 +165,28 @@ The input classes the spec implies that most likely bite a user; each has its te
   before `afterEach`; `afterEach` only logs it (amends decision 9, part 05 *Hooks*).
 - Slice 4: payloads target `wes-drs-smoke` if `gatk-hc-chr20` cannot be installed on de.NBI (part 02), only if
   slice 4's task 1 finds that.
+
+## Rulings
+
+Plan-wide decisions taken after the plan merged; a slice's own rulings go in its handoff.
+
+- **2026-11-09, plan refreshed after upstream merges #35 and #39.** *Decision:* the slices' tasks follow `main`
+  at `abdf63f`. The frontend's compose file is `platform/instance/compose.yml` (project `spe-frontend`; static,
+  `${VAR}`s from the frontend directory's `.env`, which `roles/sandbox/templates/frontend.env.j2` writes; linked as
+  `spe_frontend_dir/docker-compose.yml`); a switch that changes a service is a Compose overlay
+  `platform/instance/compose.<name>.yml` named in `SPE_COMPOSE_OVERLAYS`, which `spe-apply` adds with `-f`
+  (slice 4: `eval-sink`; slice 8: `egress`, whose firewall moves to a role `egress`); decision 3's off check is
+  the `.env` rendered byte for byte (`golden/frontend.env.L0`). The runbook is
+  `roles/sandbox/files/agent/AGENTS.md`. Every instance runs both frontends by default (`spe_frontends`), so
+  `L0.example.yml` (and every level after it) pins `spe_frontends: [agui]`, `hardening.json`'s `frontend` is
+  `spe_frontends` joined by `,` (still the string `check_hardening` requires), and slice 9's `create.yml` refuses
+  `spe_harden_airlock` with `openwebui` in `spe_frontends`. The render helper gains Ansible's `bool` filter and
+  turns rendered lists back into lists. *Why:* the plan named `roles/agui/templates/docker-compose.yml.j2`,
+  `roles/sandbox/files/AGENTS.md` and `spe_frontend`, gone from `main`; an `{% if %}` cannot go into a static
+  compose file, and an always-present variable would change every L0 container. *Cost if wrong:* a compose
+  command that creates containers without `spe-apply` (by hand, `docker compose up`) drops the overlays and runs
+  the sandbox unhardened at L3 (slice 8's `egress` probe shows it); if overlays prove awkward, the fallback is
+  to render `spe_frontend_dir/docker-compose.yml` from a template again, which reverses part of #35.
 
 ## Handoffs
 

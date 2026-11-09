@@ -1174,10 +1174,24 @@ and validates it with `platform/promptfoo-evals/injections_schema.py`.
 
 ### Task 5: The test receiver (`spe_eval_sink`)
 
-**Files:** Create `platform/dev/tests/ansible_render.py`, `platform/ansible/roles/eval_sink/files/sink.py`, `platform/ansible/roles/eval_sink/tasks/main.yml`,
-`platform/ansible/roles/eval_sink/templates/docker-compose.yml.j2`, `platform/dev/tests/test_eval_sink.py`. Modify
-`platform/ansible/inventory/group_vars/all.yml`, `platform/ansible/playbooks/create.yml`,
-`platform/ansible/roles/agui/templates/docker-compose.yml.j2`, `platform/ansible/README.md`.
+**Files:** Create `platform/dev/tests/ansible_render.py`, `platform/dev/tests/golden/frontend.env.L0`,
+`platform/ansible/roles/eval_sink/files/sink.py`, `platform/ansible/roles/eval_sink/tasks/main.yml`,
+`platform/ansible/roles/eval_sink/templates/docker-compose.yml.j2`, `platform/instance/compose.eval-sink.yml`,
+`platform/dev/tests/test_eval_sink.py`. Modify `platform/ansible/inventory/group_vars/all.yml`,
+`platform/ansible/playbooks/create.yml`, `platform/ansible/playbooks/destroy.yml`,
+`platform/ansible/roles/sandbox/templates/frontend.env.j2`, `platform/ansible/roles/sandbox/tasks/up.yml`,
+`platform/instance/spe-apply`, `platform/instance/README.md`, `platform/ansible/README.md`.
+
+**How a switch changes the frontend's compose project.** `platform/instance/compose.yml` is not a template: it
+is a static Compose file in the clone, linked as `spe_frontend_dir/docker-compose.yml`, whose `${VAR}`s come
+from the `.env` next to it (`roles/sandbox/templates/frontend.env.j2`). A switch that changes a service (this
+task's `extra_hosts`, slice 8's fixed address) is a Compose overlay `platform/instance/compose.<name>.yml`, named
+in `spe_compose_overlays`; the `.env` gets `SPE_COMPOSE_OVERLAYS=<name>,…` and the overlay's variables only when
+the list is not empty, and `spe-apply` (which every build's `up` goes through, `roles/sandbox/tasks/up.yml`) adds
+`-f` for each. Off, the `.env` renders byte for byte as today and `compose.yml` is untouched (decision 3).
+Commands that only read or exec (`docker compose -p spe-frontend -f docker-compose.yml ps|exec|logs`, in
+`roles/agui/tasks/checks.yml` and `roles/run_archive`) need no overlay. A container's `config_files` label lists
+the overlays, so slice 2's restore recreates the sandbox with them.
 
 **Interfaces:** Produces `spe_eval_sink` (bool, default `false`), `spe_eval_sink_port` (8099),
 `spe_eval_sink_host` (`backup.spe-eval.test`), `spe_eval_sink_image` (`python:3.12-alpine`), and the log
@@ -1185,8 +1199,9 @@ and validates it with `platform/promptfoo-evals/injections_schema.py`.
 text, undecodable bytes replaced, at most 1 MiB). Slice 2's `isolation.SINK_LOG` reads it; `canary.delivered`
 (slice 1) scores it.
 
-**Decisions:** 8 (`canary.delivered`'s evidence), 3 (switch off: today's compose, byte for byte):
-`test_a_request_is_logged_as_one_json_line`, `test_off_renders_no_extra_hosts`, `test_on_maps_the_receiver_name`.
+**Decisions:** 8 (`canary.delivered`'s evidence), 3 (switch off: today's `.env`, byte for byte, and no overlay):
+`test_a_request_is_logged_as_one_json_line`, `test_off_renders_todays_env`, `test_on_maps_the_receiver_name`,
+`test_spe_apply_adds_the_overlays`.
 
 - [ ] **Step 1: Write the failing test** `platform/dev/tests/test_eval_sink.py`:
 
@@ -1194,13 +1209,18 @@ text, undecodable bytes replaced, at most 1 MiB). Slice 2's `isolation.SINK_LOG`
 """The test receiver (spec part 04, *The test receiver*): logs what it gets; the sandbox finds it only when on."""
 import importlib.util
 import json
+import os
+import subprocess
 import threading
 import urllib.request
 from pathlib import Path
 
 import yaml
 
+from ansible_render import GOLDEN, render
+
 ANSIBLE = Path(__file__).resolve().parents[2] / "ansible"
+INSTANCE = ANSIBLE.parent / "instance"
 spec = importlib.util.spec_from_file_location("sink", ANSIBLE / "roles/eval_sink/files/sink.py")
 sink = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sink)
@@ -1223,26 +1243,52 @@ def test_a_request_is_logged_as_one_json_line(tmp_path):
     assert lines[1]["method"] == "GET" and lines[1]["body"] == ""
 
 
-def _render(**overrides):
-    from ansible_render import render
-    return render("agui", "docker-compose.yml.j2", **overrides)
-
-
-def test_off_renders_no_extra_hosts():
-    assert "extra_hosts" not in _render()
+def test_off_renders_todays_env():
+    assert render("sandbox", "frontend.env.j2") == (GOLDEN / "frontend.env.L0").read_text()
 
 
 def test_on_maps_the_receiver_name():
-    sandbox = yaml.safe_load(_render(spe_eval_sink=True))["services"]["sandbox"]
-    assert sandbox["extra_hosts"] == ["backup.spe-eval.test:host-gateway"]
+    env = render("sandbox", "frontend.env.j2", spe_eval_sink=True)
+    assert env.startswith((GOLDEN / "frontend.env.L0").read_text())
+    lines = env.splitlines()
+    assert "SPE_COMPOSE_OVERLAYS=eval-sink" in lines and "SPE_EVAL_SINK_HOST=backup.spe-eval.test" in lines
+    overlay = yaml.safe_load((INSTANCE / "compose.eval-sink.yml").read_text())
+    assert overlay == {"services": {"sandbox": {"extra_hosts": ["${SPE_EVAL_SINK_HOST}:host-gateway"]}}}
+
+
+def test_spe_apply_adds_the_overlays(tmp_path):
+    (tmp_path / "bin").mkdir()
+    fake = tmp_path / "bin" / "docker"
+    fake.write_text('#!/bin/sh\necho "$@"\n')
+    fake.chmod(0o755)
+    env = dict(os.environ, SPE_FRONTEND_DIR=str(tmp_path), PATH=f"{tmp_path / 'bin'}:{os.environ['PATH']}")
+    argv = ["bash", str(INSTANCE / "spe-apply"), "logs", "sandbox"]
+    base = f"-f {tmp_path}/docker-compose.yml"
+    (tmp_path / ".env").write_text("SPE_REPO_DIR=/r\nCOMPOSE_PROFILES=agui,ui\n")
+    out = subprocess.run(argv, env=env, capture_output=True, text=True, check=True).stdout
+    assert f"{base} logs" in out
+    (tmp_path / ".env").write_text("SPE_REPO_DIR=/r\nCOMPOSE_PROFILES=agui,ui\nSPE_COMPOSE_OVERLAYS=eval-sink,egress\n")
+    out = subprocess.run(argv, env=env, capture_output=True, text=True, check=True).stdout
+    assert (f"{base} -f /r/platform/instance/compose.eval-sink.yml -f /r/platform/instance/compose.egress.yml logs"
+            in out)
 ```
 
   First create the render helper `platform/dev/tests/ansible_render.py` exactly as
   [slice 6, task 2, step 1](slice-6-l1.md) gives it (slices 6–8 use it; it moves here because this task is the
-  first to render a template offline). If `render("agui", …)` stops on an undefined run-time value, add it to
-  `RUNTIME` and say so in the handoff.
+  first to render a template offline). If `render("sandbox", …)` stops on an undefined run-time value, add it to
+  `RUNTIME` and say so in the handoff. Then record today's `.env` as the golden, before any template edit:
+
+```bash
+mkdir -p platform/dev/tests/golden
+uv run --with pyyaml --with jinja2 python - <<'PY'
+import sys; sys.path.insert(0, "platform/dev/tests")
+from ansible_render import render, GOLDEN
+(GOLDEN / "frontend.env.L0").write_text(render("sandbox", "frontend.env.j2"))
+PY
+```
 
 - [ ] **Step 2: Run, expect FAIL** (no `sink.py`): `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q -k eval_sink`.
+  Once `sink.py` exists, `test_off_renders_todays_env` passes and the other two fail until step 3 is done.
 
 - [ ] **Step 3: Implement.** `roles/eval_sink/files/sink.py`:
 
@@ -1326,24 +1372,69 @@ spe_eval_sink_host: backup.spe-eval.test
 spe_eval_sink_image: python:3.12-alpine
 ```
 
-  `roles/agui/templates/docker-compose.yml.j2`, in the `sandbox` service after `networks: [tools]`:
+  and, after the switch, the overlays the frontend's compose project gets (slice 8 adds `egress`):
 
 ```yaml
+# Compose overlays (platform/instance/compose.<name>.yml) the ladder's switches add to the
+# frontend's project; empty by default, so the .env and the containers are today's.
+spe_compose_overlays: >-
+  {{ (['eval-sink'] if spe_eval_sink | bool else []) }}
+```
+
+  The receiver is this instance's own on an existing host: in `group_vars/all.yml`, `spe_compose_projects`
+  becomes `"{{ ['workflow-stack', 'spe-frontend'] + (['spe-eval-sink'] if spe_eval_sink | bool else []) }}"` and
+  `spe_owned_ports` gains `+ ([[spe_eval_sink_port | string, 'spe-eval-sink']] if spe_eval_sink | bool else [])`
+  (`spe_preflight.py` refuses a port in use by a project it does not own; `destroy.yml` takes down what
+  `spe_compose_projects` lists). In `playbooks/destroy.yml`, the reset's `projects:` map gains
+  `spe-eval-sink: "/home/{{ spe_ssh_user }}/spe-eval-sink/docker-compose.yml"`.
+
+  Append to `roles/sandbox/templates/frontend.env.j2` (after `SPE_AGENT_RELOAD`; Ansible's `trim_blocks` drops
+  the tag lines, so off adds nothing):
+
+```jinja
+{% if spe_compose_overlays %}
+# Compose overlays a ladder level adds (platform/instance/compose.<name>.yml); spe-apply passes each with -f.
+SPE_COMPOSE_OVERLAYS={{ spe_compose_overlays | join(',') }}
+{% endif %}
 {% if spe_eval_sink | bool %}
-    extra_hosts:
-      - "{{ spe_eval_sink_host }}:host-gateway"
+SPE_EVAL_SINK_HOST={{ spe_eval_sink_host }}
 {% endif %}
 ```
 
-  `playbooks/create.yml`: import role `eval_sink` after the `agui` frontend role, under the same host play. If
-  `spe_preflight.py` (`roles/existing_host/files/`) checks the host's ports or compose projects, add
-  `spe_eval_sink_port` and `spe-eval-sink` to what it accepts as this instance's own, with a test.
+  `platform/instance/compose.eval-sink.yml`:
+
+```yaml
+# Overlay for spe_eval_sink (the canary ladder's test receiver, an evaluation fixture): the
+# sandbox resolves the receiver's name to the VM. spe-apply adds it when .env's
+# SPE_COMPOSE_OVERLAYS names eval-sink.
+services:
+  sandbox:
+    extra_hosts:
+      - "${SPE_EVAL_SINK_HOST}:host-gateway"
+```
+
+  `platform/instance/spe-apply`, after the `compose=(…)` line (and a line in its header's *Configuration*
+  paragraph naming `SPE_COMPOSE_OVERLAYS`):
+
+```bash
+# The overlays a ladder level adds (SPE_COMPOSE_OVERLAYS in .env, e.g. eval-sink,egress), each
+# platform/instance/compose.<name>.yml in the clone, merged after the compose file.
+IFS=, read -ra overlays <<< "${SPE_COMPOSE_OVERLAYS:-}"
+for o in "${overlays[@]}"; do compose+=(-f "$SPE_REPO_DIR/platform/instance/compose.$o.yml"); done
+```
+
+  `roles/sandbox/tasks/up.yml`, *Validate compose file*: the command becomes
+  `docker compose -f docker-compose.yml {% for o in spe_compose_overlays %}-f {{ spe_repo_dir }}/platform/instance/compose.{{ o }}.yml {% endfor %}config --quiet`,
+  so a broken overlay stops the build before `spe-apply up`.
+
+  `playbooks/create.yml`: import role `eval_sink` (tags `[frontend]`) right after *Frontend containers up*, in the
+  same host play; its tasks handle the switch being off.
 
   `platform/ansible/README.md`: a row for each new variable, and that the receiver is an evaluation fixture.
+  `platform/instance/README.md`: a row for `compose.<name>.yml`, the overlays `SPE_COMPOSE_OVERLAYS` selects.
 
 - [ ] **Step 4: Run, expect PASS** (both suites, global constraints), then commit:
-  `git add platform/ansible/roles/eval_sink platform/dev/tests/test_eval_sink.py platform/ansible/inventory/group_vars/all.yml platform/ansible/playbooks/create.yml platform/ansible/roles/agui/templates/docker-compose.yml.j2 platform/ansible/README.md`
-  and `platform/dev/tests/ansible_render.py` (plus `spe_preflight.py` and its test if step 3 touched them)
+  `git add platform/ansible/roles/eval_sink platform/dev/tests/test_eval_sink.py platform/dev/tests/ansible_render.py platform/dev/tests/golden/frontend.env.L0 platform/ansible/inventory/group_vars/all.yml platform/ansible/playbooks/create.yml platform/ansible/playbooks/destroy.yml platform/ansible/roles/sandbox/templates/frontend.env.j2 platform/ansible/roles/sandbox/tasks/up.yml platform/instance/compose.eval-sink.yml platform/instance/spe-apply platform/instance/README.md platform/ansible/README.md`
   `git commit -s -m "eval_sink: the ladder's test receiver behind spe_eval_sink (clarification 4)"`
 
 ### Task 6: `L0.example.yml`, the ladder test, L0 built on de.NBI, handoff
@@ -1447,7 +1538,8 @@ def test_level_files_carry_no_host_identity():
 # L<n>.example.yml is this file plus the switches of levels 1..n (platform/dev/tests/test_ladder.py).
 spe_provision: existing
 spe_workflows: [wes-drs-smoke, gatk-hc-chr20]   # the TRS fixtures live in gatk-hc-chr20 (installing needs no genomes)
-spe_frontend: agui
+spe_frontends: [agui]                # the AG-UI agent only: the ladder scores through it, and Open WebUI
+                                     # would be a second, unhardened path to the same sandbox (no L5 airlock)
 spe_agent_model_provider: openai_compatible
 spe_agent_model: qwen3.8-27b
 spe_agui_smoke: false                # no model call during the build

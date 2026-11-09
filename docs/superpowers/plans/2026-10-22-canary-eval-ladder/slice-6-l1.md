@@ -115,6 +115,7 @@ template options), and the constants `ANSIBLE` and `GOLDEN`. Also produces `spe_
 ```python
 # platform/dev/tests/ansible_render.py
 """Render an Ansible role template offline, with the options of Ansible's template module."""
+import ast
 from pathlib import Path
 
 import jinja2
@@ -132,10 +133,27 @@ RUNTIME = {
 }
 
 
+def ansible_bool(value) -> bool:
+    """Ansible's `bool` filter, for the values an instance file or `-e` can give."""
+    return value if isinstance(value, bool) else str(value).strip().lower() in ("1", "true", "yes", "on", "y")
+
+
 def environment(templates: Path | None = None) -> jinja2.Environment:
     loader = jinja2.FileSystemLoader(str(templates)) if templates else None
-    return jinja2.Environment(loader=loader, trim_blocks=True, keep_trailing_newline=True,
-                              undefined=jinja2.StrictUndefined)
+    env = jinja2.Environment(loader=loader, trim_blocks=True, keep_trailing_newline=True,
+                             undefined=jinja2.StrictUndefined)
+    env.filters["bool"] = ansible_bool  # frontend.env.j2 and the switches use it
+    return env
+
+
+def _native(text: str):
+    """A rendered list or dict back to Python, as Ansible does (spe_frontends, spe_compose_overlays)."""
+    if text.strip()[:1] in ("[", "{"):
+        try:
+            return ast.literal_eval(text.strip())
+        except (ValueError, SyntaxError):
+            pass
+    return text
 
 
 def load_vars(**overrides) -> dict:
@@ -149,7 +167,7 @@ def load_vars(**overrides) -> dict:
             if k in overrides or not isinstance(val, str) or "{{" not in val:
                 continue
             try:
-                new = env.from_string(val).render(v)
+                new = _native(env.from_string(val).render(v))
             except Exception:  # Ansible-only filters and lookups stay literal
                 continue
             if new != val:
@@ -242,7 +260,8 @@ spe_trs_write_api: "https://{{ ('127.0.0.1:' ~ spe_trs_admin_port) if spe_harden
 spe_owned_ports: >-
   {{ dict([['443', 'workflow-stack']]
           + ([[spe_trs_admin_port | string, 'workflow-stack']] if spe_harden_trs_readonly else [])
-          + (spe_frontend_ports | map('string') | product(['spe-frontend']) | list)) }}
+          + (spe_frontend_ports | map('string') | product(['spe-frontend']) | list)
+          + ([[spe_eval_sink_port | string, 'spe-eval-sink']] if spe_eval_sink | bool else [])) }}
 ```
 
   In `roles/trs_install/tasks/main.yml`, replace `'--api', 'https://' ~ spe_api_host ~ '/ga4gh/trs/v2',` with
@@ -686,7 +705,7 @@ git commit -s -m "L1: WES runs only TRS URIs, refuses attachments" \
 ### Task 4: `L1.example.yml` and docs
 
 **Files:** create `platform/ansible/instances/L1.example.yml`; modify `platform/ansible/README.md`. The sandbox
-runbook (`roles/sandbox/files/AGENTS.md`) stays identical at every level. L1–L3 are infrastructure controls
+runbook (`roles/sandbox/files/agent/AGENTS.md`) stays identical at every level. L1–L3 are infrastructure controls
 that an infra team applies "without touching the agent" (spec part 01, *Order*), and a level differs by
 exactly one control. A runbook that varied would confound the matrix. At L1, the agent's TRS writes simply
 get 403 from Traefik.

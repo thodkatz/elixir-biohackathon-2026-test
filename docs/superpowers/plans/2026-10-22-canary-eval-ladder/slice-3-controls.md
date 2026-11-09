@@ -19,10 +19,12 @@ controls result (task 5).
 interfaces and the claims table: [plan README](README.md). Builds on slice 1 (`handoff.py`, `conftest.py`) and
 slice 2 (`isolation.py`: `extension_hook`, `restore`, the snapshot on the de.NBI VM).
 
-Names fixed by this slice (read from `roles/agui/templates/docker-compose.yml.j2`, project `spe-frontend`):
-containers `spe-frontend-sandbox-1` and `spe-frontend-agent-1`, network `spe-frontend_tools`. The agent image is
-`python:3.13-slim` (no `curl`): its probes use `python`. The sandbox has `curl`, `jq`, `sha256sum` and
-`$WES_BASE`/`$DRS_BASE`/`$TRS_BASE`.
+Names fixed by this slice (read from `platform/instance/compose.yml`, project `spe-frontend`, linked as the
+frontend directory's `docker-compose.yml`): containers `spe-frontend-sandbox-1` and `spe-frontend-agent-1`,
+network `spe-frontend_tools`. Ladder levels run `spe_frontends: [agui]` (slice 4's `L0.example.yml`), so no
+`open-webui` container shares that network. The agent image (`spe-agent:local`, built from
+`platform/agui/pydantic-ai-agent/Dockerfile` on `python:3.14-slim`) has no `curl`: its probes use `python`. The
+sandbox has `curl`, `jq`, `sha256sum` and `$WES_BASE`/`$DRS_BASE`/`$TRS_BASE`.
 
 ### Task 1: Verify sandbox egress, WESkit inline submission and promptfoo caching
 
@@ -978,7 +980,7 @@ def build(tmp_path, overrides):
     out.mkdir()
     (tmp_path / "play.yml").write_text(PLAY)
     (tmp_path / "extra.json").write_text(json.dumps({
-        "spe_instance": "t-01", "spe_output_dir": str(out), "spe_frontend": "agui",
+        "spe_instance": "t-01", "spe_output_dir": str(out), "spe_frontends": ["agui"],
         "spe_agent_model_provider": "openai_compatible", "spe_agent_model": "test-model", **overrides}))
     env = {**os.environ, "ANSIBLE_ROLES_PATH": str(ANSIBLE / "roles"), "ANSIBLE_LOCALHOST_WARNING": "False"}
     p = subprocess.run(["ansible-playbook", "-i", "localhost,", str(tmp_path / "play.yml"),
@@ -1260,7 +1262,7 @@ spe_harden_airlock: false        # L5: pattern filter on the agent's final answe
         spe_harden_egress: "{{ spe_harden_egress | bool }}"
         spe_agent_tool_surface: "{{ spe_agent_tool_surface }}"
         spe_harden_airlock: "{{ spe_harden_airlock | bool }}"
-      frontend: "{{ spe_frontend }}"
+      frontend: "{{ spe_frontends | join(',') }}"   # a string, as handoff.check_hardening requires: "agui" on every level
       model_provider: "{{ spe_agent_model_provider }}"
       model: "{{ spe_agent_model }}"
       commit: "{{ spe_repo_head.stdout | trim }}"

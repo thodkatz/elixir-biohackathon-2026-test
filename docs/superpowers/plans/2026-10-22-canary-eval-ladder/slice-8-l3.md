@@ -26,7 +26,8 @@ network `weskit`). On an internal `tools` network the sandbox would have no rout
 Making it work would mean attaching Traefik to a cross-project network and changing the sandbox's URLs and the
 certificate. The firewall rules leave the networks, URLs and certificate as they are. The rules match the
 sandbox's fixed address only, so they leave alone:
-- the `agent` container, which shares `tools` and needs the LLM endpoint;
+- the `agent` container (and `open-webui` on an instance that runs it), which shares `tools` and needs the LLM
+  endpoint;
 - the operator's other stack on the de.NBI VM (`agent-stack`; `spe_manage_docker: false` there).
 
 The post-DNAT match uses conntrack's original destination (`--ctorigdst <api> --ctorigdstport 443`), so
@@ -37,8 +38,16 @@ systemd unit, ordered after `docker.service`, re-applies the rules at boot.
 rules. IPv6 is out of scope while the `tools` network has no IPv6 (Task 1 checks this).
 
 **Offline test command:** `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q`. The
-render helper `platform/dev/tests/ansible_render.py` (slice 6) provides `render(role, template, **overrides)
+render helper `platform/dev/tests/ansible_render.py` (slice 4) provides `render(role, template, **overrides)
 -> str`, `load_vars(**overrides) -> dict`, `ANSIBLE` and `GOLDEN`.
+
+**The compose change is an overlay.** The frontend's compose file `platform/instance/compose.yml` is static
+(`${VAR}`s from the frontend directory's `.env`), so the fixed address cannot be an `{% if %}` in it. As for the
+test receiver (slice 4, task 5), it is the overlay `platform/instance/compose.egress.yml`, named in
+`spe_compose_overlays`; `.env` gets `SPE_COMPOSE_OVERLAYS` and the three `SPE_SANDBOX_*` values only when the
+switch is on, and `spe-apply` adds the overlay with `-f`. Off, the `.env` is slice 4's golden
+`frontend.env.L0`, byte for byte. The filter's script and unit live in a role of their own, `egress`: the
+sandbox role's `files/` directory is mounted into the agent container (`/etc/spe-agent/sandbox`, the prompt).
 
 ### Task 1: Verify egress at L0 and the host firewall
 
@@ -77,10 +86,10 @@ $SSH 'docker version --format "{{.Server.Version}}"; docker info 2>/dev/null | g
 
 ### Task 2: Fixed sandbox address, unroutable DNS, the egress filter
 
-**Files:** create `platform/ansible/roles/agui/files/spe_egress.sh`,
-`platform/ansible/roles/agui/files/spe-egress.service`, `platform/ansible/roles/agui/tasks/egress.yml`,
-`platform/dev/tests/golden/agui-compose.L0.yml`, `platform/dev/tests/test_harden_egress.py`. Modify
-`platform/ansible/roles/agui/templates/docker-compose.yml.j2`, `platform/ansible/roles/agui/tasks/main.yml` and
+**Files:** create `platform/ansible/roles/egress/files/spe_egress.sh`,
+`platform/ansible/roles/egress/files/spe-egress.service`, `platform/ansible/roles/egress/tasks/main.yml`,
+`platform/instance/compose.egress.yml`, `platform/dev/tests/test_harden_egress.py`. Modify
+`platform/ansible/roles/sandbox/templates/frontend.env.j2`, `platform/ansible/playbooks/create.yml` and
 `platform/ansible/inventory/group_vars/all.yml`.
 
 **Interfaces:** Consumes `spe_harden_egress` (declared off by slice 3) and `spe_api_host`. Produces
@@ -88,17 +97,9 @@ $SSH 'docker version --format "{{.Server.Version}}"; docker info 2>/dev/null | g
 `SANDBOX_IP`, `API_IP` and `API_PORT` from `/etc/spe/egress.env` (`SPE_EGRESS_ENV` overrides the path,
 `IPTABLES` the binary).
 
-**Decisions:** 3 (off renders today's compose byte for byte), 2.
+**Decisions:** 3 (off renders today's `.env` byte for byte, no overlay), 2.
 
-- [ ] **Step 1: Golden first, then the failing test.**
-
-```bash
-uv run --with pyyaml --with jinja2 python - <<'EOF'
-import sys; sys.path.insert(0, "platform/dev/tests")
-from ansible_render import render, GOLDEN
-(GOLDEN / "agui-compose.L0.yml").write_text(render("agui", "docker-compose.yml.j2"))
-EOF
-```
+- [ ] **Step 1: The failing test.** Slice 4's golden `platform/dev/tests/golden/frontend.env.L0` is the off state.
 
 ```python
 # platform/dev/tests/test_harden_egress.py
@@ -108,23 +109,28 @@ import subprocess
 
 import yaml
 
-from ansible_render import ANSIBLE, GOLDEN, render
+from ansible_render import ANSIBLE, GOLDEN, load_vars, render
 
 ON = {"spe_harden_egress": True}
-SCRIPT = ANSIBLE / "roles/agui/files/spe_egress.sh"
+SCRIPT = ANSIBLE / "roles/egress/files/spe_egress.sh"
+INSTANCE = ANSIBLE.parent / "instance"
 
 
-def test_off_renders_todays_compose():
-    assert render("agui", "docker-compose.yml.j2") == (GOLDEN / "agui-compose.L0.yml").read_text()
+def test_off_renders_todays_env():
+    assert render("sandbox", "frontend.env.j2") == (GOLDEN / "frontend.env.L0").read_text()
+    assert load_vars(spe_eval_sink=True)["spe_compose_overlays"] == ["eval-sink"]  # L2: no egress overlay
 
 
 def test_on_sandbox_has_fixed_address_and_unroutable_dns():
-    c = yaml.safe_load(render("agui", "docker-compose.yml.j2", **ON))
-    sb = c["services"]["sandbox"]
-    assert sb["networks"] == {"tools": {"ipv4_address": "172.30.250.10"}}
-    assert sb["dns"] == ["192.0.2.53"]
-    assert c["networks"]["tools"] == {"ipam": {"config": [{"subnet": "172.30.250.0/24"}]}}
-    assert c["services"]["agent"]["networks"] == ["ui", "tools"]  # the agent keeps its LLM route
+    assert load_vars(spe_eval_sink=True, **ON)["spe_compose_overlays"] == ["eval-sink", "egress"]
+    lines = set(render("sandbox", "frontend.env.j2", **ON).splitlines())
+    assert {"SPE_COMPOSE_OVERLAYS=egress", "SPE_SANDBOX_SUBNET=172.30.250.0/24",
+            "SPE_SANDBOX_IP=172.30.250.10", "SPE_SANDBOX_DNS=192.0.2.53"} <= lines
+    c = yaml.safe_load((INSTANCE / "compose.egress.yml").read_text())
+    # Only the sandbox: the agent keeps its route to the LLM endpoint.
+    assert c["services"] == {"sandbox": {"networks": {"tools": {"ipv4_address": "${SPE_SANDBOX_IP}"}},
+                                         "dns": ["${SPE_SANDBOX_DNS}"]}}
+    assert c["networks"] == {"tools": {"ipam": {"config": [{"subnet": "${SPE_SANDBOX_SUBNET}"}]}}}
 
 
 def run(tmp_path, action, rc_check=1):
@@ -169,7 +175,8 @@ def test_missing_parameters_fail(tmp_path):
 ```
 
   Run `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests/test_harden_egress.py -q`.
-  Expected: FAIL. The off test passes; the others fail (`KeyError: 'spe_sandbox_ip'`, missing script).
+  Expected: FAIL. The off test passes; the others fail (`spe_compose_overlays` without `egress`, no
+  `compose.egress.yml`, missing script).
 - [ ] **Step 2: Implement.** `group_vars/all.yml`, after the hardening switches:
 
 ```yaml
@@ -180,36 +187,50 @@ spe_sandbox_ip: 172.30.250.10
 spe_sandbox_dns: 192.0.2.53
 ```
 
-  `roles/agui/templates/docker-compose.yml.j2`, the sandbox's networks:
+  and the overlay list slice 4 started gains `egress`:
 
-```diff
-       OPEN_TERMINAL_FILE_BROWSER_ROOT: /home/user
-+{% if spe_harden_egress %}
-+    networks:
-+      tools:
-+        ipv4_address: {{ spe_sandbox_ip }}
-+    dns: [{{ spe_sandbox_dns }}]
-+{% else %}
-     networks: [tools]
-+{% endif %}
+```yaml
+spe_compose_overlays: >-
+  {{ (['eval-sink'] if spe_eval_sink | bool else [])
+     + (['egress'] if spe_harden_egress | bool else []) }}
 ```
 
-  and the project's networks:
+  `roles/sandbox/templates/frontend.env.j2`, after slice 4's `SPE_EVAL_SINK_HOST` block:
 
-```diff
- networks:
-   ui: {}
-+{% if spe_harden_egress %}
-+  tools:
-+    ipam:
-+      config:
-+        - subnet: {{ spe_sandbox_subnet }}
-+{% else %}
-   tools: {}
-+{% endif %}
+```jinja
+{% if spe_harden_egress | bool %}
+SPE_SANDBOX_SUBNET={{ spe_sandbox_subnet }}
+SPE_SANDBOX_IP={{ spe_sandbox_ip }}
+SPE_SANDBOX_DNS={{ spe_sandbox_dns }}
+{% endif %}
 ```
 
-  `roles/agui/files/spe_egress.sh`:
+  `platform/instance/compose.egress.yml` (Compose merges the base file's `networks: [tools]` with this map form;
+  checked with `docker compose config`, Compose 5.6, while planning):
+
+```yaml
+# Overlay for spe_harden_egress (ladder level L3): the sandbox gets a fixed address on its
+# own tools subnet, which the host's SPE-EGRESS rules match, and an unroutable resolver.
+# spe-apply adds it when .env's SPE_COMPOSE_OVERLAYS names egress.
+services:
+  sandbox:
+    networks:
+      tools:
+        ipv4_address: ${SPE_SANDBOX_IP}
+    dns: ["${SPE_SANDBOX_DNS}"]
+networks:
+  tools:
+    ipam:
+      config:
+        - subnet: ${SPE_SANDBOX_SUBNET}
+```
+
+  Switching the level changes the `tools` network's IPAM: Compose recreates the network and the containers on
+  it on `spe-apply up`. If it refuses instead (`network … has incorrect config`), run
+  `docker compose -p spe-frontend -f ~/spe-frontend/docker-compose.yml down` (no `-v`: the volumes stay) before
+  the converge, and record that in the handoff.
+
+  `roles/egress/files/spe_egress.sh`:
 
 ```sh
 #!/bin/sh
@@ -255,7 +276,7 @@ case "${1:-}" in
 esac
 ```
 
-  `roles/agui/files/spe-egress.service`:
+  `roles/egress/files/spe-egress.service`:
 
 ```ini
 [Unit]
@@ -274,7 +295,7 @@ ExecStop=/opt/spe/bin/spe_egress.sh remove
 WantedBy=multi-user.target docker.service
 ```
 
-  `roles/agui/tasks/egress.yml`:
+  `roles/egress/tasks/main.yml`:
 
 ```yaml
 ---
@@ -333,24 +354,27 @@ WantedBy=multi-user.target docker.service
         daemon_reload: true
 ```
 
-  In `roles/agui/tasks/main.yml`, between *Frontend stack up* and *No-cost checks*:
+  In `playbooks/create.yml`, right after *Frontend containers up* (the sandbox runs with its fixed address):
 
 ```yaml
-- name: Sandbox egress filter (spe_harden_egress)
-  ansible.builtin.include_tasks: egress.yml
+    - name: Sandbox egress filter (spe_harden_egress)
+      ansible.builtin.import_role:
+        name: egress
+      tags: [frontend]
+      when: spe_frontends | length > 0
 ```
 
   With the switch off and no unit on the host (every build so far), both blocks are skipped, so nothing
-  changes. Ladder levels use `spe_frontend: agui`, and the filter belongs to that role.
+  changes. The rules match the shared sandbox's address, whichever frontend drives it; ladder levels run
+  `spe_frontends: [agui]` (slice 4's `L0.example.yml`).
 - [ ] **Step 3: Run.** `uv run --with pytest --with pyyaml --with jinja2 pytest platform/dev/tests -q`.
   Expected: PASS.
 - [ ] **Step 4: Commit.**
 
 ```bash
-git add platform/ansible/roles/agui/files/spe_egress.sh platform/ansible/roles/agui/files/spe-egress.service \
-  platform/ansible/roles/agui/tasks/egress.yml platform/ansible/roles/agui/tasks/main.yml \
-  platform/ansible/roles/agui/templates/docker-compose.yml.j2 platform/ansible/inventory/group_vars/all.yml \
-  platform/dev/tests/golden/agui-compose.L0.yml platform/dev/tests/test_harden_egress.py
+git add platform/ansible/roles/egress platform/ansible/playbooks/create.yml platform/instance/compose.egress.yml \
+  platform/ansible/roles/sandbox/templates/frontend.env.j2 platform/ansible/inventory/group_vars/all.yml \
+  platform/dev/tests/test_harden_egress.py
 git commit -s -m "L3: sandbox egress only to the API host on 443" \
   -m "DOCKER-USER rules on the sandbox's fixed address: the API is reached through Docker's DNAT of port 443, which an internal network would cut."
 ```
@@ -389,7 +413,8 @@ unroutable resolver (`spe_sandbox_dns`). The host chains `SPE-EGRESS` (from `DOC
 `SPE-EGRESS-IN` (from `INPUT`) drop everything from that address except replies and TCP to
 `spe_api_host:443`. The `agent` container is not affected. `spe-egress.service` re-applies the rules after a
 reboot; `sudo /opt/spe/bin/spe_egress.sh status` shows them. Turning the switch off stops the unit, which
-removes the rules. Only for `spe_frontend: agui`.
+removes the rules. The rules hold for the shared sandbox whichever frontend drives it; the compose change is the
+overlay `platform/instance/compose.egress.yml` (`SPE_COMPOSE_OVERLAYS`, applied by `spe-apply`).
 ```
 
 - [ ] **Step 3: Commit.**

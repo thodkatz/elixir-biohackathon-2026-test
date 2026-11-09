@@ -34,13 +34,13 @@ type SidebarProps = {
   onChanged: () => Promise<unknown>; // resolves once the list is fetched again
   onDeleted: (id: string) => void;
   onError: (message: string) => void;
-  /** A run is in progress: switching session, New chat and the open session's Delete are disabled. */
+  /** The open session has a run in progress: its Delete is disabled. Switching and New chat stay enabled. */
   running: boolean;
-  /** False until the page is safe to click: hydrated, the agent ready, and the page's own
+  /** False until the page is safe to click: hydrated, the agent runtime connected, and the page's own
    *  first-load `startNew()`/`open()` has actually run (not just become due). Every button here
    *  starts an action, so each stays disabled until then rather than risk a click landing before
-   *  its handler is attached, before the agent can run anything, or in the sub-frame window
-   *  between the agent becoming ready and that first-load effect running. */
+   *  its handler is attached, before the runtime can run anything, or in the sub-frame window
+   *  between the runtime connecting and that first-load effect running. */
   ready: boolean;
 };
 
@@ -271,7 +271,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
         <button type="button" className="spe-icon-button" aria-label="Show sessions" title="Show sessions"
           onClick={() => setCollapsed(false)}><SidebarToggle /></button>
         <button type="button" className="spe-icon-button" aria-label="New chat" title="New chat"
-          disabled={running || !ready} onClick={newChat}><PencilSquare /></button>
+          disabled={!ready} onClick={newChat}><PencilSquare /></button>
       </nav>
     );
   }
@@ -296,7 +296,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
           />
         ) : (
           <button type="button" className="spe-row-open" aria-current={s.id === activeId ? "page" : undefined}
-            disabled={running || !ready} onClick={() => { end(); onOpen(s.id); }} onDoubleClick={() => startRename(s)}>
+            disabled={!ready} onClick={() => { end(); onOpen(s.id); }} onDoubleClick={() => startRename(s)}>
             {/* The Pinned section shows it; this tells a screen reader too. */}
             {s.pinned && <span className="spe-pin spe-sr-only">Pinned: </span>}
             <span className="spe-row-title">{s.title}</span>
@@ -344,7 +344,7 @@ export function Sidebar({ sessions, knownTags, activeId, onNew, onOpen, onChange
         onDoubleClick={() => resizeTo(DEFAULT_WIDTH)}
       />
       <div className="spe-sidebar-actions">
-        <button type="button" className="spe-new" disabled={running || !ready} onClick={newChat}><PencilSquare />New chat</button>
+        <button type="button" className="spe-new" disabled={!ready} onClick={newChat}><PencilSquare />New chat</button>
         <SearchBox query={filter.query} knownTags={knownTags} onChange={(query) => setFilter({ ...filter, query })} />
       </div>
       <div className="spe-sidebar-list">

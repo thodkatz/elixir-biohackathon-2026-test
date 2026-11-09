@@ -27,7 +27,7 @@ type Props = {
   knownTags: string[];
   /** A run is in progress: Delete is disabled, as in the open session's row. */
   running: boolean;
-  /** False until the page is safe to click: hydrated, the agent ready, and the page's own
+  /** False until the page is safe to click: hydrated, the agent runtime connected, and the page's own
    *  first-load `startNew()`/`open()` has actually run. The actions button starts a menu of
    *  actions, so it stays disabled until then, as the sidebar's buttons do. */
   ready: boolean;

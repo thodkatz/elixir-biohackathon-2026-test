@@ -25,6 +25,7 @@ import {
 import type { Live } from "../lib/live-sessions.ts";
 import { ListOrder } from "../lib/list-order.ts";
 import { TitleTrigger, fetchSessionList, waitListed } from "../lib/reconcile.ts";
+import { POLL_MS, needsPoll } from "../lib/refresh.ts";
 import { searchWith, sessionFromSearch } from "../lib/session-url.ts";
 import type { MetaPatch, SessionMeta } from "../lib/sessions.ts";
 import { effectiveTheme, parseTheme } from "../lib/theme.ts";
@@ -96,17 +97,19 @@ function Chat() {
   // `group`: CopilotKit groups the calls this draws, across the model's steps (./tool-calls.tsx).
   useDefaultRenderTool({ render: (props) => <ToolCard {...props} />, group: true });
   const active = live.open;
+  // The first load has run (the effect below): once only, so a runtime connection that later drops from
+  // Connected neither disables the buttons again nor re-arms the unreachable timer, and the refreshes go on.
+  const [loaded, setLoaded] = useState(false);
   // One owner of "safe to click": passed down to every button that starts an action from the
   // sidebar and header, so a click before hydration is disabled rather than dropped. Hydration
   // alone is not enough: the first-load effect below (startNew()/open(), gated on the runtime having
   // answered) must also have run, or an early New chat/row-open call opens a session itself before the
-  // page has read the URL. `connected` alone still leaves a sub-frame window open between the render where
-  // it flips (committing enabled buttons) and the first-load effect that runs after that commit, so
-  // `ready` also waits for the effect itself: `active !== null` is only ever false before that effect
-  // has opened a session (every one of its paths — `open()`'s success, its not-found/error fallback to
-  // `startNew()`, and the no-parameter `startNew()` — ends with one open), so this cannot leave `ready`
-  // false once the runtime is there, including with an empty session list.
-  const ready = useHydrated() && connected && active !== null;
+  // page has read the URL. `loaded` is set by that effect (`connected` itself would disable the buttons
+  // again on a later drop), and `ready` also waits for its open: `active !== null` is only ever false before
+  // that effect has opened a session (every one of its paths — `open()`'s success, its not-found/error
+  // fallback to `startNew()`, and the no-parameter `startNew()` — ends with one open), so this cannot leave
+  // `ready` false once the runtime is there, including with an empty session list.
+  const ready = useHydrated() && loaded && active !== null;
 
   // Every list fetch is stamped as it starts, and only a list newer than the last applied is applied: a
   // late, older list would otherwise mark a session the newer one showed as gone, for good.
@@ -256,6 +259,7 @@ function Chat() {
   useEffect(() => {
     if (!connected || firstLoad.current) return;
     firstLoad.current = true;
+    setLoaded(true);
     void refresh();
     const id = sessionFromSearch(window.location.search);
     if (id) void open(id);
@@ -263,15 +267,38 @@ function Chat() {
   }, [connected, open, refresh, startNew]);
 
   // A runtime that never answers would leave "Loading…" up for good: say so after a while, and take
-  // the message back once it does answer.
+  // the message back once it does answer. Only before the first load: a later drop does not re-arm it.
   useEffect(() => {
-    if (connected) {
+    if (connected || loaded) {
       setError((e) => (e === UNREACHABLE ? null : e));
       return;
     }
     const timer = setTimeout(() => setError(UNREACHABLE), UNREACHABLE_AFTER_MS);
     return () => clearTimeout(timer);
-  }, [connected]);
+  }, [connected, loaded]);
+
+  // Refresh (spec §6): the list is fetched again when the page becomes visible or its window regains focus,
+  // so a run started from another tab shows its mark; from the first load on, whatever the runtime's status.
+  useEffect(() => {
+    if (!loaded) return;
+    const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    const onFocus = () => void refresh();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loaded, refresh]);
+
+  // And every POLL_MS while the list shows a session running that no holder in this page streams (another
+  // tab's run, or one from before a reload), until it shows none: each list applied re-decides it.
+  const polling = loaded && needsPoll(sessions, live);
+  useEffect(() => {
+    if (!polling) return;
+    const timer = setInterval(() => void refresh(), POLL_MS);
+    return () => clearInterval(timer);
+  }, [polling, refresh]);
 
   const onDeleted = useCallback((id: string) => {
     if (id === liveRef.current.open) startNew();

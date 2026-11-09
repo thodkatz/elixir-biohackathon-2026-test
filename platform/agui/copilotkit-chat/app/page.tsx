@@ -1,8 +1,9 @@
 "use client";
 // Chat with the runtime's agent `spe`, and a sidebar of sessions. Each session the page shows or streams has
-// an agent of its own, held by ./session-agent.tsx, so a run goes on while another session is open. Each tool call is a collapsible card: a status icon and
-// title, the arguments as rows (run_command's as a `$ <command>` line) and the first lines of the result;
-// calls made in a row, across model steps, are grouped (./tool-calls.tsx). Everything is rendered as text, never HTML.
+// an agent of its own, held by ./session-agent.tsx, so a run goes on while another session is open. Each tool
+// call is a collapsible card: a status icon and title, the arguments as rows (run_command's as a `$ <command>`
+// line) and the first lines of the result; calls made in a row, across model steps, are grouped
+// (./tool-calls.tsx). Everything is rendered as text, never HTML.
 // Sessions are recorded on the server (lib/recorder.ts); this page only reads them and changes
 // their metadata. The open session is in the URL (`?session=<id>`), so a reload reopens it.
 import type { Message } from "@ag-ui/client";
@@ -18,7 +19,9 @@ import {
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { HTMLAttributes } from "react";
 import { askTitle, fetchSession, fetchSessions, removeSession, updateSession } from "../lib/client.ts";
-import { EMPTY, held, isHeld, listed, openSession, runEnded, runningIds as runningIdsOf, runStarted } from "../lib/live-sessions.ts";
+import {
+  EMPTY, held, isHeld, listed, openSession, runEnded, runningIds as runningIdsOf, runStarted,
+} from "../lib/live-sessions.ts";
 import type { Live } from "../lib/live-sessions.ts";
 import { ListOrder } from "../lib/list-order.ts";
 import { TitleTrigger, fetchSessionList, waitListed } from "../lib/reconcile.ts";

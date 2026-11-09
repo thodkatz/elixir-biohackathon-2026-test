@@ -7,8 +7,6 @@ import {
   EMPTY, held, isHeld, listed, openSession, runEnded, runningIds, runStarted,
 } from "./live-sessions.ts";
 
-const ids = (set: ReadonlySet<string>): string[] => [...set];
-
 test("keeps a running session held after a switch, drops it at its run's end", () => {
   let live = openSession(EMPTY, "A");
   live = runStarted(live, "A");

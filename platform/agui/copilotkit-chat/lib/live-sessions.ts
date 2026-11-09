@@ -6,7 +6,9 @@
 // the list can be told from never having been in it, Review Focus 2 / ruling 4: a session not yet listed,
 // e.g. a brand new one, is not "gone" just because a list fetch does not have it yet); `gone` is every seen
 // id a later list fetch no longer shows, which is sticky once set (nothing in this module clears it).
-export type Live = { open: string | null; streaming: ReadonlySet<string>; seen: ReadonlySet<string>; gone: ReadonlySet<string> };
+export type Live = {
+  open: string | null; streaming: ReadonlySet<string>; seen: ReadonlySet<string>; gone: ReadonlySet<string>;
+};
 
 export const EMPTY: Live = { open: null, streaming: new Set(), seen: new Set(), gone: new Set() };
 

@@ -740,6 +740,7 @@ def check_stop(r: Run) -> str:
     box = page.get_by_test_id("copilot-chat-textarea")
     box.fill(title)
     box.press("Enter")
+    # A New chat's row appears once a list fetch shows it (waitListed, up to 3 s), then its mark: room to spare.
     expect(r.row(title).locator(".spe-row-running")).to_have_count(1, timeout=10_000)
     sid = r.row(title).get_attribute("data-session-id")
     expect(page.get_by_role("button", name="New chat")).to_be_enabled()
@@ -846,6 +847,10 @@ def check_leave_running(r: Run, save_delay_ms: int = 1500) -> None:
     expect(page.get_by_text("Slow step 1 of 10.")).to_be_visible(timeout=10_000)
     expect(r.running(a)).to_have_count(1)
     expect(r.running(b)).to_have_count(1)
+    header.get_by_role("button", name="Chat actions").click()  # A's header too, not only B's
+    expect(page.get_by_role("menuitem", name="Delete")).to_be_disabled()
+    page.keyboard.press("Escape")
+    expect(page.get_by_role("menu")).to_have_count(0)
     page.mouse.move(900, 500)  # off the sidebar: no hovered row hides its mark
     r.shot("leave-running-mid-stream")
     first = last_reply(page)

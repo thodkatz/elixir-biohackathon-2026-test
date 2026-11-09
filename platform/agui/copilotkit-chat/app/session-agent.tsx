@@ -35,7 +35,9 @@ type Props = {
 
 const RUN_FAILED = "The agent run failed.";
 
-export function SessionAgent({ id, fetchList, initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages }: Props): null {
+export function SessionAgent({
+  id, fetchList, initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages,
+}: Props): null {
   // First a provisional agent (`isReady` false), then, on a later render, the registered one: messages set
   // on the provisional one are lost, so everything below waits for `isReady` and re-runs on a new agent.
   const { agent, isReady } = useAgent({
@@ -44,8 +46,9 @@ export function SessionAgent({ id, fetchList, initialMessages, onReady, onRunSta
     threadId: id,
     updates: [UseAgentUpdate.OnRunStatusChanged],
   });
-  const latest = useRef({ initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages });
-  latest.current = { initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages };
+  const props = { initialMessages, onReady, onRunStarted, onRunEnded, onRecorded, onList, onError, onMessages };
+  const latest = useRef(props);
+  latest.current = props;
 
   // Once per holder: a later agent object (none in practice) would otherwise be reset to a history older
   // than the run it has streamed.

@@ -134,3 +134,6 @@ CopilotKit 1.84.1, `@ag-ui/client` 1.0.2, the fake agent; script and output in
   *Cost if wrong:* a CopilotKit upgrade whose connect stops firing those callbacks leaves the session out of
   `streaming` during the rejoin (a switch away drops its holder) and skips the end's list fetch; the poll still
   clears the mark, and task 3's `check_rejoin` shows it.
+- **A left session's save failure is named too**: `“<title>”: this session could not be saved` (slice 3, task 3,
+  2026-11-09). *Why:* it is that session's run's failure, and an unnamed one shown while another chat is open would
+  mislead. *Cost if wrong:* one prefix.

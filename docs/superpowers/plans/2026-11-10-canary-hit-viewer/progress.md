@@ -106,3 +106,6 @@ slice is the README's slices table; the handoffs say what each session did.
 24. **The frontend label ("AG-UI", "Open WebUI") sits in the expanded hit, not its collapsed line**, as in the
     spec's mockup (its second line), and "Group by run" groups the loud hits only; "also seen" stays one
     collapsed block. *Cost if wrong:* a participant opens a hit to see its frontend.
+25. **A logged-out visitor to the participant page returns to it after login** (`redirect=/reports/<id>/hits`),
+    not to the report as the plan's task text had it (`/reports/<id>`), which the final review found sent them to
+    the wrong page. *Cost if wrong:* none; `hits.json` and the stream still answer 401.

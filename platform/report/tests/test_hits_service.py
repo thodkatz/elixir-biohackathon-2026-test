@@ -9,6 +9,7 @@ import re
 import sys
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -92,7 +93,9 @@ def coder():
 
 
 @pytest.fixture
-def service(tmp_path, coder):
+def server(tmp_path, coder):
+    """The service over tmp_path/reports (WID's sidecar, owner anna) and tmp_path/hits, with the
+    real stream timings; a test may lower them on the server object."""
     reports_dir, hits_dir = tmp_path / "reports", tmp_path / "hits"
     reports_dir.mkdir()
     hits_dir.mkdir()
@@ -101,8 +104,14 @@ def service(tmp_path, coder):
          "instance": "cw-anna-tm-test", "created": "2026-11-06 15:00 UTC"}))
     srv = sr.make_server("127.0.0.1:0", str(reports_dir), coder, str(hits_dir))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{srv.server_port}", hits_dir
+    yield f"http://127.0.0.1:{srv.server_port}", hits_dir, srv
     srv.shutdown()
+
+
+@pytest.fixture
+def service(server):
+    base, hits_dir, _ = server
+    return base, hits_dir
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -283,3 +292,310 @@ def test_csp_and_no_inline_script(service):
     assert "<script>" not in text
     for tag in re.findall(r"<script\b[^>]*>", text):
         assert "src=" in tag
+
+
+# --- the event stream (decisions 6, 8, 10; ruling 7; Review Focus 5) ------------------------------
+
+import http.client  # noqa: E402
+import queue  # noqa: E402
+import socket  # noqa: E402
+import time  # noqa: E402
+
+from conftest import SESSION, WORKSPACE, make_fake_instance  # noqa: E402
+
+import canary_watch  # noqa: E402
+
+READ_BACKSTOP = 30  # seconds: a stream read that never returns ends the reader thread, not the test run
+
+
+class Stream:
+    """An open event stream, read by a daemon thread into a queue, so a test waits on the queue with
+    a deadline and never blocks on the socket (a read that times out cannot be resumed)."""
+
+    def __init__(self, base: str, wid: str, token: str | None = "tok-anna", query: str = "",
+                 last_event_id: str | None = None):
+        host = urllib.parse.urlsplit(base).netloc
+        self.conn = http.client.HTTPConnection(host, timeout=READ_BACKSTOP)
+        headers = {"Cookie": f"{sr.COOKIE}={token}"} if token else {}
+        if last_event_id is not None:
+            headers["Last-Event-ID"] = last_event_id
+        self.conn.request("GET", f"/reports/{wid}/hits/events{query}", headers=headers)
+        self.sock = self.conn.sock  # the response's file keeps it open past conn.close()
+        self.resp = self.conn.getresponse()
+        self.status, self.headers = self.resp.status, dict(self.resp.getheaders())
+        self.events: queue.Queue = queue.Queue()
+        self.raw: list[str] = []
+        if self.status == 200:
+            threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        event: dict = {}
+        try:
+            while True:
+                line = self.resp.fp.readline()
+                if not line:
+                    break
+                text = line.decode().rstrip("\n")
+                self.raw.append(text)
+                if text == "":
+                    if event:
+                        self.events.put(event)
+                    event = {}
+                elif text.startswith(":"):
+                    self.events.put({"comment": text[1:].strip()})
+                else:
+                    key, _, value = text.partition(":")
+                    event[key] = value[1:] if value.startswith(" ") else value
+        except (OSError, ValueError):  # ValueError: read after close() from the test's thread
+            pass
+        self.events.put(None)  # the stream ended
+
+    def next(self, timeout: float, event: str | None = "hit") -> dict | None:
+        """The next event of this type (comments and other events skipped) within `timeout` seconds,
+        else None; also None once the stream ended."""
+        deadline = time.monotonic() + timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            try:
+                got = self.events.get(timeout=left)
+            except queue.Empty:
+                return None
+            if got is None:
+                self.events.put(None)
+                return None
+            if event is None or got.get("event") == event:
+                return got
+
+    def ended(self, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                if self.events.get(timeout=max(0.01, deadline - time.monotonic())) is None:
+                    return True
+            except queue.Empty:
+                return False
+        return False
+
+    def close(self):
+        """Really closes the connection (shutdown, so the server's next writes fail)."""
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        self.sock.close()
+        self.resp.close()
+        self.conn.close()
+
+
+@pytest.fixture
+def streams():
+    opened: list[Stream] = []
+
+    def open_stream(*args, **kwargs) -> Stream:
+        s = Stream(*args, **kwargs)
+        opened.append(s)
+        return s
+    yield open_stream
+    for s in opened:
+        s.close()
+
+
+def append(hits_dir: Path, wid: str, record: dict) -> int:
+    return HitsFile(str(hits_dir / f"{wid}.jsonl")).append(dict(record))
+
+
+def test_stream_headers(service, streams):
+    base, _ = service
+    s = streams(base, WID)
+    assert s.status == 200
+    assert s.headers["Content-Type"] == "text/event-stream"
+    assert s.headers["Cache-Control"] == "no-store"
+    assert s.headers["X-Accel-Buffering"] == "no"
+    assert s.headers["Content-Security-Policy"] == sr.CSP
+    assert "Content-Length" not in s.headers
+
+
+def test_new_line_reaches_stream_within_2s(service, streams):
+    base, hits_dir = service
+    s = streams(base, WID)
+    started = time.monotonic()
+    append(hits_dir, WID, _record(WID, _agui_hit()))
+    event = s.next(2.0)
+    assert event is not None, "no hit within 2 s"
+    assert time.monotonic() - started < 2.0
+    assert event["id"] == "1"
+    data = json.loads(event["data"])
+    hit = HitsFile(str(hits_dir / f"{WID}.jsonl")).read()[0]
+    assert data == {"id": 1, "kind": "touched", "loud": True, "type": hit["canary"]["type"],
+                    "frontend": "agui", "html": hits_view.hit_html(hit)}
+
+
+def test_events_resume_past_end(service, streams):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()), _record(WID, _openwebui_hit())])
+    s = streams(base, WID, last_event_id="99")
+    assert s.status == 200
+    assert s.next(1.5) is None  # nothing replayed, no error
+    append(hits_dir, WID, _record(WID, _agui_hit()))
+    event = s.next(2.0)
+    assert event is not None and event["id"] == "3"
+
+
+def test_events_before_file_exists(service, streams):
+    base, hits_dir = service
+    s = streams(base, WID)
+    assert s.status == 200
+    assert s.next(1.0) is None
+    append(hits_dir, WID, _record(WID, _agui_hit()))
+    event = s.next(2.0)
+    assert event is not None and event["id"] == "1"
+
+
+def test_last_event_id_catch_up(service, streams):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()), _record(WID, _openwebui_hit()),
+                               _record(WID, _agui_hit())])
+    s = streams(base, WID, last_event_id="1")
+    assert [s.next(2.0)["id"], s.next(2.0)["id"]] == ["2", "3"]
+    assert s.next(1.0) is None
+
+
+def test_after_query_when_no_last_event_id(service, streams):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()), _record(WID, _openwebui_hit())])
+    s = streams(base, WID, query="?after=1")
+    assert s.next(2.0)["id"] == "2"
+    s2 = streams(base, WID, query="?after=0", last_event_id="2")  # the header wins
+    assert s2.next(1.0) is None
+    s3 = streams(base, WID, last_event_id="x")  # not an integer: from the start
+    assert s3.next(2.0)["id"] == "1"
+
+
+def test_status_event(service, streams):
+    base, hits_dir = service
+    s = streams(base, WID)
+    now = time.time()
+    last_poll = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
+    write_status(hits_dir, WID, {"state": "running", "since": last_poll, "last_poll": last_poll})
+    event = s.next(2.0, event="status")
+    assert event is not None
+    assert json.loads(event["data"])["line"].startswith("running · watched ")
+    write_status(hits_dir, WID, {"state": "stopped", "note": "archive incomplete"})
+    event = s.next(2.0, event="status")
+    assert event is not None and json.loads(event["data"]) == {"line": "stopped · archive incomplete"}
+
+
+def test_ping_when_idle(server, streams):
+    base, _, srv = server
+    srv.stream_ping = 0.2
+    s = streams(base, WID)
+    assert s.next(2.0, event=None) == {"comment": "ping"}
+
+
+def test_stream_ends_after_its_lifetime(server, streams):
+    base, _, srv = server
+    srv.stream_seconds = 0.5
+    s = streams(base, WID)
+    assert s.ended(5.0)
+
+
+def test_streams_capped_503(server, streams):
+    base, _, srv = server
+    srv.stream_max, srv.stream_ping = 1, 0.1
+    first = streams(base, WID)
+    assert first.status == 200
+    refused = streams(base, WID)
+    assert refused.status == 503 and json.loads(refused.resp.read()) == {"error": "too many open streams"}
+    first.close()
+    deadline = time.monotonic() + 5
+    while True:  # the slot is freed once the server's next writes (pings) fail on the closed socket
+        again = streams(base, WID)
+        if again.status == 200 or time.monotonic() > deadline:
+            break
+        time.sleep(0.2)
+    assert again.status == 200
+
+
+def test_events_access_rule(service):
+    base, _ = service
+    assert call(base, f"/reports/{WID}/hits/events", token="tok-bob")[0] == 403
+    assert call(base, f"/reports/{WID}/hits/events")[0] == 401  # no redirect
+    assert call(base, "/reports/not-a-uuid/hits/events", token="tok-anna")[0] == 404
+
+
+def test_no_route_takes_a_token(service, streams):
+    """Decision 10: no URL carries a canary value. The routes table names no path parameter but the
+    workspace id (and the service's own static files); a canary in a path is a 404, in any query key
+    but `after` it is ignored."""
+    routes = re.findall(r"^\s+(?:GET|PUT|POST)\s+(\S+)", sr.__doc__, re.M)
+    assert f"{sr.PREFIX}/<id>/hits/events" in routes
+    params = {p for r in routes for p in re.findall(r"<[^>]+>", r)}
+    assert params == {"<id>", "<file>"}
+    assert [r for r in routes if "<file>" in r] == [f"{sr.PREFIX}/static/<file>"]
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
+    for path in (f"/reports/{WID}/hits/FCANARY-TEST01", "/reports/FCANARY-TEST01/hits",
+                 "/reports/FCANARY-TEST01/hits.json", f"/reports/{WID}/hits/events/FCANARY-TEST01",
+                 "/reports/FCANARY-TEST01"):
+        assert call(base, path, token="tok-anna")[0] == 404, path
+    plain = json.loads(call(base, f"/reports/{WID}/hits.json", token="tok-anna")[2])
+    keyed = json.loads(call(base, f"/reports/{WID}/hits.json?token=FCANARY-TEST01&canary=FCANARY-TEST01",
+                            token="tok-anna")[2])
+    assert keyed == plain
+    s = streams(base, WID, query="?token=FCANARY-TEST01")
+    assert s.status == 200 and s.next(2.0)["id"] == "1"
+
+
+def test_service_logs_no_token(service, streams, capfd):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
+    assert call(base, f"/reports/{WID}/hits?x=FCANARY-TEST01", token="tok-anna")[0] == 200
+    assert call(base, f"/reports/{WID}/hits.json?x=FCANARY-TEST01", token="tok-anna")[0] == 200
+    s = streams(base, WID, query="?x=FCANARY-TEST01")
+    assert s.next(2.0) is not None
+    append(hits_dir, WID, _record(WID, _openwebui_hit()))
+    assert s.next(2.0) is not None
+    s.close()
+    time.sleep(0.6)  # one stream poll after the close
+    out, err = capfd.readouterr()
+    assert f"/reports/{WID}/hits/events" in out  # the log was captured
+    assert "CANARY" not in out + err
+
+
+def test_latency_fake_instance(tmp_path, coder, streams):
+    """Decision 8: a journal line on the (fake) instance reaches the participant's open stream within
+    10 s: the watcher (slice 2) ticking every second, the service reading the same hits directory."""
+    transport, output_root, reports_dir, runs_dir = make_fake_instance(tmp_path)
+    hits_dir = tmp_path / "hits"
+    watcher = canary_watch.Watcher(str(hits_dir), str(reports_dir), str(runs_dir), str(output_root), transport)
+    srv = sr.make_server("127.0.0.1:0", str(reports_dir), coder, str(hits_dir))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    stop = threading.Event()
+
+    def ticking():
+        while not stop.is_set():
+            watcher.tick(time.time())
+            stop.wait(1.0)
+    ticker = threading.Thread(target=ticking, daemon=True)
+    ticker.start()
+    try:
+        s = streams(f"http://127.0.0.1:{srv.server_port}", WORKSPACE, token="tok-root")
+        assert s.status == 200
+        journal = Path(transport.paths["sessions"]) / f"{SESSION}.jsonl"
+        started = time.monotonic()
+        journal.write_text((FIXTURES / "agui-journals" / "s1.jsonl").read_text())
+        touched = None
+        while touched is None and time.monotonic() - started < 10:
+            event = s.next(10 - (time.monotonic() - started))
+            if event is None:
+                break
+            if json.loads(event["data"])["kind"] == "touched":
+                touched = event
+        assert touched is not None, "no touched hit within 10 s"
+        assert "FCANARY-TEST01" in json.loads(touched["data"])["html"]
+    finally:
+        stop.set()
+        ticker.join(5)
+        srv.shutdown()

@@ -26,11 +26,13 @@ from pathlib import Path
 NOTICE = "Matching is literal: an encoded, split or paraphrased canary is not seen."
 NO_HITS = "No hits yet."
 NOT_WATCHED = "Not watched yet."
+CAPPED = "hits file full"
 ENCRYPTED_NOTICE = "The canary record is encrypted: the watcher cannot match this workspace."
 
 # Loud kinds, in the headline's order (spec *Participant page* mockup); quiet kinds, and any hit whose
 # kind is unknown or missing, collapse into "also seen" (spec *Hits*).
 LOUD_KINDS = ("touched", "answer", "sent", "delivered")
+LOUD = frozenset(LOUD_KINDS)  # the same kinds as a set: the event stream's `loud` flag
 QUIET_KINDS = ("seen", "args", "prompt")
 # The headline's "also seen" label for each quiet kind (mockup: "(metadata, args, prompt)").
 QUIET_LABELS = {"seen": "metadata", "args": "args", "prompt": "prompt"}
@@ -69,9 +71,12 @@ def _tool_html(tool: dict | None) -> str:
     return "".join(out)
 
 
-def _hit_html(hit: dict) -> str:
+def hit_html(hit: dict) -> str:
+    """One hit's collapsed <details>, as the page lists it and the event stream carries it (ruling 8:
+    one renderer, so a hit inserted live reads as one loaded with the page). Its `data-id`,
+    `data-kind`, `data-session` (the session id) and `data-run` let the page script place and count it."""
     kind = hit.get("kind")
-    loud = "loud" if kind in LOUD_KINDS else "quiet"
+    loud = "loud" if kind in LOUD else "quiet"
     frontend = FRONTEND_LABELS.get(hit.get("frontend"))
     session = hit.get("session") if isinstance(hit.get("session"), dict) else {}
     canary = hit.get("canary") if isinstance(hit.get("canary"), dict) else {}
@@ -97,7 +102,9 @@ def _hit_html(hit: dict) -> str:
     trace.append(_tool_html(hit.get("tool")))
     trace.append(f'<div class="field excerpt"><span class="k">excerpt</span> {_marked_excerpt(hit.get("excerpt"))}</div>')
 
-    return f'<details class="hit {loud}">{summary}<div class="trace">{"".join(trace)}</div></details>'
+    data = (f'data-id="{_esc(hit.get("id"))}" data-kind="{_esc(kind)}" '
+            f'data-session="{_esc(session.get("id"))}" data-run="{_esc(hit.get("run"))}"')
+    return f'<details class="hit {loud}" {data}>{summary}<div class="trace">{"".join(trace)}</div></details>'
 
 
 def _counts(hits: list[dict]) -> dict[str, int]:
@@ -139,7 +146,8 @@ def _epoch(value: object) -> float | None:
 def status_line(status: dict | None, now: float) -> str:
     """The header's live status clause (ruling 6: the watcher's status file: `state`, `since`,
     `last_poll`, `note`): "running · watched 3 s ago", "stopped" (or "stopped · archive incomplete"
-    when `note` is set), "not reachable since 14:02", "hits file full" (state `capped`'s own note).
+    when `note` is set), "not reachable since 14:02", "hits file full" (state `capped`; a note that says
+    more is appended as `stopped`'s is).
     `None`, or a dict with no state yet (discovered but never polled, or simply no status file on
     disk): "not watched yet". Anything else that is not a dict (a caller passing plain text) is
     shown as-is; the caller escapes it."""
@@ -159,7 +167,8 @@ def status_line(status: dict | None, now: float) -> str:
         since = status.get("since")
         return f"not reachable since {since[11:16]}" if isinstance(since, str) and len(since) >= 16 else "not reachable"
     if state == "capped":
-        return note or "hits file full"
+        # The watcher's own note for this state is the same words: appended only when it says more.
+        return f"{CAPPED} · {note}" if note and note != CAPPED else CAPPED
     if state == "encrypted":
         return "canary record is encrypted"
     return str(state)
@@ -191,10 +200,10 @@ def participant_body(meta: dict, hits: list[dict], status: dict | None) -> str:
     ordered = sorted(hits, key=lambda h: str(h.get("at") or h.get("detected") or ""), reverse=True)
     loud = [h for h in ordered if h.get("kind") in LOUD_KINDS]
     quiet = [h for h in ordered if h.get("kind") not in LOUD_KINDS]
-    items = "".join(_hit_html(h) for h in loud)
+    items = "".join(hit_html(h) for h in loud)
     if quiet:
         items += (f'<details class="also-seen"><summary>also seen ({len(quiet)})</summary>'
-                  f'{"".join(_hit_html(h) for h in quiet)}</details>')
+                  f'{"".join(hit_html(h) for h in quiet)}</details>')
     if state == "encrypted":
         items = f'<p class="muted">{_esc(ENCRYPTED_NOTICE)}</p>'
     elif not items:

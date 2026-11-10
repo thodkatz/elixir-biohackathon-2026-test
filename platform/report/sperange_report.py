@@ -19,6 +19,9 @@ Routes (Caddy sends /reports* here):
     GET  /reports/<id>/hits        the canary hit viewer's participant page (spec *Participant
                                     page*); 403 for anyone but the workspace's owner and Coder owners
     GET  /reports/<id>/hits.json   the same hits as JSON, ?after=<id> for only the new ones
+    GET  /reports/<id>/hits/events the same hits live, as server-sent events (decision 6); resumes
+                                    past Last-Event-ID (else ?after=<id>); ends after 30 minutes,
+                                    503 past 200 open streams (ruling 7)
     GET  /reports/static/<file>    the page's CSS and script
     GET  /reports/healthz          200, no login
 
@@ -55,13 +58,18 @@ import markdown
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from canary_hits import HitsFile  # noqa: E402
-from hits_view import participant_body  # noqa: E402
+from hits_view import LOUD, hit_html, participant_body, status_line  # noqa: E402
 
 PREFIX = "/reports"
 COOKIE = "coder_session_token"
 MAX_BYTES = 1_000_000
 CACHE_SECONDS = 30
 HITS_DIR = "/data-share/canary-hits"
+# The event stream (ruling 7): one thread per open stream, so both its life and their number are bounded.
+STREAM_SECONDS = 30 * 60  # then it ends; EventSource reconnects with Last-Event-ID
+STREAM_MAX = 200  # open streams per server; past it, 503
+STREAM_POLL = 0.5  # seconds between looks at the hits and status files (decision 6: a hit shown within 2 s)
+STREAM_PING = 15  # seconds with nothing sent before a ": ping" comment (keeps proxies from closing it)
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 STATIC_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2"}
@@ -482,6 +490,115 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_json(HTTPStatus.OK, {"workspace": wid, "status": self.read_status(wid),
                                               "hits": self.read_hits(wid, after)})
 
+    def hits_events(self, wid: str, user: dict) -> None:
+        """The event stream (spec *Participant page*; decision 6, ruling 7). Not sent through `send`: no
+        Content-Length, and each event is written as it is found. Its timings and cap are the server's
+        attributes (`make_server`), so tests can shorten them."""
+        if not UUID_RE.match(wid):
+            return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        if not self.can_see_hits(self.store.meta(wid), user):
+            return self.send_json(HTTPStatus.FORBIDDEN, {"error": "forbidden"})
+        srv = self.server
+        with srv.streams_lock:
+            if srv.streams >= srv.stream_max:
+                full = True
+            else:
+                full, srv.streams = False, srv.streams + 1
+        if full:
+            return self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"error": "too many open streams"},
+                                  {"Retry-After": "60"})
+        try:
+            self.close_connection = True
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Security-Policy", CSP)
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "same-origin")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            self.wfile.flush()
+            if self.command != "HEAD":
+                self._stream(wid, self._stream_start())
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the viewer went away
+        finally:
+            with srv.streams_lock:
+                srv.streams -= 1
+
+    def _stream_start(self) -> int:
+        """Where the stream resumes: Last-Event-ID when it is an integer, else ?after=, else 0."""
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        for value in (self.headers.get("Last-Event-ID"), (query.get("after") or [None])[-1]):
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+        return 0
+
+    def _stream(self, wid: str, start: int) -> None:
+        srv = self.server
+        hits_path, status_path = self._hits_path(wid), self._status_path(wid)
+        lines, offset = 0, 0  # complete lines passed so far, and the byte offset after them
+        caught_up = False  # `start` reached, or clamped to the file's end on the first look
+        status_seen = None  # the status file's (mtime, inode) last sent; None: never sent
+        ends = time.monotonic() + srv.stream_seconds
+        last_sent = time.monotonic()
+        while time.monotonic() < ends:
+            out = []
+            data = b""
+            if hits_path:
+                try:
+                    with open(hits_path, "rb") as f:
+                        f.seek(offset)
+                        data = f.read()
+                except FileNotFoundError:
+                    caught_up = True  # no hits yet: nothing to skip, the first hit is id 1
+            # Only complete lines: a line still being written is read again on the next look.
+            complete = data[:data.rfind(b"\n") + 1]
+            for raw in complete.splitlines(keepends=True):
+                lines += 1
+                offset += len(raw)
+                if lines <= start and not caught_up:
+                    continue
+                event = self._hit_event(lines, raw)
+                if event:
+                    out.append(event)
+            caught_up = True  # a start past the end is clamped to it: nothing replayed, no error
+            if status_path:
+                try:
+                    st = os.stat(status_path)
+                    stamp = (st.st_mtime_ns, st.st_ino)
+                except OSError:
+                    stamp = None
+                if stamp is not None and stamp != status_seen:
+                    status_seen = stamp
+                    line = status_line(self.read_status(wid) or {}, time.time())
+                    out.append("event: status\ndata: " + json.dumps({"line": line}) + "\n\n")
+            if not out and time.monotonic() - last_sent >= srv.stream_ping:
+                out.append(": ping\n\n")
+            if out:
+                self.wfile.write("".join(out).encode())
+                self.wfile.flush()
+                last_sent = time.monotonic()
+            time.sleep(srv.stream_poll)
+
+    @staticmethod
+    def _hit_event(n: int, raw: bytes) -> str | None:
+        """Line `n` of the hits file as an event, its id the line number (the hit's id); None for a line
+        that does not parse (a crash's partial line), which still counts as a line."""
+        try:
+            hit = json.loads(raw.decode("utf-8", "replace"))
+        except ValueError:
+            return None
+        if not isinstance(hit, dict):
+            return None
+        canary = hit.get("canary") if isinstance(hit.get("canary"), dict) else {}
+        kind = hit.get("kind")
+        data = {"id": n, "kind": kind, "loud": kind in LOUD, "type": canary.get("type"),
+                "frontend": hit.get("frontend"), "html": hit_html(hit)}
+        return f"id: {n}\nevent: hit\ndata: {json.dumps(data)}\n\n"
+
     # ---- methods
     def do_HEAD(self):
         self.do_GET()
@@ -499,13 +616,15 @@ class Handler(BaseHTTPRequestHandler):
         except (urllib.error.URLError, OSError, ValueError):
             return self.send(HTTPStatus.BAD_GATEWAY, message_page("Portal unavailable", "Coder did not answer; try again in a moment."))
         if user is None:
-            if rest.endswith(".md") or rest.endswith("/hits.json"):
+            if rest.endswith(".md") or rest.endswith("/hits.json") or rest.endswith("/hits/events"):
                 return self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "not logged in"})
             if rest.endswith("/hits"):
                 return self.login_redirect(PREFIX + "/" + rest[:-len("/hits")])
             return self.login_redirect(path)
         if rest == "":
             return self.send(HTTPStatus.OK, list_page(self.store.listing(), user))
+        if rest.endswith("/hits/events"):
+            return self.hits_events(rest[:-len("/hits/events")], user)
         if rest.endswith("/hits.json"):
             return self.hits_json(rest[:-len("/hits.json")], user)
         if rest.endswith("/hits"):
@@ -617,6 +736,9 @@ def make_server(listen: str, reports_dir: str, coder_url: str, hits_dir: str | N
                                                  "hits_dir": hits_dir})
     srv = ThreadingHTTPServer((host or "127.0.0.1", int(port)), handler)
     srv.daemon_threads = True
+    srv.streams, srv.streams_lock = 0, threading.Lock()  # open event streams (ruling 7)
+    srv.stream_max, srv.stream_seconds = STREAM_MAX, STREAM_SECONDS
+    srv.stream_poll, srv.stream_ping = STREAM_POLL, STREAM_PING
     return srv
 
 

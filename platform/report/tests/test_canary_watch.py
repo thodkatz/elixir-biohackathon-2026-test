@@ -12,6 +12,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import canary_hits  # noqa: E402
 import canary_record  # noqa: E402
@@ -356,13 +358,50 @@ def test_bad_or_unmatched_sidecars_are_skipped(tmp_path):
     assert w.instance == "ws1"
 
 
+def test_once_workspace_has_no_sidecar_and_is_always_running(tmp_path):
+    """once_workspace builds a Workspace straight from an output directory: id "once", no owner,
+    running True (there is no runs_dir to weigh it against), encrypted/generation as discover
+    computes them from the same directory."""
+    output_root = tmp_path / "output"
+    directory = _output_dir(output_root, "ws1")
+    w = canary_watch.once_workspace(str(directory))
+    assert w.id == "once" and w.owner is None and w.instance == "ws1"
+    assert w.output_dir == str(directory) and w.running is True and w.encrypted is False
+    assert w.api_host == "api.spe.test" and w.ssh.user == "ubuntu" and w.ssh.host == "localhost"
+    # Matches discover()'s own generation for the same hosts.yml.
+    reports, _, runs = _layout(tmp_path)
+    _sidecar(reports, WS1, "ws1")
+    [discovered] = canary_watch.discover(str(reports), str(output_root), str(runs))
+    assert w.generation == discovered.generation
+
+
+def test_once_workspace_encrypted_record(tmp_path):
+    output_root = tmp_path / "output"
+    directory = _output_dir(output_root, "ws1", encrypted=True)
+    w = canary_watch.once_workspace(str(directory))
+    assert w.encrypted is True
+
+
+def test_once_workspace_no_record_raises(tmp_path):
+    output_root = tmp_path / "output"
+    directory = _output_dir(output_root, "ws1", no_record=True)
+    with pytest.raises(canary_record.RecordError):
+        canary_watch.once_workspace(str(directory))
+
+
+def test_once_workspace_no_hosts_yml_raises(tmp_path):
+    output_root = tmp_path / "output"
+    directory = output_root / "ws1"
+    directory.mkdir(parents=True)
+    with pytest.raises(canary_record.RecordError):
+        canary_watch.once_workspace(str(directory))
+
+
 # --- the daemon: polling a fake instance, state, status, the scan on stop (decisions 1, 3, 10) ---
 
 import logging  # noqa: E402
 import shlex  # noqa: E402
 import sqlite3  # noqa: E402
-
-import pytest  # noqa: E402
 
 FIXTURES = HERE / "fixtures" / "canary"
 SESSION = "aaaaaaaa-1111-4222-8333-444444444444"
@@ -836,3 +875,83 @@ def test_run_capped(tmp_path):
         canary_watch.run_capped([sys.executable, "-c", "raise SystemExit(3)"], b"", 30, 1000)
     with pytest.raises(canary_watch.PollError, match="timed out"):
         canary_watch.run_capped([sys.executable, "-c", "import time; time.sleep(5)"], b"", 0.5, 1000)
+
+
+# --- --once: a hand check, no sidecar, no state or status file (ruling 5) ---
+
+def test_once_polls_and_appends_without_touching_the_hits_root(tmp_path, capsys):
+    fake = Fake(tmp_path)
+    fake.write_journal(JOURNAL)
+    out = tmp_path / "hits.jsonl"
+    rc = canary_watch.once(str(fake.out), str(out), transport=canary_watch.LocalTransport(fake.paths))
+    assert rc == 0
+    hits = HitsFile(str(out)).read()
+    assert _keys(hits) == R1_KEYS
+    assert {k: hits[0][k] for k in ("workspace", "owner")} == {"workspace": "once", "owner": None}
+    # Nothing is written anywhere near a hits root: only --out exists.
+    assert not fake.hits_dir.exists()
+    assert sorted(p.name for p in tmp_path.iterdir() if p.is_file()) == ["hits.jsonl"]
+    captured = capsys.readouterr()
+    for token in TOKENS:
+        assert token not in captured.out and token not in captured.err
+    assert "sources" in captured.out and "missing" in captured.out and "errors" in captured.out
+    assert "hits by kind" in captured.out
+
+
+def test_once_is_idempotent_on_rerun(tmp_path):
+    """Run twice into the same --out: the second run's dedup (by this instance's generation) adds
+    nothing new, since the instance (and so its canary record and hosts.yml) has not changed."""
+    fake = Fake(tmp_path)
+    fake.write_journal(JOURNAL)
+    out = tmp_path / "hits.jsonl"
+    transport = canary_watch.LocalTransport(fake.paths)
+    canary_watch.once(str(fake.out), str(out), transport=transport)
+    first = HitsFile(str(out)).read()
+    canary_watch.once(str(fake.out), str(out), transport=transport)
+    assert HitsFile(str(out)).read() == first
+
+
+def test_once_encrypted_record_not_polled(tmp_path, capsys):
+    fake = Fake(tmp_path, encrypted=True)
+    out = tmp_path / "hits.jsonl"
+    rc = canary_watch.once(str(fake.out), str(out), transport=canary_watch.LocalTransport(fake.paths))
+    assert rc == 1
+    assert not out.exists()
+    assert "encrypted" in capsys.readouterr().out
+
+
+def test_once_no_record_fails_without_a_token(tmp_path, capsys):
+    output_root = tmp_path / "output"
+    directory = _output_dir(output_root, "ws1", no_record=True)
+    out = tmp_path / "hits.jsonl"
+    rc = canary_watch.once(str(directory), str(out))
+    assert rc == 1
+    assert not out.exists()
+    assert "no usable canary record" in capsys.readouterr().err
+
+
+def test_once_cli_needs_output_dir_and_out(tmp_path):
+    with pytest.raises(SystemExit):
+        canary_watch.main(["--once"])
+    with pytest.raises(SystemExit):
+        canary_watch.main(["--once", "--output-dir", str(tmp_path)])
+    with pytest.raises(SystemExit):
+        canary_watch.main(["--once", "--archive", str(tmp_path), "--out", str(tmp_path / "h.jsonl")])
+
+
+def test_nothing_on_the_instance_changes():
+    """decision 1: no file under platform/instance/ or platform/ansible/roles/ is touched by this
+    branch. Skipped outside a git checkout, or when origin/main is not available (as CI and a
+    fresh upstream clone may lack it)."""
+    repo = Path(__file__).resolve().parents[3]
+    if not (repo / ".git").exists():
+        pytest.skip("not a git checkout")
+    check = subprocess.run(["git", "rev-parse", "--verify", "origin/main"], cwd=repo,
+                           capture_output=True, text=True)
+    if check.returncode != 0:
+        pytest.skip("origin/main is not available")
+    diff = subprocess.run(["git", "diff", "--name-only", "origin/main...HEAD"], cwd=repo,
+                          capture_output=True, text=True, check=True)
+    changed = [line for line in diff.stdout.splitlines() if line]
+    touched = [line for line in changed if line.startswith(("platform/instance/", "platform/ansible/roles/"))]
+    assert touched == []

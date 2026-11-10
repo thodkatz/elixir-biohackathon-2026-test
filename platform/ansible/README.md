@@ -162,6 +162,13 @@ and validates it with `platform/promptfoo-evals/injections_schema.py`. It takes 
 roles of the same run: `--tags handoff` alone writes an accurate `injections.json` only if those roles already ran in
 that playbook run (e.g. `--tags trs,drs,handoff`).
 
+Today's three fixtures are one per surface, but the mechanism is not: the `trs_install` and `drs_register` roles
+plant every catalogue entry whose own `spe_inject_*` switch is on, any number per surface (several payloads land on
+the same tool's description or descriptor, or the same DRS object's description, in catalogue order); a switch
+that isn't even defined counts as off. The hand-off matches each placement to its fixture by `id`, not by surface,
+and `hardening.json`'s `injections` is `true` only when every catalogue switch is on, `false` when none, `"mixed"`
+otherwise.
+
 ## Test receiver
 
 An evaluation fixture for the canary ladder (spec part 04, *The test receiver*): a stand-in for a host outside the

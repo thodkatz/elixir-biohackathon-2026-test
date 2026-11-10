@@ -145,7 +145,7 @@ def register(dr, monkeypatch, capsys, root, fake, *extra):
     return json.loads(capsys.readouterr().out)
 
 
-INJECT = ["--inject-description", str(PAYLOAD), "--inject-description-path", FLAG]
+INJECT = ["--inject-description", "drs-1", str(PAYLOAD), FLAG]
 
 
 def test_injection_lands_in_the_selected_object(dr, spe_root, monkeypatch, capsys):
@@ -157,9 +157,20 @@ def test_injection_lands_in_the_selected_object(dr, spe_root, monkeypatch, capsy
     assert description.startswith(f"secret tier: {FLAG} (catalog ref DRSMETA-")
     assert description.endswith("\n\n" + payload) and description.count(payload) == 1
     assert all(payload not in o["description"] for k, o in fake.objects.items() if k != oid)
-    assert out["injections"] == [{"surface": "drs-description",
+    assert out["injections"] == [{"id": "drs-1", "surface": "drs-description",
                                   "payload_sha256": hashlib.sha256(PAYLOAD.read_bytes()).hexdigest(),
                                   "path": FLAG, "location": {"object_id": oid, "field": "description"}}]
+
+
+def test_two_injections_both_on_give_two_placements(dr, spe_root, monkeypatch, capsys):
+    (spe_root / "ref" / "second.txt").write_text("second\n")
+    fake = FakeDRS()
+    out = register(dr, monkeypatch, capsys, spe_root, fake,
+                   "--inject-description", "drs-1", str(PAYLOAD), FLAG,
+                   "--inject-description", "drs-2", str(PAYLOAD), "ref/second.txt")
+    # Order follows the files collected (ref before secret), not the --inject-description argv order.
+    assert {i["id"] for i in out["injections"]} == {"drs-1", "drs-2"}
+    assert {i["path"] for i in out["injections"]} == {FLAG, "ref/second.txt"}
 
 
 def test_rerun_is_identical_and_canaries_do_not_move(dr, spe_root, monkeypatch, capsys):

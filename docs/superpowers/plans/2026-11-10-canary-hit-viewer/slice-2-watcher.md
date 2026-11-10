@@ -95,7 +95,7 @@ Decisions 1, 3, 10; *Watcher* (*How it pulls*, *Reader output is untrusted*, *On
   - `class Transport` with `read(ws: Workspace, offsets: dict) -> dict`; `SshTransport` runs
     `canary_record.vm_argv(output_dir)` (SSH from `hosts.yml`'s target and arguments, or local) with
     `-o ControlMaster=auto -o ControlPath=~/.ssh/cm-%C -o ControlPersist=60 -o BatchMode=yes` (sockets on local
-    disk, not on `/data-share`'s NFS), then `sudo python3 - <shlex.quote(offsets JSON)>` with the reader's source
+    disk, not on `/data-share`'s NFS), then `sudo -n python3 - <shlex.quote(offsets JSON)>` with the reader's source
     on stdin (timeout 30 s); the offsets' journal keys are checked as UUIDs and their values as integers before
     the call (`test_offsets_quoted_and_checked`);
     `LocalTransport(paths: dict)` runs the reader locally with `SPE_READER_PATHS` (the fake instance).
@@ -105,13 +105,15 @@ Decisions 1, 3, 10; *Watcher* (*How it pulls*, *Reader output is untrusted*, *On
     the dedup keys drop the repeats.
   - Status per workspace in `<hits_dir>/<id>.status.json` (0640): `state`, `since`, `last_poll`, `hits`
     (count per kind), `note` (e.g. "canary record is encrypted", "hits file full").
-  - `Watcher(hits_dir, reports_dir, runs_dir, output_root, transport).tick(now: float) -> None`: discovers, polls
+  - `Watcher(hits_dir, reports_dir, runs_dir, output_root, transport).tick(now: float) -> None`: discovers (at most
+    every 15 s; a new run directory newer than `hosts.yml` marks the workspace stopped on the tick it appears), polls
     each running workspace whose next poll is due (3 s; 60 s after a failure, `state` `unreachable`), scans each
     new run directory whose `report.json` names a scanned workspace once, and only once its `index.md` exists
     (the archive writes it last; `report.json` comes before the journals and exports,
     `test_scan_waits_for_index_md`) (from the offsets reached, then
     `state` `stopped`), and writes state and status. `run_forever()` calls `tick` every second.
-  - Untrusted output: a line that is not JSON is dropped; at most 200 hits per workspace per poll; `HitsFile`
+  - Untrusted output: a line that is not JSON, or whose fields have the wrong type, is dropped (in polling and
+    in the on-stop scan; a scan that still fails marks its run scanned); at most 200 hits per workspace per poll; `HitsFile`
     at 10 MB stops writing (`state` `capped`); a reader reply that is not the expected shape is a failed poll.
 - Carried from slice 1 (its review and rulings):
   - `JournalReader` keeps an open run's pieces until its `run_end`; a run that never ends grows forever. Bound it:

@@ -48,3 +48,22 @@ slice is the README's slices table; the handoffs say what each session did.
    is not a UUID is skipped, not a failed poll; the state records `generation_start` (hits-file line count at the
    generation's start) so a restart rebuilds dedup keys from this generation's hits only (review fix). *Cost if
    wrong:* none.
+8. **M1 left: `run_starts` stays pinned to an open run's `run_start`** across polls, so after a restart a journal
+   is re-read from there (final review). *Cost if wrong:* at most 1 MiB of re-read per poll after a restart; the
+   dedup keys keep the hits right.
+9. **M3 left: the offsets go to the reader as one argv element** (final review). Past about 2,700 journals they
+   exceed the remote `sh -c`'s 128 KiB `MAX_ARG_STRLEN` and the workspace stays `unreachable`; the fix (offsets on
+   stdin) is in `BACKLOG.md`. *Cost if wrong:* a workspace with that many sessions is watched only on stop.
+10. **M4 left: the generation only salts the dedup keys**; a hit records no generation of its own (final review).
+    *Cost if wrong:* a page that wants per-generation views recounts from `generation_start`.
+11. **M5 deferred: splitting the transport out of `canary_watch.py`** (`check_offsets`, `run_capped`, the
+    transports, ~140 lines, into `canary_transport.py`) waits for slice 3, and only if it edits the file (its
+    Task 9 says so). *Cost if wrong:* `canary_watch.py` stays at ~1,080 lines a while longer.
+12. **The canary-watch unit's hardening goes to `BACKLOG.md`** (`ProtectSystem=strict` with `ReadWritePaths`;
+    never `NoNewPrivileges`, which breaks a local controller's sudo). *Cost if wrong:* the watcher, run as root,
+    can write anywhere until it is done.
+13. **Discovery is throttled to every 15 s** (`DISCOVER_EVERY`): it re-read every sidecar, `hosts.yml` and
+    `canaries.json` over NFS every second. The per-tick scan of the runs directory still marks a workspace stopped
+    on the tick its run directory appears. *Cost if wrong:* a stop only discovery can tell (a run directory of the
+    same instance name that is another workspace's), a rebuild (new generation) or a new workspace is noticed up to
+    15 s later; a rebuild's first polls within that window read the old generation's offsets.

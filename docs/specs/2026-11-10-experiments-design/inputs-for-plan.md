@@ -4,7 +4,7 @@
 
 | # | Slice | Decisions | Needs an instance |
 |---|---|---|---|
-| 1 | **The catalogue as files**: `paths/` (P1–P4, template), `mitigations/` (L1–L3, L4–L5 planned), `validate.py` over all three, `matrix.CATALOGUE` read from files, `tests/experiments/`, `injections` in the experiment block | 2, 3, 4, 23 | no |
+| 1 | **The catalogue as files**: `paths/` (P1–P4, template), `mitigations/` (L1–L3, L4–L5 planned), `validate.py` over all three, `matrix.CATALOGUE` read from files, `tests/experiments/`, `injections` in the experiment block, `drs_register` and `trs_install` planting every catalogue entry whose switch is on | 2, 3, 4, 23 | no |
 | 2 | **The new template**: `spe-experiments` with `experiment` and `mitigations`, the sync assembling and pushing it (and `experiment/<name>` branches), the merge into `ansible_vars`, `spe_experiments` gating, `requires`/`conflicts` in `create.yml`, `hardening.json` `mitigations`, the ladder experiments | 1, 5, 6 | one de.NBI build (the `ladder-l2` preset: level 1) |
 | 3 | **`spe-eval`**: VM-local hand-off, local `isolation`, per-arm snapshots, the two arms (and the one-arm case), `run.sh`'s suite, reports and description arguments, the gate learning the arm, injection switches and `injections.json` per arm, lock and its token, archive, the guide's first *Experiments* steps | 7–11, 13, 22, 23 | de.NBI, a `--repeat 1` run |
 | 4 | **The viewer and apps**: `evals-view`, the read-only proxy, the Evaluations app; the early output | 14–16 | de.NBI |

@@ -89,8 +89,12 @@ on the stack. There are two kinds, and an experiment may use either or both:
   `switch`, `surface`, `payload`, `select`, `target_file`, `canary_file`, `action`, `disclosure`, as the three
   today) plus its payload file beside it, on its own switch `spe_inject_<id with _>`, default `false` in
   `group_vars/all.yml`, so a build without it is today's (as for a mitigation's `off`, decision 4).
-  - On a surface that exists (`trs-description`, `drs-description`, `workflow-comment`), it is data only: the
-    roles that plant there place any entry whose switch is on.
+  - On a surface that exists (`trs-description`, `drs-description`, `workflow-comment`), it is data only, once
+    the roles that plant there read the catalogue: today `drs_register` and `trs_install` take the first entry
+    per surface and test the three `spe_inject_*` switches by name, so they learn to plant every entry whose
+    switch (named in the entry, `false` when undefined) is on, and the ladder's three keep their placements.
+    They run under the `drs` and `trs` tags, so `spe-apply all` plants an injection on a running workspace with
+    no rebuild, as for the ladder's three today.
   - On a new surface (a file in `/data-share`, a tool's output, a page reached by egress), it is also code: the
     role that plants it, guarded by the switch, reports its placement (`surface`, `location`, `payload_sha256`)
     as `trs_install.py` and `drs_register.py` do, so `injections_manifest.py` checks it like the others (exactly

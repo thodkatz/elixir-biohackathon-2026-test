@@ -242,6 +242,22 @@ overlay `platform/instance/compose.egress.yml` (`SPE_COMPOSE_OVERLAYS`, applied 
 change an existing network's subnet, so before a converge that turns the switch on or off on a built VM, take the
 frontend down: `docker compose -p spe-frontend -f ~/spe-frontend/docker-compose.yml down` (its volumes stay).
 
+## Experiments
+
+Three variables, all off or empty by default, so a build without them is today's (`group_vars/all.yml`):
+`spe_experiments` (bool), `spe_experiment` (an `../../experiments/<name>.yml` stem) and `spe_mitigations`
+(a list of `../../mitigations/<id>.yml` ids). The `spe-experiments` Coder template
+(`../coder/README.md`, *spe-experiments*) is what normally sets them, from an experiment's selected
+preset and its own `mitigations` parameter; it also merges each selected mitigation's `on` values and the
+experiment's `vars` into the build, in Terraform, not here
+(`../../docs/specs/2026-11-10-experiments-design/`, part 02).
+
+`create.yml` checks `spe_mitigations` before anything is created (skipped when it is empty): an unknown or
+`status: planned` id, an unmet `requires`, a `conflicts` pair both selected, or non-contiguous ladder levels
+(a `Ln` selected without every `L1`..`L<n-1>`) each refuse the build, naming the offending id(s). `hardening.json`
+records `mitigations` and `experiment` (`[]`/`""` when experiments are off), read by the controls suite and
+`run.sh`.
+
 ## The chats and the agent
 
 `spe_frontends` lists what runs: `[openwebui, agui]` by default, one of them, or

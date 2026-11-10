@@ -130,6 +130,19 @@ def test_status_text_escaped_once():
     assert "&amp;amp;" not in body
 
 
+def test_placeholder_class_on_no_hits_and_not_watched_only():
+    # NO_HITS: hits.js removes this on the first live hit (p.placeholder).
+    archived = participant_body(META, [], None)
+    assert 'class="muted placeholder"' in archived
+    # NOT_WATCHED: a dict status with no state yet.
+    not_watched = participant_body(META, [], {})
+    assert 'class="muted placeholder"' in not_watched
+    # The encrypted notice is never removed by a live hit, so it stays plain "muted".
+    encrypted = participant_body(META, [], {"state": "encrypted"})
+    assert 'class="muted placeholder"' not in encrypted
+    assert 'class="muted">' in encrypted
+
+
 HOSTILE = "<img src=x onerror=alert(1)>"
 
 

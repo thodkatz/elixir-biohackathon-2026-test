@@ -89,7 +89,8 @@ owner and Coder owners only, 403 for everyone else, 401/redirect when logged out
 `static/hits.js` opens the event stream, inserts each hit's HTML at the top of the list (no HTML
 built in the browser but the server's own, parsed once from the event), keeps the headline counts
 and the status line in sync, offers "Notify me" (kind and type only, never the value or excerpt)
-and "Group by run" (reorders the hits already on the page by `data-session`/`data-run`, moves no
-new elements in). Both buttons are rendered `hidden` by `hits_view.py` and shown once the script
-runs, so a page with no script (the standalone early output, `--html`) never shows one that does
-nothing.
+and "Group by run" (reorders the hits on the page, live ones included, by `data-session`/
+`data-run`; builds no HTML of its own but the group headings. Only the loud hits are grouped —
+"also seen" stays one collapsed block regardless). Both buttons are rendered `hidden` by
+`hits_view.py` and shown once the script runs, so a page with no script (the standalone early
+output, `--html`) never shows one that does nothing.

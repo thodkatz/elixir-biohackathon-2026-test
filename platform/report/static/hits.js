@@ -17,9 +17,12 @@
   var statusEl = document.getElementById("hits-status");
   if (!wid || !list) return;
 
-  // The quiet kinds' headline labels (hits_view.QUIET_LABELS): a presentational mirror, not a
-  // security boundary - the kind itself always comes from the server-rendered html.
+  // The quiet kinds' headline labels (hits_view.QUIET_LABELS) and their order (hits_view.QUIET_KINDS
+  // then OTHER_LABEL): a presentational mirror, not a security boundary - the kind itself always
+  // comes from the server-rendered html. hits_view.py carries a matching comment: the two change
+  // together.
   var QUIET_LABELS = { seen: "metadata", args: "args", prompt: "prompt" };
+  var QUIET_LABEL_ORDER = ["metadata", "args", "prompt", "other"];
 
   // The model this script keeps in sync with the DOM: every hit currently shown, newest first,
   // loud (top of the list) and quiet (inside "also seen") kept apart so grouping only touches
@@ -37,6 +40,8 @@
 
   // --- the event stream -------------------------------------------------------------------
 
+  // "/reports/" is the service's own prefix (every route of it, the Coder app's URL), not a guess
+  // at where this page happens to be served from.
   var es = new EventSource("/reports/" + wid + "/hits/events?after=" + initialLast);
   es.addEventListener("hit", function (ev) {
     var data;
@@ -69,7 +74,9 @@
   }
 
   function removePlaceholder() {
-    var p = list.querySelector(":scope > p.muted"); // "No hits yet." / "Not watched yet."
+    // Only NO_HITS/NOT_WATCHED carries this class (hits_view.participant_body); the encrypted
+    // notice is also a `p.muted` but stays once a hit cannot change it.
+    var p = list.querySelector(":scope > p.placeholder");
     if (p) p.remove();
   }
 
@@ -153,6 +160,7 @@
     var n = parseInt(m[1], 10) + 1;
     var labels = m[2] ? m[2].split(", ") : [];
     if (labels.indexOf(label) === -1) labels.push(label);
+    labels.sort(function (a, b) { return QUIET_LABEL_ORDER.indexOf(a) - QUIET_LABEL_ORDER.indexOf(b); });
     el.textContent = "also seen: " + n + " (" + labels.join(", ") + ")";
   }
 
@@ -233,6 +241,11 @@
       notifyEnabled = true;
       notifyBtn.textContent = "Notifications on";
       notifyBtn.disabled = true;
+    } else if (Notification.permission === "denied") {
+      // Already refused (e.g. by the browser's own prompt earlier): no button that asks again
+      // and does nothing.
+      notifyBtn.textContent = "Notifications blocked";
+      notifyBtn.disabled = true;
     } else {
       notifyBtn.textContent = "Notify me";
       notifyBtn.addEventListener("click", function () {
@@ -240,6 +253,9 @@
           if (permission === "granted") {
             notifyEnabled = true;
             notifyBtn.textContent = "Notifications on";
+            notifyBtn.disabled = true;
+          } else if (permission === "denied") {
+            notifyBtn.textContent = "Notifications blocked";
             notifyBtn.disabled = true;
           }
         });

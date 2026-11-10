@@ -35,6 +35,8 @@ LOUD_KINDS = ("touched", "answer", "sent", "delivered")
 LOUD = frozenset(LOUD_KINDS)  # the same kinds as a set: the event stream's `loud` flag
 QUIET_KINDS = ("seen", "args", "prompt")
 # The headline's "also seen" label for each quiet kind (mockup: "(metadata, args, prompt)").
+# static/hits.js mirrors QUIET_LABELS and this order (QUIET_KINDS then OTHER_LABEL) to keep a
+# live-added label in the same place a reload would put it; change both together.
 QUIET_LABELS = {"seen": "metadata", "args": "args", "prompt": "prompt"}
 OTHER_LABEL = "other"
 FRONTEND_LABELS = {"agui": "AG-UI", "openwebui": "Open WebUI"}
@@ -209,7 +211,9 @@ def participant_body(meta: dict, hits: list[dict], status: dict | None) -> str:
     if state == "encrypted":
         items = f'<p class="muted">{_esc(ENCRYPTED_NOTICE)}</p>'
     elif not items:
-        items = f'<p class="muted">{_esc(NOT_WATCHED if not_watched_yet else NO_HITS)}</p>'
+        # "placeholder": the class hits.js removes once a live hit arrives (a hit cannot change
+        # the encrypted notice above, so that one stays plain "muted").
+        items = f'<p class="muted placeholder">{_esc(NOT_WATCHED if not_watched_yet else NO_HITS)}</p>'
     # The two buttons below are static, `hidden` until hits.js (slice 3) removes the attribute:
     # with no script (the standalone early output), they stay invisible. hits.js builds no HTML
     # of its own but these two, with document.createElement + textContent, so they are rendered

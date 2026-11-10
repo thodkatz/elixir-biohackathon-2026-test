@@ -252,6 +252,11 @@ spe_local_vars:
   - spe_harden_data_tiers
   - spe_harden_egress
   - spe_harden_airlock
+  # The host's layout as the build checked it: a local re-apply re-runs the preflight, which
+  # otherwise checks the defaults (/data-share, 15 GB) on a host the instance file overrode.
+  - spe_data_root
+  - spe_min_free_gb
+  - spe_manage_docker
 spe_local_vars_extra: []     # instance files add their own overrides here
 spe_frontend_webui_image: ghcr.io/open-webui/open-webui:v0.13.0
 spe_frontend_terminal_image: spe-open-terminal:0.16.1

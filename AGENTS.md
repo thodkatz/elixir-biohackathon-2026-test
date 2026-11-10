@@ -202,10 +202,6 @@ to things. Who is working on what is shown by the open PRs, not here (*Claiming 
 Each unit's PR updates its track's line; the last slice removes it. An open upstream PR also gets a line while it
 is open (`docs/guides/contributing-upstream.md`, step 6).
 
-- **Canary evaluation ladder** (biohackathon 0013, 0014, 0015): slices 1–9 merged (L0–L3 built and checked by
-  their controls, the L5 airlock). **Next: slice 10/10** `impl/canary-eval-ladder-10-agent-runs`, the agent runs
-  at L0–L3; it runs once its key gate passes, and the key is in reach (`BACKLOG.md` *Next*). L4/L5 go to the L4 spec (`BACKLOG.md`). Handoff:
-  `docs/superpowers/plans/2026-10-22-canary-eval-ladder/handoffs/2026-11-09T1602Z-slice-9-done.md`.
 - **Upstream PR kraatz #28** (`contrib/agui-archive-markdown`): archive Markdown wording, autolinks, refusal
   reason, bad timestamps; waits on upstream's review.
 - **Upstream PR kraatz #29** (`contrib/agui-chat-ui-polish`): reopened sessions land on their end, menu focus;

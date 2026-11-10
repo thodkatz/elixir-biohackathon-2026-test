@@ -77,6 +77,9 @@ Utility tests pass with the mitigation on: yes / no
 ```
 
 The result is `matrix.py counts` output: labels and counts only, never an answer or a token, so it can be posted.
+It is one step, read against the cumulative ladder view (`matrix.py render` over the controller-side runs, committed
+under `docs/results/`); a contribution edits neither `matrix.py` (its labels come from the files, decision 3) nor
+that view. `CONTRIBUTING.md` says the same.
 A reviewer who wants to see it reproduced creates a workspace from `spe-x-<name>` and runs `spe-eval run`.
 
 ## The guides

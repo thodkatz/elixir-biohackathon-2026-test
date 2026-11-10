@@ -11,3 +11,4 @@
 | Comparing experiments across workspaces | the seed is secret, so builds differ | the official ladder's controller-side runs |
 | Keeping or deleting the existing template `spe` | the new template must prove itself first | the user, once `spe-experiments` runs the ladder experiments on the portal |
 | Creating, reaching or stopping workspaces with the `coder` CLI (an agent on the participant's laptop) | participants work in their workspace, created from the dashboard; agents in it do not create or destroy workspaces | not planned (the user, 2026-11-10: "they should work on their workspace") |
+| A contributed mitigation as a ladder level, with a column in the cumulative matrix | a merged mitigation stays an experiment; a level is chosen by maintainers and measured by controller-side runs against the same canaries | a later spec, per level (as L4 and L5) |

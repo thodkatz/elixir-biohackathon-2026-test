@@ -937,3 +937,15 @@ def test_admin_order_by_detected_not_at(service):
     text = call(base, "/reports/hits", token="tok-root")[2].decode()
     first = re.search(r'<div class="admin-hit" [^>]*data-workspace="([^"]+)"', text).group(1)
     assert first == OTHER
+
+
+def test_reports_list_links_admin_hits(service):
+    """Decision 7: one click from the reports list to the admin page, admins only."""
+    base, _ = service
+    status, _, body = call(base, "/reports/", token="tok-root")
+    assert status == 200
+    assert f'href="{sr.PREFIX}/hits">Canary hits</a>' in body.decode()
+    for token in ("tok-anna", "tok-bob"):
+        status, _, body = call(base, "/reports/", token=token)
+        assert status == 200
+        assert f'{sr.PREFIX}/hits"' not in body.decode()

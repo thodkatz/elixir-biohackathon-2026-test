@@ -328,8 +328,11 @@ def list_page(rows: list[dict], user: dict) -> bytes:
     table = ("<table><thead><tr><th>Workspace</th><th>Owner</th><th>Instance</th><th>Created</th>"
              "<th>Last saved</th></tr></thead><tbody>" + "".join(trs) + "</tbody></table>"
              if trs else "<p class=\"muted\">No report yet. A report is created with each workspace.</p>")
+    admin_link = (f"<p class=\"admin-link\"><a href=\"{PREFIX}/hits\">Canary hits</a></p>"
+                  if is_admin(user) else "")
     body = ("<main class=\"list\"><h1>Run reports</h1><p class=\"lead\">One report per workspace, written by its "
             "owner while testing. Everyone logged in can read them.</p>"
+            f"{admin_link}"
             f"<section class=\"card\">{table}</section></main>")
     return page("Run reports", body, user)
 

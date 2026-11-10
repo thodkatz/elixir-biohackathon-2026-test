@@ -41,7 +41,10 @@ The existing parameters, as in `spe`, plus:
 | `experiment` | string, dropdown | every `experiments/*.yml`, by its file stem, shown by its `name` | `ladder-l0` | yes |
 | `mitigations` | list(string), multi-select | every `mitigations/*.yml` without `status: planned`, shown by its `name` | `[]` | yes |
 
-Each experiment file is also a preset: its `parameters` set the form, including `experiment` (its own stem) and
+Each experiment file is also a preset, described on the form by its `description` followed by what it measures,
+generated from its `experiment:` block (`TM-001 via P2 · mitigation L1: TRS read-only`), so the threat and paths
+show where the experiment is picked. Threats and paths are not form fields: they describe an experiment, they do
+not set the build. Its `parameters` set the form, including `experiment` (its own stem) and
 `mitigations` (its `base`: the workspace starts in the baseline arm). `spe-eval` switches arms on the running VM
 (03); the form's `mitigations` is the arm the workspace is created in and returns to. Every workspace from this
 template has an experiment, so `spe-eval run` always has something to run.

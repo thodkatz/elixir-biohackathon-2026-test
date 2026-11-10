@@ -12,6 +12,15 @@ Evaluations, is a view for people over what `spe-eval results` prints; there is 
 `experiments/README.md`, the index of experiments (one line each: name, threat, paths, mitigation), and to the
 ladder experiments as worked examples. Nothing an agent needs is only in a UI or only in this spec.
 
+The section includes one worked example of writing a mitigation, the step the commands cannot do for the agent:
+L1 (TRS read-only) as the reference, shown as its parts: the Ansible change in the SPE agent's path (Traefik and
+WES, not an installer), the Jinja guard on its switch so the stack is unchanged with it off, `mitigations/L1.yml`,
+the probe that shows it, and the two `curl` checks (one refused, one still working) to make after
+`spe-eval arm … mitigated`. A participant's guard service follows the same shape.
+
+Agents in the workspace work in that workspace: they do not create, stop or delete workspaces (each is a cloud
+VM, and stop destroys it); a fresh build from a branch template is the participant's step, from the dashboard.
+
 ## Commands
 
 How to run the tests is these commands, in this order: `test` after each edit (offline), `arm` to try a build by

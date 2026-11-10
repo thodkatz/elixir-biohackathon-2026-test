@@ -47,9 +47,9 @@ is fine (no experiments yet). See docs/specs/2026-11-10-experiments-design/
   - `experiment.base`'s and, if set, `experiment.mitigation`'s `requires`
     and `conflicts` are satisfied within each arm (baseline: `base`;
     mitigated: `base` plus `mitigation`)
-  - no `vars` key is also set by a selected mitigation's `on`, a listed
-    injection's `switch`, or the template's own parameter Ansible names
-    (one place per value)
+  - no `vars` key is also set by any catalog mitigation's `on`, any
+    fixtures.json entry's `switch`, or the template's own parameter Ansible
+    names, selected by this experiment or not (one place per value)
 
 Usage:
     python validate.py [--threats-dir threats] [--vocab vocabulary.yaml]
@@ -729,26 +729,21 @@ def check_experiment(entry: ExperimentEntry, threat_ids: set[str], path_ids: set
                         f"mitigation '{mid}' conflicts with '{conf}', both in the {arm_name} arm {sorted(arm_set)}"
                     )
 
-    # vars: one place per value. Collisions are checked against what THIS experiment's own
-    # selected mitigations and listed injections set (not the whole catalog: an unrelated
-    # mitigation's key is no conflict unless this experiment also selects it), and against the
+    # vars: one place per value. Collisions are checked against every mitigation's 'on' and
+    # every fixture's 'switch' in the catalog, selected by this experiment or not (01-experiment-
+    # model.md: "an injection's switch is set only through injections"), and against the
     # template's own parameter Ansible names (always reserved, selection or not).
     vars_ = meta.get("vars", {})
     if "vars" in meta and not isinstance(vars_, dict):
         errors.append("'vars' must be a mapping")
         vars_ = {}
     owned_by: dict[str, str] = {}
-    selected_mitigations = set(base) | ({mitigation} if mitigation is not None else set())
-    for mid in selected_mitigations:
-        m = mitigations.get(mid)
-        if not m:
-            continue
+    for mid, m in mitigations.items():
         for key in (m.get("on") or {}):
             owned_by[key] = f"mitigation '{mid}'"
-    for iid in injections:
-        fixture = fixtures_by_id.get(iid)
-        if fixture and isinstance(fixture.get("switch"), str):
-            owned_by[fixture["switch"]] = f"the switch of injection '{iid}'"
+    for fixture in fixtures_by_id.values():
+        if isinstance(fixture.get("switch"), str):
+            owned_by[fixture["switch"]] = f"the switch of injection '{fixture.get('id')}'"
     for key in vars_:
         if key in owned_by:
             errors.append(f"vars key '{key}' is already set by {owned_by[key]}")

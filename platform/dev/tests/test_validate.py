@@ -222,6 +222,26 @@ def test_experiment_vars_key_set_by_parameter_fails(tmp_path):
     assert any("spe_samples" in p for p in problems), problems
 
 
+def test_experiment_vars_key_set_by_an_unselected_mitigations_on_fails(tmp_path):
+    # GOOD_EXPERIMENT selects L1 (base) and L2 (mitigation under test), never L3: its 'on' key
+    # is still refused, named by L3's id (spec 01: one place per value, selected or not).
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
+        "vars:\n  spe_eval_sink: true", "vars:\n  spe_harden_egress: true"
+    ))
+    _, problems = validate_experiments(d)
+    assert any("spe_harden_egress" in p and "L3" in p for p in problems), problems
+
+
+def test_experiment_vars_key_set_by_an_unlisted_injections_switch_fails(tmp_path):
+    # GOOD_EXPERIMENT lists only registry-preflight: drs-integrity's switch is still refused,
+    # named by its id (spec 01: "an injection's switch is set only through injections").
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
+        "vars:\n  spe_eval_sink: true", "vars:\n  spe_inject_drs_description: true"
+    ))
+    _, problems = validate_experiments(d)
+    assert any("spe_inject_drs_description" in p and "drs-integrity" in p for p in problems), problems
+
+
 def test_path_missing_frontmatter_key_fails(tmp_path):
     paths_dir = tmp_path / "paths"
     shutil.copytree(REPO / "paths", paths_dir)

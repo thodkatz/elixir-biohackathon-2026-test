@@ -67,6 +67,10 @@ exit "$code"
 # seconds, simulating the detached `spe-eval run` child actually running.
 FAKE_SYSTEMD_RUN = """#!/bin/sh
 echo "$*" >> "$FAKE_SYSTEMD_RUN_LOG"
+if [ -n "${FAKE_SYSTEMD_RUN_ENV_LOG:-}" ]; then
+  echo "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-}" >> "$FAKE_SYSTEMD_RUN_ENV_LOG"
+  echo "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}" >> "$FAKE_SYSTEMD_RUN_ENV_LOG"
+fi
 if [ -n "${FAKE_SYSTEMD_RUN_NO_ACQUIRE:-}" ]; then exit 0; fi
 token=""
 for a in "$@"; do
@@ -76,12 +80,18 @@ for a in "$@"; do
 done
 lock_file="$HOME/spe-eval/lock"
 mkdir -p "$(dirname "$lock_file")"
+# Detached from this script's own stdin/stdout/stderr (as the real systemd-run also would, and
+# unlike an inline "&" background job): otherwise, since those are `subprocess.run(capture_output=
+# True)`'s own pipes, the backgrounded subshell inheriting them keeps the write end open for its
+# whole FAKE_SYSTEMD_RUN_HOLD, so the *caller's* subprocess.run does not return until the hold is
+# already over -- by which time a holder() that checks the real flock (task 5 review, Important
+# 4a) correctly finds it already released, instead of "still running".
 (
   exec 9>"$lock_file"
   flock 9
   printf '%s' "$token" >&9
   sleep "${FAKE_SYSTEMD_RUN_HOLD:-0.5}"
-) &
+) >/dev/null 2>&1 </dev/null &
 exit 0
 """
 
@@ -250,6 +260,20 @@ def test_arm_refuses_while_locked(setup):
 
 # --- run ---------------------------------------------------------------------------------------
 
+def test_run_json_keeps_canaries_sha256_from_run_sh(setup):
+    # task 5 review, Important 3: spe-eval's own run.json write (state/ended/gate_notes), in
+    # cmd_run's `finally`, must merge into the run.json run.sh already wrote on success rather
+    # than overwrite it outright, or matrix.counts/replay.py never find canaries_sha256 again.
+    run, _popen, _calls, _repo, home, _logs = setup
+    p = run("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261110T190000Z"})
+    assert p.returncode == 0, p.stderr
+    record = json.loads((home / "spe-eval" / "reports" / "one-arm" / "20261110T190000Z" / "baseline" /
+                          "run.json").read_text())
+    assert record["canaries_sha256"] == "abc"  # FAKE_RUN_SH's own run.json, on success
+    assert record["started"]
+    assert record["state"] == "ok"
+
+
 def test_run_two_arm_order_and_return_to_build_arm(setup):
     run, _popen, calls, _repo, home, logs = setup
     p = run("run", "two-arm", env={"SPE_EVAL_RUN_ID": "20261110T100000Z"})
@@ -397,6 +421,33 @@ def test_run_detach_exits_1_if_the_child_never_takes_the_lock(setup):
     assert "did not take the lock" in p.stderr
 
 
+def test_run_detach_defaults_the_user_bus_when_unset(setup, tmp_path):
+    # task 5 review, Important 4b: the Coder agent is a system unit with no PAM session, so its
+    # shells have neither XDG_RUNTIME_DIR nor DBUS_SESSION_BUS_ADDRESS; systemd-run --user then
+    # fails to connect to the bus. spe-eval must default both, from /run/user/<uid>, rather than
+    # pass them through unset.
+    run, _popen, _calls, _repo, _home, logs = setup
+    env_log = tmp_path / "systemd-env.log"
+    p = run("run", "one-arm", "--detach",
+            env={"FAKE_SYSTEMD_RUN_ENV_LOG": str(env_log), "XDG_RUNTIME_DIR": "", "DBUS_SESSION_BUS_ADDRESS": ""})
+    assert p.returncode == 0, p.stderr
+    lines = env_log.read_text().splitlines()
+    uid = os.getuid()
+    assert lines == [f"XDG_RUNTIME_DIR=/run/user/{uid}",
+                     f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"]
+
+
+def test_run_detach_keeps_an_already_set_user_bus(setup, tmp_path):
+    run, _popen, _calls, _repo, _home, logs = setup
+    env_log = tmp_path / "systemd-env.log"
+    p = run("run", "one-arm", "--detach",
+            env={"FAKE_SYSTEMD_RUN_ENV_LOG": str(env_log), "XDG_RUNTIME_DIR": "/custom/run",
+                 "DBUS_SESSION_BUS_ADDRESS": "unix:path=/custom/run/bus"})
+    assert p.returncode == 0, p.stderr
+    assert env_log.read_text().splitlines() == ["XDG_RUNTIME_DIR=/custom/run",
+                                                "DBUS_SESSION_BUS_ADDRESS=unix:path=/custom/run/bus"]
+
+
 # --- status / wait / runs ----------------------------------------------------------------------
 
 def test_status_json_reports_the_run_in_progress(setup):
@@ -502,15 +553,24 @@ def test_wait_when_lock_already_free_judges_the_newest_run(setup):
 
 def test_wait_for_an_arm_holder_with_no_report_exits_0(setup):
     # task 4 review, minor 7: no report is not evidence of a failed *run* when the holder was an
-    # `arm` (which keeps none by design). A never-ready health server keeps the lock held for the
-    # fixture's SPE_EVAL_HEALTH_TIMEOUT (0.3s) so `wait` reliably calls in while it is still held.
+    # `arm` (which keeps none by design). A never-ready health server keeps the lock held for
+    # SPE_EVAL_HEALTH_TIMEOUT so `wait` reliably calls in while it is still held.
+    #
+    # Whole-branch review, the flaky test: the fixture's default 0.3s timeout raced `wait`'s own
+    # process start (a fresh Python interpreter importing yaml/validate/injections_schema before
+    # it ever calls holder()), which under CPU load can take longer than 0.3s -- `wait` would then
+    # find the lock already free and report "no run has happened yet" instead. Give the holder a
+    # long hold (~4s, well past that startup cost even under load) and `wait` a bounded timeout
+    # above it (10s), so the real race is between "wait sees the run in progress" and a generous
+    # deadline, not between two near-equal durations.
     run, popen, _calls, _repo, home, _logs = setup
     unhealthy = _HealthServer(503, b'{"status": "starting"}')
     try:
-        holder = popen("arm", "one-arm", "baseline", env={"SPE_EVAL_HEALTH_URL": unhealthy.url})
+        holder = popen("arm", "one-arm", "baseline",
+                       env={"SPE_EVAL_HEALTH_URL": unhealthy.url, "SPE_EVAL_HEALTH_TIMEOUT": "4"})
         try:
             wait_until_locked(home)
-            p = run("wait", "--timeout", "5")
+            p = run("wait", "--timeout", "10")
             assert p.returncode == 0, p.stdout
             assert "no report found" in p.stdout
         finally:

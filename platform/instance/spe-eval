@@ -106,6 +106,21 @@ def _run_tracked(state: _StopState, argv: list[str], env: dict | None = None) ->
         state.proc = None
 
 
+def _user_bus_env() -> dict:
+    """The caller's environment, with `XDG_RUNTIME_DIR`/`DBUS_SESSION_BUS_ADDRESS` defaulted when
+    unset, for the `systemd-run --user` call `cmd_run_detached` makes. The Coder agent is a system
+    unit (`roles/coder_agent/tasks/main.yml`'s `User=`, no PAM session), so its shells have
+    neither; `systemd-run --user` then fails with "Failed to connect to bus" (task 5 review,
+    Important 4b). Lingering (R5) already guarantees `/run/user/<uid>`'s manager and bus exist, so
+    defaulting to them here is enough; a caller that already has either leaves it untouched."""
+    env = dict(os.environ)
+    if not env.get("XDG_RUNTIME_DIR"):
+        env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+    if not env.get("DBUS_SESSION_BUS_ADDRESS"):
+        env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={env['XDG_RUNTIME_DIR']}/bus"
+    return env
+
+
 def _spe_apply(state: _StopState, args: list[str], token: str | None = None) -> int:
     """`spe-apply <args>` on `$PATH`, with `SPE_EVAL_LOCK=token` so it does not refuse its own
     caller's lock (decision 11)."""
@@ -314,7 +329,17 @@ def cmd_run(ns: argparse.Namespace) -> int:
                 record["state"] = arm_state
                 record["ended"] = spe_eval.iso_now()
                 record["gate_notes"] = notes
-                spe_eval.write_json(record, out_dir / "run.json")
+                # Merge onto whatever run.sh itself already wrote to this run.json (on success,
+                # `started`/`canaries_sha256`: task 5 review, Important 3) rather than overwriting
+                # it outright, so matrix.counts/replay keep finding canaries_sha256 here.
+                run_json_path = out_dir / "run.json"
+                on_disk: dict = {}
+                if run_json_path.is_file():
+                    try:
+                        on_disk = json.loads(run_json_path.read_text())
+                    except ValueError:
+                        on_disk = {}
+                spe_eval.write_json({**on_disk, **record}, run_json_path)
             if arm_state != "ok":
                 any_bad = True
 
@@ -365,7 +390,7 @@ def cmd_run_detached(ns: argparse.Namespace) -> int:
     if ns.name:
         argv.append(ns.name)
     argv += ["--repeat", str(ns.repeat)]
-    result = subprocess.run(argv, env=os.environ, capture_output=True, text=True)
+    result = subprocess.run(argv, env=_user_bus_env(), capture_output=True, text=True)
     if result.returncode != 0:
         _print_err(f"systemd-run failed (exit {result.returncode}): {result.stderr.strip()}")
         return 2

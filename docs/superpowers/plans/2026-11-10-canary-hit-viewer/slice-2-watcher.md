@@ -19,7 +19,7 @@ Decisions 1, 3; ruling 1.
   `open-webui-data` (`<mount>/webui.db`); the receiver is `/var/lib/spe-eval-sink/requests.jsonl`. A test override:
   env `SPE_READER_PATHS` (JSON `{"sessions": dir, "agent_runs": file, "receiver": file, "webui_db": file}`)
   replaces the lookup. Prints one JSON object:
-  `{"files": {"journal:<uuid>" | "agent_runs" | "receiver": {"size": int, "start": int, "end": int, "lines": [str]}},
+  `{"files": {"journal:<uuid>" | "agent_runs" | "receiver": {"size": int, "start": int, "end": int, "lines": [str], "line_starts": [int]}},
   "openwebui": {"rows": [{"id", "title", "updated_at", "chat"}], "max": number} | null, "missing": [str],
   "errors": [str]}`. `start` is where reading began (0 when the file is shorter than its offset: replaced), `end`
   the offset after the last complete line; a partial last line stays unread. All files together at most 1 MiB

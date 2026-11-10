@@ -17,6 +17,10 @@ the service and a `FakeCoder` on port 0 and call it with `urllib`.
 
 Decisions 6, 10, 11; ruling 6.
 
+- [ ] **Open check carried from slice 2** (its Task 5 Step 0): Open WebUI's `chat` table columns (`id, title, updated_at,
+  chat`) are unverified, since `denbi-agui-01` runs the AG-UI frontend only. On an instance with Open WebUI, run the
+  `pragma table_info(chat)` check slice 2's Task 5 names; a difference is a ruling in `progress.md` and a reader fix.
+
 **Files:**
 - Modify: `platform/report/sperange_report.py`, `platform/report/hits_view.py`
 - Create: `platform/report/tests/test_hits_service.py`

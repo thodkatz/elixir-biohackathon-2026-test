@@ -25,3 +25,26 @@ slice is the README's slices table; the handoffs say what each session did.
    `answer` joins a run's messages with no separator, so a token right after another message's last word fails
    the whole-word match there, while the journal, one answer per message, still finds it. *Cost if wrong:* a
    run with a run log and no journal misses that one hit.
+
+## Slice 2
+
+1. **Open WebUI's `chat` columns are unverified**: `denbi-agui-01` runs the AG-UI frontend only (no
+   `spe-frontend_open-webui-data` volume), so the check moved into slice 3's Task 9. *Cost if wrong:* the reader
+   reports `openwebui: <exception>` until a column rename is fixed.
+2. **The on-stop scan runs `scan_archive` over the whole run directory** with the workspace's `seen` set and
+   generation, not from the offsets reached: the dedup keys (no `source` in them) drop what polling found. *Cost if
+   wrong:* one extra read of a run's archive.
+3. **`SshTransport` puts its `-o` options before `vm_argv`'s target**, and runs `sudo python3 -` locally when
+   `vm_argv` is `[]`. *Cost if wrong:* none.
+4. **The watcher caps a reader reply at 32 MiB** (a file with no newline would otherwise be shipped whole); past
+   it the poll fails (`unreachable`). Only the participant's own workspace can be stalled this way. *Cost if
+   wrong:* such a workspace is watched only by its on-stop archive scan.
+5. **A `RecordError` message is logged with the workspace id**: the constraint allows errors, and every
+   `RecordError` names a file, key or line, never a value. *Cost if wrong:* a future message carrying a value leaks
+   into the log.
+6. **The reader returns `line_starts`** (each line's byte offset; Task 5's interface rewritten): restart needs the
+   exact offset of an open run's `run_start`, and lines are decoded with `errors="replace"`. *Cost if wrong:* none.
+7. **Beyond the plan**: journal titles are kept in the state file (a restart keeps them); a journal file whose name
+   is not a UUID is skipped, not a failed poll; the state records `generation_start` (hits-file line count at the
+   generation's start) so a restart rebuilds dedup keys from this generation's hits only (review fix). *Cost if
+   wrong:* none.

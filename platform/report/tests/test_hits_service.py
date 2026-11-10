@@ -670,3 +670,30 @@ def test_unreadable_hits_file_ends_with_one_log_line(service, streams, capfd):
     out, _ = capfd.readouterr()
     assert f"hits stream {WID}: IsADirectoryError, ended\n" in out
     assert str(hits_dir) not in out
+
+
+# --- Task 11: the page script and the Coder app -------------------------------------------------
+
+def test_page_loads_hits_script(service):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
+    status, _, body = call(base, f"/reports/{WID}/hits", token="tok-anna")
+    assert status == 200
+    text = body.decode()
+    assert f'<script src="{sr.PREFIX}/static/hits.js">' in text
+    assert f'data-wid="{WID}"' in text
+    assert "Group by run" in text
+    assert 'data-session="s1"' in text
+    assert 'data-run="r1"' in text
+    status, headers, _ = call(base, f"{sr.PREFIX}/static/hits.js")
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/javascript")
+
+
+def test_coder_app_hits():
+    main_tf = Path(__file__).resolve().parents[2] / "coder" / "template" / "main.tf"
+    if not main_tf.is_file():
+        pytest.skip("main.tf not present in this checkout")
+    text = main_tf.read_text()
+    assert 'slug         = "hits"' in text
+    assert "/reports/${data.coder_workspace.me.id}/hits" in text

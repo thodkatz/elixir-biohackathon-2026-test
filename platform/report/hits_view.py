@@ -178,7 +178,9 @@ def _header(meta: dict, hits: list[dict], status: dict | None, now: float) -> st
     label = meta.get("instance") or meta.get("workspace") or "workspace"
     owner = meta.get("owner")
     text = "archived run" if status is None else status_line(status, now)
-    head = f'<h1>Canary hits &middot; {_esc(label)} ({_esc(text)})</h1>'
+    # #hits-status: the live service's script sets its textContent on every status event
+    # (slice 3); the early output (standalone, no script) never updates it.
+    head = f'<h1>Canary hits &middot; {_esc(label)} (<span id="hits-status">{_esc(text)}</span>)</h1>'
     if owner:
         head += f'<p class="owner muted">owner {_esc(owner)}</p>'
     return head + _headline(hits)
@@ -208,10 +210,18 @@ def participant_body(meta: dict, hits: list[dict], status: dict | None) -> str:
         items = f'<p class="muted">{_esc(ENCRYPTED_NOTICE)}</p>'
     elif not items:
         items = f'<p class="muted">{_esc(NOT_WATCHED if not_watched_yet else NO_HITS)}</p>'
+    # The two buttons below are static, `hidden` until hits.js (slice 3) removes the attribute:
+    # with no script (the standalone early output), they stay invisible. hits.js builds no HTML
+    # of its own but these two, with document.createElement + textContent, so they are rendered
+    # here once, where hit_html's escaping discipline already lives.
+    actions = ('<div class="hits-actions">'
+               '<button type="button" id="notify-btn" class="btn" hidden>Notify me</button>'
+               '<button type="button" id="group-toggle" class="btn" hidden>Group by run</button>'
+               '</div>')
     return (
         '<main class="hits">'
         f'<header class="report-head card">{_header(meta, hits, status, now)}'
-        f'<p class="notice muted">{_esc(NOTICE)}</p></header>'
+        f'<p class="notice muted">{_esc(NOTICE)}</p>{actions}</header>'
         f'<section class="card hit-list">{items}</section>'
         '</main>'
     )

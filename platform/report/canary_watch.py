@@ -2,12 +2,16 @@
 """The canary hit viewer's watcher (spec *Watcher*). This slice: the scan of one archived run
 directory (/data-share/runs/<time>_<instance>/, as the run_archive role writes it) into a hits file.
 
-    canary_watch.py --archive RUN_DIR --out HITS.jsonl [--api-host HOST]
+    canary_watch.py --archive RUN_DIR --out HITS.jsonl [--html PAGE.html] [--api-host HOST]
 
 The scan reads the run's canaries.json, the AG-UI journals (agui/agui-journals/<session>.jsonl), the
 agent's run log (agui/agent-runs.jsonl) and Open WebUI's chats (openwebui-export.json in the run
 directory itself, never agui/openwebui-export.json, which is the journals reshaped and would repeat
 their hits under Open WebUI's ids). Journals go first, so their copy of a run wins the dedup.
+
+With --html, every hit now in the hits file (not only those appended this run) is also rendered as a
+standalone participant page (hits_view.standalone), written with mode 0640 like the hits file itself:
+the early output (spec *Early output*).
 
 Logs carry paths, counts and errors only, never a canary value (decision 10).
 
@@ -17,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from canary_hits import HitsFile, Place, JournalReader, agent_run_places, dedup_key, hits_for, openwebui_places  # noqa: E402
 from canary_record import RecordError, _scalar, load_canaries, read_hosts  # noqa: E402
+from hits_view import participant_body, standalone  # noqa: E402
 
 OUTPUT_ROOT = Path(__file__).resolve().parents[1] / "ansible" / "output"  # spe_output_root's default
 ARCHIVE_GENERATION = "archive"  # the generation a scan by hand keys its hits under
@@ -121,6 +127,19 @@ def archive_meta(run_dir: str) -> dict:
     return {"workspace": None, "instance": run.get("instance"), "owner": run.get("participant")}
 
 
+def write_html(path: str, meta: dict, hits_list: list[dict]) -> None:
+    """The run's hits file rendered as a standalone participant page (the early output), mode 0640
+    like the hits file itself (os.open + fchmod, whatever the umask)."""
+    title = f"Canary hits: {meta.get('instance') or meta.get('workspace') or 'workspace'}"
+    doc = standalone(title, participant_body(meta, hits_list, None)).encode()
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
+    try:
+        os.fchmod(fd, 0o640)
+        os.write(fd, doc)
+    finally:
+        os.close(fd)
+
+
 def _api_host(given: str | None, instance: str | None) -> str | None:
     """--api-host, else the instance's output directory's hosts.yml while it still exists, else None
     (then every URL host in a call's arguments counts as foreign)."""
@@ -139,6 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Scan an archived run directory into a canary hits file.")
     parser.add_argument("--archive", required=True, metavar="RUN_DIR", help="the archived run directory")
     parser.add_argument("--out", required=True, metavar="HITS.jsonl", help="the hits file to append to")
+    parser.add_argument("--html", metavar="PAGE.html", help="also render the hits file as a standalone participant page")
     parser.add_argument("--api-host", metavar="HOST", help="the instance's API host (default: its hosts.yml)")
     args = parser.parse_args(argv)
     meta = archive_meta(args.archive)
@@ -154,6 +174,9 @@ def main(argv: list[str] | None = None) -> int:
     note = " (hits file full)" if hits.full else ""
     print(f"canary_watch: {count} new hits from {args.archive} into {args.out}{note}"
           f" (workspace {meta.get('workspace') or 'none'}, api host {'known' if api_host else 'unknown'})")
+    if args.html:
+        write_html(args.html, meta, hits.read())
+        print(f"canary_watch: wrote {args.html}")
     return 0
 
 

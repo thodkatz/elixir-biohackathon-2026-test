@@ -8,6 +8,10 @@ calls.** Runs on Anthropic are paid: get the go-ahead first. Runs on de.NBI need
 
 ## Run the suite
 
+This is the controller's own route, over a tunnel, against a hand-off directory. On an `spe-experiments`
+workspace, `spe-eval run` runs both suites, every arm, from the VM itself, no tunnel and no hand-off path to set
+by hand: `../instance/workspace/AGENTS.md`, *Experiments*.
+
 Replace `VM` with the instance's SSH host and `INSTANCE` with its name.
 
 ```bash

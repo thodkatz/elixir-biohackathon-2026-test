@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -421,11 +422,17 @@ class Lock:
         current holder's token, if another process already holds it."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            os.close(fd)
-            raise LockHeld(self.holder()) from None
+        # A few short retries: `holder()`'s own probe (`status`, `wait`'s polling) takes the free lock
+        # for an instant, and must not make a real acquire fail (re-review N3).
+        for attempt in range(5):
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if attempt == 4:
+                    os.close(fd)
+                    raise LockHeld(self.holder()) from None
+                time.sleep(0.1)
         os.ftruncate(fd, 0)
         os.write(fd, token.encode())
         os.fsync(fd)

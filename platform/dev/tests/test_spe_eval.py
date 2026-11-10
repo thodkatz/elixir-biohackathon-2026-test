@@ -452,3 +452,25 @@ def test_lock_holder_reports_a_genuinely_held_lock(tmp_path):
         assert spe_eval.Lock(path).holder() == "tok-held"
     finally:
         held.release()
+
+
+def test_lock_acquire_rides_out_a_momentary_probe(tmp_path):
+    # re-review N3: holder()'s probe (status, wait polling) takes the free lock for an instant;
+    # an acquire that lands in that instant retries instead of refusing.
+    import fcntl
+    import os
+    import threading
+
+    path = tmp_path / "lock"
+    path.write_text("")
+    fd = os.open(path, os.O_RDWR)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    timer = threading.Timer(0.15, lambda: (fcntl.flock(fd, fcntl.LOCK_UN), os.close(fd)))
+    timer.start()
+    lock = spe_eval.Lock(path)
+    try:
+        lock.acquire("tok-after-probe")
+        assert lock.holder() == "tok-after-probe"
+    finally:
+        timer.join()
+        lock.release()

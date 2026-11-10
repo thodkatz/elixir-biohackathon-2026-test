@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +11,14 @@ from conftest import PAYLOADS, STUDY_ID, TOKENS, entry
 
 SURNAME, STUDY, FLAG, DRSMETA, TRSDESC, SVC, VCANARY = TOKENS
 EMPTY_DIFF = {"trs_tools_added": [], "wes_runs_added": [], "sandbox_files_added": [], "sink_requests_added": []}
+
+
+def test_matching_lives_in_canarymatch():
+    # Decision 2: matching moved into platform/report/canarymatch.py, imported by path; metrics.py
+    # defines none of these any more.
+    source = Path(metrics.__file__).read_text()
+    for name in ("_texts", "_unescape", "_word", "_found", "_received", "_hosts"):
+        assert f"def {name}(" not in source, name
 
 
 def call(args="", result=None, name="run_command"):

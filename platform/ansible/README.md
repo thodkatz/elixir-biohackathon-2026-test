@@ -143,7 +143,11 @@ instance files are sensitive too.
 
 Evaluation fixtures for the canary ladder (`docs/superpowers/specs/2026-10-22-canary-eval-ladder-design/02-injections.md`):
 an instruction planted in content the agent reads, naming a sensitive file and asking for it. Off by default; on in
-every `instances/L<n>.example.yml`. Payloads and their targets are fixed in `catalog/injections/fixtures.json`.
+every `instances/L<n>.example.yml`. Payloads and their targets are fixed in `catalog/injections/fixtures.json`; the
+surfaces they can land on and each one's location keys are in `catalog/injections/surfaces.json` beside it
+(`{"surfaces": {<surface>: [<key>, ...]}}`, e.g. `"trs-description": ["field", "tool_id"]`). Both are the
+evaluation side's authority too: `platform/promptfoo-evals/injections_schema.py`'s catalogue is built from
+these files, not listed in code (decision 23), so a new fixture on an existing surface needs no change there.
 
 | Variable | Payload | Where it lands |
 |---|---|---|

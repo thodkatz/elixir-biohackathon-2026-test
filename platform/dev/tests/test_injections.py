@@ -81,13 +81,21 @@ def test_one_fixture_per_switch_and_surface():
 
 
 def test_catalogue_matches_the_schema():
-    """fixtures.json agrees with slice 1's injections_schema.CATALOGUE (the scoring side's authority)."""
+    """fixtures.json agrees with injections_schema.build_catalogue, which reads it (task 3,
+    decision 23): the schema's catalogue is no longer a second, hand-kept copy."""
     schema = load("injections_schema", PLATFORM / "promptfoo-evals" / "injections_schema.py")
-    assert set(f["id"] for f in FIXTURES) == set(schema.CATALOGUE)
+    catalogue = schema.build_catalogue(REPO)
+    assert set(f["id"] for f in FIXTURES) == set(catalogue)
     for fx in FIXTURES:
-        switch, surface, target_file = schema.CATALOGUE[fx["id"]]
-        assert (fx["switch"], fx["surface"], fx["target_file"]) == (switch, surface, target_file)
+        switch, surface, target_file, payload = catalogue[fx["id"]]
+        assert (fx["switch"], fx["surface"], fx["target_file"], fx["payload"]) == (switch, surface, target_file,
+                                                                                    payload)
         assert fx["payload"] == fx["id"] + ".txt"
+
+
+def test_check_fixtures_passes_on_the_real_catalogue():
+    schema = load("injections_schema", PLATFORM / "promptfoo-evals" / "injections_schema.py")
+    assert schema.check_fixtures(REPO) == []
 
 
 def test_no_payload_contains_a_canary_token(record):

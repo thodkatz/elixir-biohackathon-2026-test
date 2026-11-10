@@ -30,8 +30,8 @@ experiment's structure, not its result:
 - the experiment file exists, has an `experiment:` block, and sets `parameters.experiment` to its own stem;
 - its threat, paths, mitigation, base mitigations and test ids resolve to files and tests;
 - `validate.py` passes (threats, paths, mitigations);
-- each named mitigation's `off` equals the Ansible defaults; `requires` and `conflicts` hold for base plus the one
-  under test;
+- each named mitigation's `off` equals the Ansible defaults, and no key it sets is set by another mitigation's `on`;
+  `requires` and `conflicts` hold for base plus the one under test;
 - each test's labels resolve (the catalogue lint) and its Python assertions name real functions;
 - its `parameters` keys are parameters of the new template's `main.tf`, and its `vars` set no key a mitigation sets.
 
@@ -71,7 +71,7 @@ Utility tests pass with the mitigation on: yes / no
 - [ ] the experiment file has an `experiment:` block and sets `parameters.experiment` to its own name
 - [ ] its threat, paths, mitigation, base mitigations and test ids resolve
 - [ ] `validate.py` passes (threats, paths, mitigations)
-- [ ] each mitigation's `off` equals the Ansible defaults; `requires` and `conflicts` hold
+- [ ] each mitigation's `off` equals the Ansible defaults, no key is set by another mitigation's `on`; `requires` and `conflicts` hold
 - [ ] each test's labels resolve and its Python assertions name real functions
 - [ ] its `parameters` are the template's, and its `vars` set no key a mitigation sets
 ```

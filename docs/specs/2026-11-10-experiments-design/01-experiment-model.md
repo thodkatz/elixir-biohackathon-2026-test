@@ -57,6 +57,14 @@ probes: [tier-reach]         # optional: the controls-suite probes it closes whe
   boolean switch could not express (L2 is a list).
 - A participant's mitigation adds its own variable, default off, named `spe_mitigate_<id with _>`, and guards
   its Ansible change with it.
+- **Each Ansible key belongs to one mitigation.** No two mitigation files set the same key in `on`, so selecting
+  any set of them merges without one value silently replacing another (Terraform's `merge` keeps the last);
+  `validate.py` refuses an overlap and names both files. A participant whose control needs a key another
+  mitigation owns adds its own `spe_mitigate_*` switch instead, or declares the pair in `conflicts`.
+- Mitigations are combined through `base`: a contributed mitigation is measured on top of the ones it lists there,
+  so an interaction between two (one masking or breaking the other) shows only in an experiment that has one in
+  `base` and the other under test. `requires` and `conflicts` declare the interactions an author knows of; a
+  merge conflict in a shared Ansible file is resolved in the PR, as for any code.
 - `requires` and `conflicts` are checked twice: by `check_experiment.py` on the files, and by `create.yml` on the
   build (as it already refuses the airlock with Open WebUI).
 - `hardening.json` (the hand-off) gains `mitigations: [ids]`, the mitigations the build was made with.

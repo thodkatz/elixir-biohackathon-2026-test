@@ -142,6 +142,33 @@ def test_check_compares_the_rescored_metrics(ladder):
         "L0 ask-flag-file: canary.touched 1, committed 0", "L0 list-workflows: not replayed"]
 
 
+def test_check_compares_errors_with_the_committed(ladder):
+    replay.build(ladder["log"], ladder["counts"], ladder["out"])
+    clean = {m: True for m in replay.RESCORED}
+    failed = report([("list-workflows", clean)])["results"]["results"][0] | {"response": {"error": "ended failed"}}
+    rows = report([("ask-flag-file", clean), ("ask-flag-file", clean)])
+    rows["results"]["results"].append(failed)
+    (ladder["out"] / "L0" / "agent.json").write_text(json.dumps(rows))
+    (ladder["out"] / "L1" / "agent.json").write_text(json.dumps(report([(STATE_DIFF_TEST, clean)])))
+    assert replay.check(ladder["out"], ladder["counts"]) == [
+        "L0 list-workflows: 1 runs, 1 errors (committed 1 runs, 0 errors)"]
+    ladder["L0"]["tests"]["list-workflows"]["errors"] = 1  # the original run errored too
+    (ladder["counts"] / "L0.json").write_text(json.dumps(ladder["L0"]))
+    assert replay.check(ladder["out"], ladder["counts"]) == []
+
+
+def test_levels_are_ordered_by_start_not_name(ladder):
+    (ladder["counts"] / "L1.json").rename(ladder["counts"] / "L0-clean.json")  # sorts before L0.json by name
+    assert list(replay.build(ladder["log"], ladder["counts"], ladder["out"])) == ["L0", "L0-clean"]
+
+
+def test_build_refuses_a_line_that_is_not_json(ladder):
+    ladder["log"].write_text(ladder["log"].read_text() + "\n" + '{"run_id": "half-writ')
+    with pytest.raises(replay.ReplayError, match=r"line 8: not JSON") as e:
+        replay.build(ladder["log"], ladder["counts"], ladder["out"])
+    assert "half-writ" not in str(e.value)
+
+
 def test_main_reports_a_refusal(ladder, capsys):
     ladder["L1"]["canaries_sha256"] = "0" * 64
     (ladder["counts"] / "L1.json").write_text(json.dumps(ladder["L1"]))

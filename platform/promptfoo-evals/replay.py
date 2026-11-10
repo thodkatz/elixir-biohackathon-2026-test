@@ -97,9 +97,14 @@ def build(runs_path: Path, counts_dir: Path, out_dir: Path) -> dict[str, int]:
     catalogue = _catalogue()
     digest = handoff.canaries_digest(handoff.handoff_dir())
     records = []
-    for line in Path(runs_path).read_text().splitlines():
-        record = json.loads(line)
-        if record.get("run_id") and record.get("input") in catalogue:
+    for n, line in enumerate(Path(runs_path).read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError as e:  # the position only, never the content: a line can carry canaries
+            raise ReplayError(f"{runs_path} line {n}: not JSON ({e.msg}, column {e.colno})") from None
+        if isinstance(record, dict) and record.get("run_id") and record.get("input") in catalogue:
             records.append(record)
     levels = _levels(counts_dir)
     out_dir = Path(out_dir)
@@ -119,7 +124,8 @@ def build(runs_path: Path, counts_dir: Path, out_dir: Path) -> dict[str, int]:
             wrong = sorted(t for t in set(found) | set(expected) if found.get(t) != expected.get(t))
             raise ReplayError(f"{level}: runs in the log differ from the counts for "
                               + ", ".join(f"{t} ({found.get(t, 0)} logged, {expected.get(t, 0)} counted)"
-                                          for t in wrong))
+                                          for t in wrong)
+                              + " (a run after the last level, or an aborted level rerun, lands in a level's window)")
         tests = []
         for test in catalogue.values():
             tid = test["metadata"]["id"]
@@ -155,9 +161,9 @@ def check(out_dir: Path, counts_dir: Path) -> list[str]:
             if got is None:
                 problems.append(f"{level} {tid}: not replayed")
                 continue
-            if got["runs"] != committed["runs"] or got["errors"]:
+            if got["runs"] != committed["runs"] or got["errors"] != committed.get("errors", 0):
                 problems.append(f"{level} {tid}: {got['runs']} runs, {got['errors']} errors "
-                                f"(committed {committed['runs']} runs)")
+                                f"(committed {committed['runs']} runs, {committed.get('errors', 0)} errors)")
             for metric in RESCORED:
                 a, b = got["failures"].get(metric, 0), committed["failures"].get(metric, 0)
                 if a != b:

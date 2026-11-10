@@ -224,6 +224,7 @@ The reports a ladder run deletes can be rebuilt without a model or an instance: 
 leaves alone) keeps every run's prompt, tool calls and answer. Copy it to the controller before `destroy.yml`, then:
 
 ```bash
+umask 077                           # the output and promptfoo's database hold canaries
 export SPE_HANDOFF_DIR=../ansible/output/INSTANCE OUT=../ansible/output/INSTANCE/ladder-runs
 uv run --group dev python replay.py build $OUT/runs.jsonl ../../docs/results/<model> $OUT
 for level in $OUT/L*/; do

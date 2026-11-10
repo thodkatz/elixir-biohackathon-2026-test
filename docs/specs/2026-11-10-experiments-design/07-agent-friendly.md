@@ -62,7 +62,7 @@ reasons only. A reason may quote a canary, as the viewer does; both are the work
 
 ## Acceptance
 
-An agent given only the workspace and the sentence "propose a mitigation for TM-003 through P2 and measure it" can
+An agent given only the workspace and the sentence "propose an attack and a mitigation for TM-003 through P2 and measure it" can
 reach a pushed `experiment/<name>` branch with a passing checker and a filled PR body, using only the commands
 above and the workspace guide. The plan's last slice checks this end to end, with a coding agent in a de.NBI
 workspace, and records where it needed help.

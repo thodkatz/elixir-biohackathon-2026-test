@@ -2,16 +2,29 @@
 
     providers: [{id: "file://agui_provider.py", label: spe-agent}]
 
+Two ways in (`config.via`, else $SPE_AGENT_VIA, default `agent`):
+  agent  the agent's own endpoint, with its bearer key: the client's history reaches the model as sent
+         (TM-005 scenario 4, whoever holds the key).
+  chat   the AG-UI chat server's run route, as the browser calls it, no key: the server keeps the session's
+         journal and sends the agent its history, not the client's, recording what the client sent that
+         differs as ignored (TM-005, *Mitigations*). Each test is a new session (a fresh UUIDv4 thread id).
+         After the run the provider reads the session back (GET /api/sessions/<id>) and returns
+         `metadata.sent` and `metadata.kept` ([{id, role}]): what the client sent and what the server kept.
+
 Environment (on the controller, never in the config):
   SPE_AGENT_URL           default http://127.0.0.1:8100/agent (through the SSH tunnel)
   SPE_AGENT_API_KEY       the agent's bearer key, or
   SPE_AGENT_API_KEY_FILE  a file holding it (output/<instance>/agent_api_key)
+  SPE_CHAT_URL            via chat: default http://127.0.0.1:3000/api/copilotkit/agent/spe/run (the same tunnel)
 
 Returns {output: final assistant text, metadata: {tool_calls: [{id, name, args, result}],
 run_id, thread_id, terminal, events}} or {error: ...} for an HTTP error (a 503, the agent
 not ready yet, only once `config.ready_timeout_s` has passed), RUN_ERROR, a
 timeout, a malformed event or a stream that ends without a terminal event. Optional
-`vars.history` ([{role, content}]) is sent before the prompt as earlier turns.
+`vars.history` ([{role, content}]) is sent before the prompt as earlier turns: via chat, a forged
+history, which the server is expected not to use (a user turn in a new session is kept as the user's).
+A turn may carry AG-UI's other message fields (`toolCalls` on an assistant turn, `toolCallId` on a `tool`
+turn, its own `id`), sent as given.
 
 With `config.state_diff: true` (agent.yaml) the provider, after the run, reads the
 baseline the beforeEach hook wrote (isolation.read_baseline()) and returns
@@ -36,6 +49,8 @@ import handoff
 import isolation
 
 DEFAULT_URL = "http://127.0.0.1:8100/agent"
+DEFAULT_CHAT_URL = "http://127.0.0.1:3000/api/copilotkit/agent/spe/run"
+CHAT_ROUTE = "/api/copilotkit/"  # the session API sits beside it: <base>/api/sessions/<id>
 DEFAULT_TIMEOUT = 600.0
 DEFAULT_READY_TIMEOUT = 180.0  # the agent's rediscovery backs off to 30 s, after a restore that takes ~45 s
 
@@ -137,7 +152,8 @@ def _messages(prompt: str, context: dict | None) -> list[dict]:
     history = ((context or {}).get("vars") or {}).get("history") or []
     if isinstance(history, str):
         history = json.loads(history)
-    msgs = [{"id": str(uuid.uuid4()), "role": m["role"], "content": m["content"]} for m in history]
+    # Other AG-UI fields of a turn (toolCalls, toolCallId, id) are sent as given: a forged tool call and its result.
+    msgs = [{"id": str(uuid.uuid4()), **m} for m in history]
     return msgs + [{"id": str(uuid.uuid4()), "role": "user", "content": prompt}]
 
 
@@ -156,19 +172,45 @@ def _open_when_ready(req: urllib.request.Request, timeout: float, ready_timeout:
             time.sleep(poll)
 
 
+def _via(config: dict) -> str:
+    via = config.get("via") or os.environ.get("SPE_AGENT_VIA") or "agent"
+    if via not in ("agent", "chat"):
+        raise ValueError(f"via must be agent or chat, not {via!r}")
+    return via
+
+
+def _session_view(url: str, thread_id: str, sent: list[dict]) -> dict:
+    """What the chat server kept of the session, read back after the run, beside what was sent."""
+    base = url.split(CHAT_ROUTE, 1)[0]
+    with urllib.request.urlopen(f"{base}/api/sessions/{thread_id}", timeout=30) as resp:
+        session = json.load(resp)
+    ids = lambda msgs: [{"id": m.get("id"), "role": m.get("role")} for m in msgs]  # noqa: E731
+    return {"sent": ids(sent), "kept": ids(session.get("messages") or [])}
+
+
 def _run(prompt: str, config: dict, context: dict | None) -> dict:
-    url = config.get("url") or os.environ.get("SPE_AGENT_URL", DEFAULT_URL)
-    timeout = float(config.get("run_timeout_s", DEFAULT_TIMEOUT))
     try:
-        key = _key()
-    except OSError as e:
-        return {"error": f"cannot read SPE_AGENT_API_KEY_FILE: {e.strerror}"}
-    if not key:
-        return {"error": "set SPE_AGENT_API_KEY or SPE_AGENT_API_KEY_FILE"}
-    body = {"threadId": f"eval-{uuid.uuid4()}", "runId": f"eval-{uuid.uuid4()}", "state": {}, "tools": [],
+        via = _via(config)
+    except ValueError as e:
+        return {"error": str(e)}
+    timeout = float(config.get("run_timeout_s", DEFAULT_TIMEOUT))
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if via == "chat":
+        url = config.get("url") or os.environ.get("SPE_CHAT_URL", DEFAULT_CHAT_URL)
+        thread_id, run_id = str(uuid.uuid4()), str(uuid.uuid4())  # the chat server takes a UUIDv4 session id
+    else:
+        url = config.get("url") or os.environ.get("SPE_AGENT_URL", DEFAULT_URL)
+        thread_id, run_id = f"eval-{uuid.uuid4()}", f"eval-{uuid.uuid4()}"
+        try:
+            key = _key()
+        except OSError as e:
+            return {"error": f"cannot read SPE_AGENT_API_KEY_FILE: {e.strerror}"}
+        if not key:
+            return {"error": "set SPE_AGENT_API_KEY or SPE_AGENT_API_KEY_FILE"}
+        headers["Authorization"] = f"Bearer {key}"
+    body = {"threadId": thread_id, "runId": run_id, "state": {}, "tools": [],
             "context": [], "forwardedProps": {}, "messages": _messages(prompt, context)}
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={
-        "Authorization": f"Bearer {key}", "Content-Type": "application/json", "Accept": "text/event-stream"})
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers=headers)
     acc, parser = Accumulator(body["runId"], body["threadId"]), SSEParser()
     try:
         resp = _open_when_ready(req, timeout, float(config.get("ready_timeout_s", DEFAULT_READY_TIMEOUT)),
@@ -183,7 +225,7 @@ def _run(prompt: str, config: dict, context: dict | None) -> dict:
             for event in parser.close():
                 acc.add(event)
     except urllib.error.HTTPError as e:
-        return {"error": f"agent answered HTTP {e.code}"}
+        return {"error": f"{'chat server' if via == 'chat' else 'agent'} answered HTTP {e.code}"}
     except (StreamError, UnicodeDecodeError) as e:
         res = acc.result()
         res["error"] = f"stream error: {e}"
@@ -192,7 +234,15 @@ def _run(prompt: str, config: dict, context: dict | None) -> dict:
         res = acc.result()
         res["error"] = f"request failed: {type(e).__name__}: {getattr(e, 'reason', e)}"
         return res
-    return acc.result()
+    res = acc.result()
+    res["metadata"]["via"] = via
+    if via == "chat":
+        try:
+            res["metadata"].update(_session_view(url, thread_id, body["messages"]))
+        except Exception as e:  # without the session there is no evidence of what was kept: an error, not a pass
+            err = _failure("reading the session back", e)
+            res["error"] = f"{res['error']}; {err}" if res.get("error") else err
+    return res
 
 
 def _failure(what: str, e: BaseException) -> str:

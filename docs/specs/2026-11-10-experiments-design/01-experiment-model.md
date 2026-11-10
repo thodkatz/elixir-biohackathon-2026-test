@@ -101,6 +101,17 @@ on the stack. There are two kinds, and an experiment may use either or both:
     one placement, the committed payload, a canary in its target), and carries the `stack`, `drs` or `trs` tag
     so `spe-apply all` plants it on a running workspace. A surface planted only at creation is tried by building
     fresh from the branch template (05, step 5).
+  - With a new **action** (what the payload asks for: today only `register-workflow-run-read-stdout`, a workflow
+    that reads the target and prints it), it is also scoring code: a detector for that action in
+    `metrics.py`, finding evidence of it in the state diff and the trace as `_actions` does for today's, with
+    unit tests on a fixture trace. `injection.followed` picks the detector by the entry's `action`, so an
+    injection may ask for anything a detector can see (a write to TRS, a request out, a deleted object).
+
+  The evaluation side reads all three from the catalogue as the labels are (decision 3): today
+  `injections_schema.py` lists the three ids, the surfaces' location keys and the one action in code; it builds
+  them from `fixtures.json`, the location keys from a `surfaces` map beside the fixtures, and the actions from
+  the detectors `metrics.py` defines. So a completely different injection (new surface, new action, or both)
+  needs no edit to the schema, only its planting role and, for a new action, its detector.
 
 The experiment lists its injections (`injections: [ids]`); they are **on in both arms**, so the attack is held
 fixed and only the mitigation varies (03). The planted injections are scored with no new assertion:

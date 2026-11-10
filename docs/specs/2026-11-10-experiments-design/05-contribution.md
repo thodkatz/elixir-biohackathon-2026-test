@@ -33,7 +33,8 @@ experiment's structure, not its result:
 - the experiment file exists, has an `experiment:` block, and sets `parameters.experiment` to its own stem;
 - its threat, paths, mitigation, base mitigations, injections and test ids resolve to files and tests;
 - each listed injection's entry is complete, its payload file exists and names its `target_file`, its
-  `canary_file` is a canary file the experiment's `canaries` parameter plants, and its switch defaults to `false`;
+  `canary_file` is a canary file the experiment's `canaries` parameter plants, its surface has location keys and
+  its action a detector, and its switch defaults to `false`;
 - `validate.py` passes (threats, paths, mitigations);
 - each named mitigation's `off` equals the Ansible defaults, and no key it sets is set by another mitigation's `on`;
   `requires` and `conflicts` hold for base plus the one under test;

@@ -53,8 +53,8 @@ Each is *decision, why, cost if wrong*; a slice that departs from this plan adds
    log names its caller.
 4. **The early output stays on the portal VM.** It shows canary values (decision 10), so the HTML is written to
    `/data-share/canary-hits/early-output/<run dir>.html` (mode 0640) and never committed; the PR commits only
-   per-kind counts (`evidence/slice-1/counts.md`). *Cost if wrong:* none: the user reads it on the portal or over
-   `scp`.
+   per-kind counts (`evidence/slice-1/counts.md`). *Cost if wrong:* none: the user reads it on the portal
+   (`sudo cat`, or `scp` after a `sudo cp` to their home).
 5. **A one-shot scan of an instance without a sidecar exists only by hand** (`canary_watch.py --once
    --output-dir <dir>`, slice 2), for checking the reader on our own de.NBI instance; the daemon never scans
    without a sidecar (decision 9). *Cost if wrong:* none: the flag only reads.
@@ -72,6 +72,11 @@ Each is *decision, why, cost if wrong*; a slice that departs from this plan adds
 9. **The admin page shows the newest 500 hits and `hits.json` the newest 2000**; each workspace's own page and
    JSON hold all of it. *Why:* 50 workspaces at the 10 MB cap would be half a gigabyte per page load. *Cost if
    wrong:* an admin follows the workspace link for older hits.
+10. **A workspace is running when its `hosts.yml` is newer than its newest run directory**, two mtimes that
+   both come from the NFS server (the output tree and `/data-share` sit on the portal VM). *Why:* no Coder API call
+   and no state on the service side. *Cost if wrong:* if the two trees ever live on hosts with skewed clocks, a
+   stopped workspace is polled (its SSH fails: `unreachable`) or a running one waits for its next build; then ask
+   Coder's API for the build state instead.
 
 ## Global Constraints
 

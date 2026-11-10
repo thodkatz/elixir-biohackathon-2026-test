@@ -23,8 +23,10 @@ Decisions 1, 3; ruling 1.
   "openwebui": {"rows": [{"id", "title", "updated_at", "chat"}], "max": number} | null, "missing": [str],
   "errors": [str]}`. `start` is where reading began (0 when the file is shorter than its offset: replaced), `end`
   the offset after the last complete line; a partial last line stays unread. All files together at most 1 MiB
-  per call: past it, the rest waits for the next poll (`end` says where it stopped). Open WebUI: rows with
-  `updated_at > offset`, ordered by it, through `sqlite3.connect(f"file:{path}?mode=ro", uri=True)`, stopping at
+  per call: past it, the rest waits for the next poll (`end` says where it stopped); each source still returns
+  at least its first line or row, so one line or row over 1 MiB cannot stall it. Open WebUI: rows with
+  `updated_at >= offset` (whole seconds: a chat saved in the second of the last row read is not skipped; the
+  dedup keys drop the repeats), ordered by it, through `sqlite3.connect(f"file:{path}?mode=ro", uri=True)`, stopping at
   1 MiB of `chat` text; an error (no table, locked) goes in `errors` as `openwebui: <exception class>`.
   Files open with `open(path, "rb")` only.
 - Consumes: nothing from the other modules: the reader is self-contained (it is sent alone).
@@ -62,9 +64,9 @@ Decisions 1, 9; ruling 6.
   `discover(reports_dir: str, output_root: str, runs_dir: str) -> list[Workspace]`: one per sidecar
   `<reports_dir>/<uuid>.json` whose `instance` has `<output_root>/<instance>/hosts.yml`; for two sidecars naming
   one instance, the newer (mtime) only; `encrypted` when only `canaries.json.age` is there; `running` when
-  `hosts.yml` is newer than every `<runs_dir>/*_<instance>` directory. SSH user, host and key: as the archive
-  playbook connects (read `platform/ansible/playbooks/archive.yml` and the `handoff` role's `hosts.yml` keys; the
-  key is `<output_dir>/ssh_key`). `hosts.yml` is read with `canary_record.read_hosts`, the record with
+  `hosts.yml` is newer than every `<runs_dir>/*_<instance>` directory. How to reach the VM: `canary_record.vm_argv(output_dir)`
+  (slice 1), which reads `hosts.yml`'s `ssh_target` and `ssh_args` (or a local target); not `archive.yml`'s way,
+  which asks OpenStack for the address. `hosts.yml` is read with `canary_record.read_hosts`, the record with
   `canary_record.load_canaries` (ruling 2).
 - Defaults: `--reports-dir /data-share/reports`, `--runs-dir /data-share/runs`, `--hits-dir
   /data-share/canary-hits`, `--output-root` `<repo>/platform/ansible/output` (from the script's own path).
@@ -91,8 +93,11 @@ Decisions 1, 3, 10; *Watcher* (*How it pulls*, *Reader output is untrusted*, *On
   `hits_for`, `dedup_key`, `HitsFile`), `scan_archive`, `discover`, the reader's output format (Task 5).
 - Produces:
   - `class Transport` with `read(ws: Workspace, offsets: dict) -> dict`; `SshTransport` runs
-    `ssh -o ControlMaster=auto -o ControlPath=<hits_dir>/.ssh/%C -o ControlPersist=60 -o BatchMode=yes -i <key>
-    <user>@<host> sudo python3 - <offsets JSON>` with the reader's source on stdin (timeout 30 s);
+    `canary_record.vm_argv(output_dir)` (SSH from `hosts.yml`'s target and arguments, or local) with
+    `-o ControlMaster=auto -o ControlPath=~/.ssh/cm-%C -o ControlPersist=60 -o BatchMode=yes` (sockets on local
+    disk, not on `/data-share`'s NFS), then `sudo python3 - <shlex.quote(offsets JSON)>` with the reader's source
+    on stdin (timeout 30 s); the offsets' journal keys are checked as UUIDs and their values as integers before
+    the call (`test_offsets_quoted_and_checked`);
     `LocalTransport(paths: dict)` runs the reader locally with `SPE_READER_PATHS` (the fake instance).
   - State per workspace in `<hits_dir>/<id>.state.json` (0600): `generation`, `offsets` (the reader's keys),
     `run_starts` (per journal, the offset of its open run's `run_start` line), `seen` (dedup keys), `archived`
@@ -102,7 +107,9 @@ Decisions 1, 3, 10; *Watcher* (*How it pulls*, *Reader output is untrusted*, *On
     (count per kind), `note` (e.g. "canary record is encrypted", "hits file full").
   - `Watcher(hits_dir, reports_dir, runs_dir, output_root, transport).tick(now: float) -> None`: discovers, polls
     each running workspace whose next poll is due (3 s; 60 s after a failure, `state` `unreachable`), scans each
-    new run directory whose `report.json` names a scanned workspace once (from the offsets reached, then
+    new run directory whose `report.json` names a scanned workspace once, and only once its `index.md` exists
+    (the archive writes it last; `report.json` comes before the journals and exports,
+    `test_scan_waits_for_index_md`) (from the offsets reached, then
     `state` `stopped`), and writes state and status. `run_forever()` calls `tick` every second.
   - Untrusted output: a line that is not JSON is dropped; at most 200 hits per workspace per poll; `HitsFile`
     at 10 MB stops writing (`state` `capped`); a reader reply that is not the expected shape is a failed poll.
@@ -139,7 +146,7 @@ Decision 1 (nothing on the instance), decision 10 (file modes); ruling 5.
 
 - [ ] **Step 1: Write the failing test** `test_nothing_on_the_instance_changes`: `git diff --name-only
   origin/main...HEAD` lists nothing under `platform/instance/` or `platform/ansible/roles/` (skip when not in a
-  git checkout).
+  git checkout or `origin/main` is missing, as upstream and CI have it).
 - [ ] **Step 2: Write the unit** like `sperange-report.service` (`User=ubuntu`, `Restart=always`,
   `ExecStart=/usr/bin/python3 <checkout>/platform/report/canary_watch.py`), and the README steps.
 - [ ] **Step 3: Run** the report suite. Expected: PASS.

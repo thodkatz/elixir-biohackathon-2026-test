@@ -28,8 +28,11 @@ Decision 2.
   (`[m.span() for m in word(token).finditer(text)]`).
 - Produces, in `canary_record`: `class RecordError(Exception)`; `load_canaries(dir) -> list[dict]`;
   `read_hosts(dir) -> dict`; `_scalar`; bodies verbatim from `handoff.py` with `ConfigError` read as `RecordError`
-  (`load_canaries`'s private `_json` comes along). `handoff.py`: `from canary_record import RecordError as
-  ConfigError, _scalar, load_canaries, read_hosts`, so `ManifestError(ConfigError)` and every caller are unchanged.
+  (`load_canaries`'s private `_json` comes along), and `vm_argv(dir) -> list[str]` (the SSH or local command
+  prefix from `hosts.yml`, verbatim; slice 2's transport uses it). `handoff.py` inserts the same
+  `platform/report` path as `metrics.py` below (it is imported first by `metrics.py`, `controls_provider`,
+  `isolation` and `matrix`), then `from canary_record import RecordError as ConfigError, _json, _scalar,
+  load_canaries, read_hosts, vm_argv`, so `ManifestError(ConfigError)` and every caller are unchanged.
 - `metrics.py` imports by path: `sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "report"))`, then
   `from canarymatch import texts as _texts, found as _found, …`, so its metric bodies stay unchanged.
 
@@ -76,9 +79,11 @@ Decisions 3, 4, 5; clarification 1.
     place at `TOOL_CALL_RESULT` (with the call's name and args), an `answer` place at `TEXT_MESSAGE_END`, a
     `prompt` place at `run_start`, and whatever is still open at `run_end`. `REASONING_*` events are ignored.
     `at` is the line's `at`; `frontend` `agui`; `source` `agui-journal`.
-  - `agent_run_places(record: dict) -> list[Place]`: `prompt` from `input`, `tool_args`/`tool_result` per
-    `tool_calls` item (`id`, `name`, `args`, `result`), `answer` from `answer`; `run` `run_id`, `session`
-    `{"id": thread_id, "title": title}`, `at` `started`; `frontend` `agui`, `source` `agent-runs`.
+  - `agent_run_places(record: dict, titles: dict[str, str]) -> list[Place]`: `prompt` from `input`,
+    `tool_args`/`tool_result` per `tool_calls` item (`id`, `name`, `args`, `result`), `answer` from `answer`;
+    `run` `run_id`, `session` `{"id": thread_id, "title": titles.get(thread_id)}`, `at` `started` (epoch
+    seconds, as ISO 8601 UTC); `frontend` `agui`, `source` `agent-runs`. Records `{"type": "title", "thread_id",
+    "title"}` (`app.py`, `title.py`) give no places: the caller collects them into `titles`.
   - `openwebui_places(chat: dict, source: str) -> list[Place]`, for one item of the export's `chats` or one
     database row (`id`, `title`, `chat` JSON): per assistant message in `chat.history.messages`, `run` = its
     `id`, `at` its `timestamp` (epoch seconds, as ISO 8601 UTC), `prompt` the `content` of its `parentId`
@@ -108,7 +113,11 @@ Decisions 3, 4, 5; clarification 1.
   `test_prefix_token_not_matched` (`FCANARY-TEST011` in a result gives only that canary),
   `test_excerpt_at_most_400` (a 10 000-character result: excerpt ≤ 400, and
   `excerpt.text[start:end] == token`), `test_record_schema` (every key of the spec's record present, `null` where
-  the source lacks it).
+  the source lacks it). And decision 2's acceptance check, in `platform/promptfoo-evals/tests/test_metrics.py`:
+  `test_watcher_agrees_with_metrics`: over one fixture trace (a run with a file canary read by a tool, a metadata
+  canary in a listing, a canary in the answer and one sent to the receiver), the set of (kind, canary type,
+  `file`) from `hits_for` equals the set `canary_answer`, `canary_touched`, `canary_sent` and `canary_delivered`
+  name in their reasons (`seen` has no metric: compare it with `touched`'s metadata exclusion).
 - [ ] **Step 2: Run** `uv run --with pytest --with markdown pytest platform/report/tests/test_canary_hits.py -q`.
   Expected: FAIL (no module).
 - [ ] **Step 3: Implement** `canary_hits.py` to the interfaces above.
@@ -131,13 +140,16 @@ Decision 3 (dedup), decision 5, decision 10 (ids).
   - `class HitsFile`: `__init__(path: str, max_bytes: int = 10_000_000)`; `append(hit: dict) -> int | None`
     (sets `id` to the next line number, starting at 1, writes one JSON line with mode 0640 on create, returns the
     id, `None` once full); `full: bool`; `read(after: int = 0) -> list[dict]`.
-  - `scan_archive(run_dir: str, hits: HitsFile, seen: set[str], meta: dict, api_host: str | None) -> int` in
+  - `scan_archive(run_dir: str, hits: HitsFile, seen: set[str], meta: dict, api_host: str | None,
+    generation: str) -> int` in
     `canary_watch.py`: reads `<run_dir>/canaries.json`, the journals, `agui/agent-runs.jsonl`, and `<run_dir>/openwebui-export.json` (never
     `agui/openwebui-export.json`); stamps `detected`, `workspace`, `instance`, `owner` from `meta`; appends each
     hit whose `dedup_key` is not in `seen`; returns the count. Journals first, so their copy wins.
   - CLI: `canary_watch.py --archive RUN_DIR --out HITS.jsonl [--html PAGE.html] [--api-host HOST]`. `meta` comes
-    from the run's `report.json` (the report sidecar's copy: `workspace`, `owner`, `instance`), else from
-    `run.yml` (`instance`, `participant`), workspace `null`.
+    from the run's `report.json` (the report sidecar's copy: `workspace_id`, the workspace's UUID, as
+    `workspace`; `owner`, `instance`), else from `run.yml` (`instance`, `participant`), workspace `null`. The
+    daemon passes the workspace's generation (slice 2), so the on-stop scan's keys match the live poll's; the
+    CLI passes `"archive"`.
 - The archive does not keep the API host (`run_archive/tasks/write.yml`'s `run_record` has none). The daemon
   passes the workspace's `hosts.yml` `api_host`; by hand it is `--api-host`, else the instance's output
   directory's `hosts.yml` when it still exists, else `None`: then any URL host in a call's arguments counts as
@@ -183,7 +195,7 @@ Decisions 4, 5, 11; *Early output*; ruling 4.
 - [ ] **Step 3: Implement** `hits_view.py` and `hits.css`; wire `--html` in the CLI.
 - [ ] **Step 4: Run** the report suite. Expected: PASS.
 - [ ] **Step 5: Commit** `Hits view: the participant page as static HTML`.
-- [ ] **Step 6: The early output.** Pick archived runs with hits: copy the slice's four modules to a temporary
+- [ ] **Step 6: The early output.** Pick archived runs with hits: copy the slice's five modules and `static/hits.css` to a temporary
   directory on the portal (`ssh agent-service-1 'mktemp -d'`, `scp`), run
   `sudo python3 canary_watch.py --archive /data-share/runs/<run> --out <tmp>/<run>.jsonl --html
   /data-share/canary-hits/early-output/<run>.html` over every run (create the directory as `root:sperange-report`

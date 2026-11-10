@@ -206,3 +206,14 @@ NOW = calendar.timegm(time.strptime("2026-11-10T14:03:10Z", "%Y-%m-%dT%H:%M:%SZ"
 ])
 def test_status_line(status, line):
     assert hits_view.status_line(status, NOW) == line
+
+
+@pytest.mark.parametrize("status, text", [
+    ({"state": "encrypted"}, hits_view.ENCRYPTED_NOTICE),
+    ({"state": "running"}, hits_view.NO_HITS),
+    ({"state": "stopped", "note": "archive incomplete"}, hits_view.NO_HITS),
+    ({}, hits_view.NOT_WATCHED),  # discovered but never polled
+    (None, hits_view.NO_HITS),  # the early output: an archived run, never live
+])
+def test_empty_text(status, text):
+    assert hits_view.empty_text(status) == text

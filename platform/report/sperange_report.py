@@ -58,7 +58,7 @@ import markdown
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from canary_hits import HitsFile  # noqa: E402
-from hits_view import LOUD, hit_html, participant_body, status_line  # noqa: E402
+from hits_view import LOUD, empty_text, hit_html, participant_body, status_line  # noqa: E402
 
 PREFIX = "/reports"
 COOKIE = "coder_session_token"
@@ -72,6 +72,7 @@ STREAM_POLL = 0.5  # seconds between looks at the hits and status files (decisio
 STREAM_READ = 1 << 20  # bytes of the hits file read per look at most (a catch-up takes several)
 STREAM_PING = 15  # seconds with nothing sent before a ": ping" comment (keeps proxies from closing it)
 STREAM_WRITE_TIMEOUT = 30  # seconds a write may block (a client that stops reading); then the stream ends
+STREAM_STATUS_REFRESH = 10  # seconds before an unchanged status is resent, so "watched N s ago" ages live
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 STATIC_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2"}
@@ -550,6 +551,7 @@ class Handler(BaseHTTPRequestHandler):
         caught_up = False  # `start` reached, or clamped to the file's end once the end was read
         in_long_line = False  # inside a line longer than one read, skipped (it still counts as a line)
         status_seen = None  # the status file's (mtime, inode) last sent; None: never sent
+        status_sent = time.monotonic()  # when a status event was last sent; also refreshes it
         ends = time.monotonic() + srv.stream_seconds
         last_sent = time.monotonic()
         while time.monotonic() < ends:
@@ -599,10 +601,14 @@ class Handler(BaseHTTPRequestHandler):
                     stamp = (st.st_mtime_ns, st.st_ino)
                 except OSError:
                     stamp = None
-                if stamp is not None and stamp != status_seen:
-                    status_seen = stamp
-                    line = status_line(self.read_status(wid) or {}, time.time())
-                    out.append("event: status\ndata: " + json.dumps({"line": line}) + "\n\n")
+                now_mono = time.monotonic()
+                # Resent on change, or unchanged past stream_status_refresh: "watched N s ago"
+                # would otherwise freeze once the watcher stops touching the status file.
+                if stamp is not None and (stamp != status_seen or now_mono - status_sent >= srv.stream_status_refresh):
+                    status_seen, status_sent = stamp, now_mono
+                    status = self.read_status(wid) or {}
+                    line = status_line(status, time.time())
+                    out.append("event: status\ndata: " + json.dumps({"line": line, "empty": empty_text(status)}) + "\n\n")
             if not out and time.monotonic() - last_sent >= srv.stream_ping:
                 out.append(": ping\n\n")
             if out:
@@ -766,6 +772,7 @@ def make_server(listen: str, reports_dir: str, coder_url: str, hits_dir: str | N
     srv.stream_max, srv.stream_seconds = STREAM_MAX, STREAM_SECONDS
     srv.stream_poll, srv.stream_ping, srv.stream_read = STREAM_POLL, STREAM_PING, STREAM_READ
     srv.stream_write_timeout = STREAM_WRITE_TIMEOUT
+    srv.stream_status_refresh = STREAM_STATUS_REFRESH
     return srv
 
 

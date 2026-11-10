@@ -493,10 +493,36 @@ def test_status_event(service, streams):
     write_status(hits_dir, WID, {"state": "running", "since": last_poll, "last_poll": last_poll})
     event = s.next(2.0, event="status")
     assert event is not None
-    assert json.loads(event["data"])["line"].startswith("running · watched ")
+    data = json.loads(event["data"])
+    assert data["line"].startswith("running · watched ") and data["empty"] == hits_view.NO_HITS
     write_status(hits_dir, WID, {"state": "stopped", "note": "archive incomplete"})
     event = s.next(2.0, event="status")
-    assert event is not None and json.loads(event["data"]) == {"line": "stopped · archive incomplete"}
+    assert event is not None
+    assert json.loads(event["data"]) == {"line": "stopped · archive incomplete", "empty": hits_view.NO_HITS}
+
+
+def test_status_event_resent_unchanged_past_refresh(server, streams):
+    """A status file that never changes once watched would otherwise leave "watched N s ago"
+    frozen at the age it had when first sent (review round, finding 1): past
+    `stream_status_refresh`, the same file is resent anyway, with a larger age. Collects status
+    events over a window rather than checking only the next one: a `stat` can occasionally report
+    an unchanged file as changed (observed on this filesystem), which would resend early with the
+    same age; the real refresh is the one that eventually shows the age caught up."""
+    base, hits_dir, srv = server
+    srv.stream_status_refresh = 2.0
+    s = streams(base, WID)
+    last_poll = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 10))
+    write_status(hits_dir, WID, {"state": "running", "since": last_poll, "last_poll": last_poll})
+    first = s.next(2.0, event="status")
+    assert first is not None
+    first_age = int(re.search(r"(\d+) s ago", json.loads(first["data"])["line"]).group(1))
+    deadline = time.monotonic() + 8.0
+    last_age = first_age
+    while last_age < first_age + 2 and time.monotonic() < deadline:
+        event = s.next(max(0.1, deadline - time.monotonic()), event="status")
+        assert event is not None, "no further status event before the deadline"
+        last_age = int(re.search(r"(\d+) s ago", json.loads(event["data"])["line"]).group(1))
+    assert last_age >= first_age + 2  # a resend with the age caught up, not just the file unchanged
 
 
 def test_ping_when_idle(server, streams):

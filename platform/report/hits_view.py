@@ -5,8 +5,10 @@ whole, self-contained HTML document (hits.css inlined, no script) for the early 
 its own script (notifications, the event stream) around the same body.
 
 `status` is the watcher's status file (ruling 6: `state`, `since`, `last_poll`, `note`), read by the
-live service; `status_line` turns it into the header's clause ("running · watched 3 s ago"). `None`
-is reserved for the early output, which is never live (`_header`'s "archived run"): the live service
+live service; `status_line` turns it into the header's clause ("running · watched 3 s ago"), and
+`empty_text` into the placeholder text for a hits list with none to show, shared with the live
+service's status event so hits.js can keep a placeholder current without a reload. `None` is
+reserved for the early output, which is never live (`_header`'s "archived run"): the live service
 passes `{}` instead when the workspace has no status file yet, so this one argument cannot be
 confused between the two callers.
 
@@ -176,6 +178,20 @@ def status_line(status: dict | None, now: float) -> str:
     return str(state)
 
 
+def empty_text(status: dict | None) -> str:
+    """The text for a hits list with none to show: `participant_body`'s placeholder, and the
+    status event's `empty` field so hits.js can keep an already-shown placeholder current without
+    a reload. ENCRYPTED_NOTICE when the watcher found the record encrypted; NOT_WATCHED for a
+    workspace discovered but never polled yet (a status dict with no `state`); else NO_HITS (an
+    archived run, or a watched workspace with no hits)."""
+    state = status.get("state") if isinstance(status, dict) else None
+    if state == "encrypted":
+        return ENCRYPTED_NOTICE
+    if isinstance(status, dict) and not state:
+        return NOT_WATCHED
+    return NO_HITS
+
+
 def _header(meta: dict, hits: list[dict], status: dict | None, now: float) -> str:
     label = meta.get("instance") or meta.get("workspace") or "workspace"
     owner = meta.get("owner")
@@ -200,7 +216,6 @@ def participant_body(meta: dict, hits: list[dict], status: dict | None) -> str:
     archived run or a watched one, "Not watched yet." for one with no status yet."""
     now = time.time()
     state = status.get("state") if isinstance(status, dict) else None
-    not_watched_yet = isinstance(status, dict) and not state
     ordered = sorted(hits, key=lambda h: str(h.get("at") or h.get("detected") or ""), reverse=True)
     loud = [h for h in ordered if h.get("kind") in LOUD_KINDS]
     quiet = [h for h in ordered if h.get("kind") not in LOUD_KINDS]
@@ -211,9 +226,10 @@ def participant_body(meta: dict, hits: list[dict], status: dict | None) -> str:
     if state == "encrypted":
         items = f'<p class="muted">{_esc(ENCRYPTED_NOTICE)}</p>'
     elif not items:
-        # "placeholder": the class hits.js removes once a live hit arrives (a hit cannot change
-        # the encrypted notice above, so that one stays plain "muted").
-        items = f'<p class="muted placeholder">{_esc(NOT_WATCHED if not_watched_yet else NO_HITS)}</p>'
+        # "placeholder": the class hits.js removes once a live hit arrives, and whose text a
+        # status event keeps current meanwhile (a hit cannot change the encrypted notice above,
+        # so that one stays plain "muted").
+        items = f'<p class="muted placeholder">{_esc(empty_text(status))}</p>'
     # The two buttons below are static, `hidden` until hits.js (slice 3) removes the attribute:
     # with no script (the standalone early output), they stay invisible. hits.js builds no HTML
     # of its own but these two, with document.createElement + textContent, so they are rendered

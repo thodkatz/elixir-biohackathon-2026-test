@@ -1,8 +1,8 @@
 // The canary hits participant page (spec *Participant page*; decisions 6, 10; plan ruling 8):
 // opens the event stream the service renders (GET /reports/<id>/hits/events), inserts each new
 // hit's server-rendered HTML (hits_view.hit_html, carried on the event: ruling 8 - one renderer,
-// so this script holds no template to drift from it), keeps the headline counts and the status
-// line live, and offers "Notify me" and "Group by run". No inline script (CSP: script-src
+// so this script holds no template to drift from it), keeps the headline counts, the status line
+// and an empty placeholder's text live, and offers "Notify me" and "Group by run". No inline script (CSP: script-src
 // 'self'): everything here is this file, loaded with <script src>.
 (function () {
   "use strict";
@@ -57,11 +57,17 @@
     addHit(data);
   });
   es.addEventListener("status", function (ev) {
-    if (!statusEl) return;
+    var data;
     try {
-      statusEl.textContent = JSON.parse(ev.data).line;
+      data = JSON.parse(ev.data);
     } catch (e) {
-      // a malformed status event leaves the line as it was
+      return; // a malformed status event leaves the line and placeholder as they were
+    }
+    if (statusEl) statusEl.textContent = data.line;
+    if (typeof data.empty === "string") {
+      // No placeholder (the encrypted notice, or a hit already shown): nothing to update.
+      var p = list.querySelector(":scope > p.placeholder");
+      if (p) p.textContent = data.empty;
     }
   });
   // No onerror handling that closes the stream: EventSource reconnects on its own, with

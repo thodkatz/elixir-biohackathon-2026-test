@@ -155,8 +155,10 @@ spe_eval_dir: "/home/{{ spe_ssh_user }}/spe-eval"
 # checksum-verified against its own published SHASUMS256.txt, and uv (Astral's release binary),
 # checksum-verified against its own .sha256 file. Bump either version freely (Node upward only,
 # staying at or above package-lock.json's floor); a wrong one fails loudly at download time (role
-# spe_eval), caught by the real check on de.NBI (task 7), never silently.
-spe_eval_node_version: "22.22.0"
+# spe_eval), caught by the real check on de.NBI (task 7), never silently. Node 24 for its npm 11:
+# package-lock.json is written by npm 11, and npm 10 (Node 22) refuses it in `npm ci` ("Missing:
+# gcp-metadata@7.0.1 from lock file"), so the pin follows the npm that writes the lock.
+spe_eval_node_version: "24.21.0"
 spe_eval_uv_version: "0.5.11"
 
 # --- test receiver (spec part 04, *The test receiver*; on in every instances/L<n>.example.yml) --

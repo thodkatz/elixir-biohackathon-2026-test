@@ -812,10 +812,23 @@ def test_unreadable_source_skipped(tmp_path, caplog):
     shutil.copytree(RUN, run)
     (run / "agui" / "agent-runs.jsonl").unlink()
     (run / "agui" / "agent-runs.jsonl").mkdir()
-    (run / "agui" / "agui-journals" / "broken.jsonl").mkdir()
+    (run / "agui" / "agui-journals" / "bbbbbbbb-1111-4222-8333-444444444444.jsonl").mkdir()
     hits, count = scan(tmp_path, run=run)
     assert count > 0 and _keys(hits.read()) == R1_KEYS
     assert WORKSPACE in caplog.text and "agent-runs.jsonl" in caplog.text
+    assert "cannot read a journal" in caplog.text and "bbbbbbbb" not in caplog.text  # never a journal's name
+
+
+def test_archive_journal_not_a_session_id_skipped(tmp_path):
+    """The archive scan reads only <session id>.jsonl as a journal, as polling does: another name is skipped."""
+    run = tmp_path / "run"
+    shutil.copytree(RUN, run)
+    journals = run / "agui" / "agui-journals"
+    (journals / f"{SESSION}.jsonl").rename(journals / "notes.jsonl")
+    hits, _ = scan(tmp_path, run=run)
+    records = hits.read()
+    assert records and not [h for h in records if h["source"] == "agui-journal"]
+    assert {h["source"] for h in records if h["run"] == "r1"} == {"agent-runs"}  # the run log's copy only
 
 
 # Lines that parse but whose fields have the wrong type, or that nest too deep to parse: each once made the
@@ -1070,3 +1083,128 @@ def test_nothing_on_the_instance_changes():
     changed = [line for line in diff.stdout.splitlines() if line]
     touched = [line for line in changed if line.startswith(("platform/instance/", "platform/ansible/roles/"))]
     assert touched == []
+
+
+# --- the local review round (#78): write failures, a stop missed across a rebuild, a rebuild between
+# discoveries, a stop whose archive never finishes ---
+
+def _failing_append(monkeypatch, after: int) -> dict:
+    """HitsFile.append raises OSError once `after` hits have been written, until `box["fail"]` is False."""
+    real, box = canary_hits.HitsFile.append, {"fail": True, "written": 0}
+
+    def append(self, hit):
+        if box["fail"] and box["written"] >= after:
+            raise OSError(28, "No space left on device")
+        box["written"] += 1
+        return real(self, hit)
+
+    monkeypatch.setattr(canary_hits.HitsFile, "append", append)
+    return box
+
+
+def test_hits_write_failure_fails_the_poll(tmp_path, monkeypatch, caplog):
+    """An OSError writing the hits file is a failed poll, not a dropped line: the offsets stay, and the hits
+    come out once (no more, no fewer) when the write works again."""
+    caplog.set_level(logging.INFO)
+    fake = Fake(tmp_path)
+    fake.write_journal(JOURNAL)
+    box = _failing_append(monkeypatch, after=2)
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    assert len(fake.hits()) == 2
+    assert fake.status()["state"] == "unreachable"
+    assert fake.state()["offsets"]["journals"] == {}  # not advanced past the lines whose hits were lost
+    assert "poll failed (OSError)" in caplog.text and "dropped" not in caplog.text
+    box["fail"] = False
+    watcher.tick(1000.0 + canary_watch.BACKOFF)
+    assert _keys(fake.hits()) == R1_KEYS
+    assert fake.status()["state"] == "running"
+    assert fake.state()["offsets"]["journals"][SESSION] == fake.journal.stat().st_size
+
+
+def test_archive_write_failure_is_retried(tmp_path, monkeypatch, caplog):
+    """An OSError writing an archived run's hits leaves the run unscanned (the workspace not yet stopped),
+    tried again after BACKOFF; its hits then come out once."""
+    caplog.set_level(logging.INFO)
+    fake = Fake(tmp_path)
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    run = fake.archive(JOURNAL)
+    box = _failing_append(monkeypatch, after=1)
+    watcher.tick(1003.0)
+    assert fake.state()["archived"] == [] and len(fake.hits()) == 1
+    assert fake.status()["state"] != "stopped"
+    assert f"{WORKSPACE}: archived run scan failed (OSError), again in 60 s" in caplog.text
+    box["fail"] = False
+    watcher.tick(1004.0)  # not yet: BACKOFF
+    assert fake.state()["archived"] == []
+    watcher.tick(1003.0 + canary_watch.BACKOFF)
+    assert fake.state()["archived"] == [run.name]
+    assert _keys(fake.hits()) == R1_KEYS
+    assert fake.status()["state"] == "stopped"
+
+
+def _rebuild(fake: Fake, later: float) -> None:
+    hosts = fake.out / "hosts.yml"
+    hosts.write_text(hosts.read_text())
+    os.utime(hosts, (later, later))
+
+
+def test_stop_and_rebuild_while_down_scanned_under_the_old_generation(tmp_path):
+    """The watcher down across a stop and a rebuild: the stop's run directory is scanned with the last
+    generation's keys before they are cleared, so what polling wrote is not written again."""
+    fake = Fake(tmp_path)
+    end_call1 = _index("TOOL_CALL_END", "call1")
+    fake.write_journal(JOURNAL[:end_call1 + 1])
+    fake.watcher().tick(1000.0)
+    live = fake.hits()
+    assert len(live) == 2
+    generation = fake.state()["generation"]
+    run = fake.archive(JOURNAL)  # the stop, then the rebuild: hosts.yml newer than the run directory
+    _rebuild(fake, time.time() + 200)
+    fake.write_journal([], mode="w")
+    fake.watcher().tick(1003.0)  # the restart
+    hits = fake.hits()
+    assert _keys(hits) == R1_KEYS and hits[:2] == live
+    state = fake.state()
+    assert state["archived"] == [run.name]
+    assert state["generation"] != generation and state["generation_start"] == len(R1_KEYS)
+    assert fake.status()["state"] == "running"
+
+
+def test_rebuild_between_discoveries_not_polled_under_the_stale_generation(tmp_path):
+    """hosts.yml rewritten while discovery is throttled: that workspace is not polled under its stale
+    generation; the next tick discovers again, and the rebuilt instance's hits are written once."""
+    fake = Fake(tmp_path)
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    assert fake.hits() == []
+    _rebuild(fake, time.time() + 50)
+    fake.write_journal(JOURNAL)
+    watcher.tick(1003.0)
+    assert len(fake.transport.calls) == 1  # not polled: its generation is stale
+    watcher.tick(1004.0)  # discovered again
+    assert len(fake.transport.calls) == 2
+    assert _keys(fake.hits()) == R1_KEYS
+    for now in (1007.0, 1010.0, 1004.0 + canary_watch.DISCOVER_EVERY):
+        watcher.tick(now)
+    assert len(fake.hits()) == len(R1_KEYS)
+
+
+def test_archive_without_index_md_scanned_after_a_while(tmp_path):
+    """A stop whose archive never writes index.md: ARCHIVE_WAIT seconds past its run directory's mtime it is
+    scanned as it is, and the workspace is stopped, noted "archive incomplete" (kept over a restart)."""
+    fake = Fake(tmp_path)
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    run = fake.archive(JOURNAL, index=False)
+    mtime = run.stat().st_mtime
+    watcher.tick(mtime + 10)
+    assert fake.state()["archived"] == [] and fake.status()["state"] == "running"
+    watcher.tick(mtime + canary_watch.ARCHIVE_WAIT + 1)
+    assert fake.state()["archived"] == [run.name]
+    assert _keys(fake.hits()) == R1_KEYS
+    status = fake.status()
+    assert status["state"] == "stopped" and status["note"] == "archive incomplete"
+    fake.watcher().tick(mtime + canary_watch.ARCHIVE_WAIT + 5)
+    assert fake.status()["note"] == "archive incomplete" and len(fake.hits()) == len(R1_KEYS)

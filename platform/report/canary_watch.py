@@ -32,8 +32,9 @@ zero offsets, through the real SshTransport, appending new hits to --out. It wri
 the hits directory or /data-share (no state file, no status file): the daemon never scans without a
 report sidecar, and this never stands in for it.
 
-Logs carry workspace ids, paths, counts and error classes only, never a canary value, an excerpt, a line
-of a source or a path under sensitive/ (decision 10).
+The daemon's logs carry workspace ids, counts and error classes only, never a canary value, an excerpt, a
+line of a source, a file or run directory name (a journal's, an instance's, is the participant's) or a path
+under sensitive/ (decision 10).
 
 Standard library only: the portal runs this from its repository checkout with the system Python.
 """
@@ -80,11 +81,11 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _jsonl(path: Path, who: str | None = None):
+def _jsonl(path: Path, who: str | None = None, kind: str = "a source"):
     """The parsed lines of a JSON Lines file; lines that do not parse (or nest too deep to) are dropped
-    (untrusted input). A file
-    that cannot be read (a PermissionError, a directory in its place) is skipped and logged under `who`
-    (the workspace id), by its name only: one bad source never ends a scan or the daemon."""
+    (untrusted input). A file that cannot be read (a PermissionError, a directory in its place) is skipped
+    and logged under `who` (the workspace id) by `kind`, a fixed label, never the file's name (a journal's
+    is the participant's): one bad source never ends a scan or the daemon."""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -95,7 +96,7 @@ def _jsonl(path: Path, who: str | None = None):
     except FileNotFoundError:
         return
     except OSError as e:
-        logger.warning("%s: cannot read %s (%s), skipping it", who, path.name, type(e).__name__)
+        logger.warning("%s: cannot read %s (%s), skipping it", who, kind, type(e).__name__)
 
 
 def _archive_places(run_dir: Path, who: str | None = None) -> list[Place]:
@@ -103,14 +104,16 @@ def _archive_places(run_dir: Path, who: str | None = None) -> list[Place]:
     the agent's: untrusted) that still makes a source's parser raise is skipped, so the rest still count."""
     places: list[Place] = []
     dropped = 0
-    for journal in sorted((run_dir / "agui" / "agui-journals").glob("*.jsonl")):
+    # Only <session id>.jsonl, as polling and the chat app read them: any other name is not a journal.
+    journals = [j for j in (run_dir / "agui" / "agui-journals").glob("*.jsonl") if SESSION_ID.fullmatch(j.stem)]
+    for journal in sorted(journals):
         reader = JournalReader(journal.stem)
-        for line in _jsonl(journal, who):
+        for line in _jsonl(journal, who, "a journal"):
             try:
                 places += reader.feed(line)
             except Exception:
                 dropped += 1
-    records = list(_jsonl(run_dir / "agui" / "agent-runs.jsonl", who))
+    records = list(_jsonl(run_dir / "agui" / "agent-runs.jsonl", who, "agent-runs.jsonl"))
     titles = {r["thread_id"]: r["title"] for r in records
               if isinstance(r, dict) and r.get("type") == "title" and isinstance(r.get("thread_id"), str)
               and isinstance(r.get("title"), str)}
@@ -249,7 +252,8 @@ class Workspace:
     running*): a report sidecar naming an instance whose output directory has a readable
     hosts.yml. `generation` changes with every rewrite of hosts.yml (a fresh instance); `running`
     while hosts.yml is newer than every archive directory of this instance; `encrypted` when the
-    canary record is age-encrypted only (still returned, so its status can say so)."""
+    canary record is age-encrypted only (still returned, so its status can say so); `hosts_mtime_ns`
+    the mtime of hosts.yml the generation was taken at (None: not checked)."""
     id: str
     owner: str | None
     instance: str
@@ -259,6 +263,7 @@ class Workspace:
     generation: str
     running: bool
     encrypted: bool
+    hosts_mtime_ns: int | None = None
 
 
 def _is_uuid(stem: str) -> bool:
@@ -318,12 +323,18 @@ def _record_status(output_dir: Path) -> tuple[bool, bool]:
     return True, False
 
 
-def _generation(hosts_path: Path) -> str:
+def _generation_at(hosts_path: Path) -> tuple[str, int]:
     """SHA-256 of hosts.yml's bytes and mtime: a rewrite with identical content still starts a
-    new generation, since its mtime changed (spec *Watcher*, *Which are running*)."""
+    new generation, since its mtime changed (spec *Watcher*, *Which are running*); and that mtime
+    (ns), which the watcher compares every tick to see a rewrite between discoveries."""
+    mtime_ns = hosts_path.stat().st_mtime_ns
     digest = hashlib.sha256(hosts_path.read_bytes())
-    digest.update(str(hosts_path.stat().st_mtime_ns).encode())
-    return digest.hexdigest()
+    digest.update(str(mtime_ns).encode())
+    return digest.hexdigest(), mtime_ns
+
+
+def _generation(hosts_path: Path) -> str:
+    return _generation_at(hosts_path)[0]
 
 
 def _is_running(hosts_path: Path, runs_dir: Path, instance: str) -> bool:
@@ -357,7 +368,8 @@ def discover(reports_dir: str, output_root: str, runs_dir: str) -> list[Workspac
         try:
             hosts = read_hosts(output_dir)
         except RecordError as e:
-            logger.warning("%s: %s, skipping", workspace_id, e)
+            # The class only: its message can name the output directory's path (the instance's name).
+            logger.warning("%s: hosts.yml unusable (%s), skipping", workspace_id, type(e).__name__)
             continue
         usable, encrypted = _record_status(output_dir)
         if not usable:
@@ -371,6 +383,7 @@ def discover(reports_dir: str, output_root: str, runs_dir: str) -> list[Workspac
                       if isinstance(v, str) and v), None),
             key=hosts.get("ssh_key") if isinstance(hosts.get("ssh_key"), str) else None,
         )
+        generation, mtime_ns = _generation_at(output_dir / "hosts.yml")
         workspaces.append(Workspace(
             id=workspace_id,
             owner=owner,
@@ -378,9 +391,10 @@ def discover(reports_dir: str, output_root: str, runs_dir: str) -> list[Workspac
             output_dir=str(output_dir),
             api_host=api_host,
             ssh=ssh,
-            generation=_generation(output_dir / "hosts.yml"),
+            generation=generation,
             running=_is_running(output_dir / "hosts.yml", runs_path, instance),
             encrypted=encrypted,
+            hosts_mtime_ns=mtime_ns,
         ))
     return workspaces
 
@@ -403,16 +417,18 @@ def once_workspace(output_dir: str) -> Workspace:
                   if isinstance(v, str) and v), None),
         key=hosts.get("ssh_key") if isinstance(hosts.get("ssh_key"), str) else None,
     )
+    generation, mtime_ns = _generation_at(directory / "hosts.yml")
     return Workspace(id="once", owner=None, instance=directory.name, output_dir=str(directory),
-                     api_host=api_host, ssh=ssh, generation=_generation(directory / "hosts.yml"),
-                     running=True, encrypted=encrypted)
+                     api_host=api_host, ssh=ssh, generation=generation, running=True, encrypted=encrypted,
+                     hosts_mtime_ns=mtime_ns)
 
 
 # The daemon (spec *Watcher*, *How it pulls*, *Reader output is untrusted*, *On stop*)
 
 POLL_EVERY = 3.0  # seconds between polls of a running workspace
 DISCOVER_EVERY = 15.0  # seconds between discoveries (sidecars, hosts.yml, canaries.json, all over NFS)
-BACKOFF = 60.0  # seconds after a failed poll
+BACKOFF = 60.0  # seconds after a failed poll, or a failed write of an archived run's hits
+ARCHIVE_WAIT = 600.0  # seconds past a stop's run directory's mtime before it is scanned without its index.md
 POLL_TIMEOUT = 30  # seconds for one reader call
 REPLY_MAX = 32 << 20  # bytes of reader reply read; past it the poll fails
 HITS_PER_POLL = 200
@@ -657,40 +673,57 @@ def _load_state(data: object) -> tuple[dict, set[str]]:
 def _apply(w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: float) -> tuple[int, int, int]:
     """Match one reply's lines and rows, append their new hits; (hits added, lines dropped, hits over
     the per-poll limit). Offsets, run starts and titles are committed only once the whole reply is in.
-    Module-level (not Watcher's) so --once can call it on a one-shot `_Watched` with no Watcher."""
+    Only parsing and matching a line or row is guarded: an OSError writing the hits file raises out of
+    here, so the poll fails and its offsets are not committed (the re-read is deduplicated by `seen`,
+    which gets a key only once its hit is written). Module-level (not Watcher's) so --once can call it on
+    a one-shot `_Watched` with no Watcher."""
     state = copy.deepcopy({k: w.state[k] for k in ("offsets", "run_starts", "titles", "journal_titles")})
     offsets, run_starts = state["offsets"], state["run_starts"]
     tally = {"added": 0, "dropped": 0, "over": 0}
     detected = _iso(now)
 
-    def record(places: list[Place]) -> None:
+    def match(places: list[Place]) -> tuple[list[dict], bool]:
+        """The hits of these places; and whether one place's matching raised (the others still count)."""
+        found, bad = [], False
         for place in places:
-            for found in hits_for(place, canaries, w.ws.api_host):
-                hit = {"id": None, "detected": detected, "workspace": w.ws.id, "instance": w.ws.instance,
-                       "owner": w.ws.owner, **found}
-                if hit["at"] is None and hit["source"] == "receiver":
-                    hit["at"] = detected  # the receiver's log has no time: when it was read
-                key = dedup_key(hit, w.ws.generation)
-                if key in w.seen or w.hits.full:
-                    continue
-                if tally["added"] >= HITS_PER_POLL:
-                    tally["over"] += 1
-                    continue
-                if w.hits.append(hit) is None:
-                    continue
-                w.seen.add(key)
-                w.kinds[hit["kind"]] += 1
-                tally["added"] += 1
+            try:
+                found += hits_for(place, canaries, w.ws.api_host)
+            except Exception:
+                bad = True
+        return found, bad
+
+    def record(found_hits: list[dict]) -> None:
+        """Append the new ones. Not guarded: an OSError here fails the poll."""
+        for found in found_hits:
+            hit = {"id": None, "detected": detected, "workspace": w.ws.id, "instance": w.ws.instance,
+                   "owner": w.ws.owner, **found}
+            if hit["at"] is None and hit["source"] == "receiver":
+                hit["at"] = detected  # the receiver's log has no time: when it was read
+            key = dedup_key(hit, w.ws.generation)
+            if key in w.seen or w.hits.full:
+                continue
+            if tally["added"] >= HITS_PER_POLL:
+                tally["over"] += 1
+                continue
+            if w.hits.append(hit) is None:
+                continue
+            w.seen.add(key)
+            w.kinds[hit["kind"]] += 1
+            tally["added"] += 1
 
     def each(entry: dict, handle) -> None:
-        """handle(parsed line, its start) per line. A line is the participant's or the agent's: one that does
-        not parse, nests too deep, or has a field of the wrong type is dropped, never the poll (which would
-        then fail on it every time, its offsets never advancing past it)."""
+        """handle(parsed line, its start) -> its places, per line. A line is the participant's or the agent's:
+        one that does not parse, nests too deep, or has a field of the wrong type is dropped, never the poll
+        (which would then fail on it every time, its offsets never advancing past it)."""
         for line, start in zip(entry["lines"], entry["line_starts"]):
             try:
-                handle(json.loads(line), start)
+                places = handle(json.loads(line), start)
             except Exception:
                 tally["dropped"] += 1
+                continue
+            found, bad = match(places)
+            tally["dropped"] += bad
+            record(found)
 
     files = reply["files"]
     for key in sorted(k for k in files if k.startswith("journal:")):  # journals first: their copy wins
@@ -705,7 +738,8 @@ def _apply(w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: floa
             reader = w.readers[session] = JournalReader(session)
             reader.title = state["journal_titles"].get(session)
 
-        def journal_line(line: object, start: int, session: str = session, reader: JournalReader = reader) -> None:
+        def journal_line(line: object, start: int, session: str = session,
+                         reader: JournalReader = reader) -> list[Place]:
             places = reader.feed(line)
             kind = line.get("type") if isinstance(line, dict) else None
             run_id = line.get("run_id") if isinstance(line, dict) else None
@@ -714,22 +748,21 @@ def _apply(w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: floa
                 run_starts[session] = start  # the earliest open run: re-read from here after a restart
             elif kind == "run_end" and not reader.runs:
                 run_starts.pop(session, None)
-            record(places)
+            return places
 
         each(entry, journal_line)
         if reader.title is not None and state["journal_titles"].get(session) != reader.title:
             _bounded(state["journal_titles"], session, reader.title)
         offsets["journals"][session] = entry["end"]
-    def run_log_line(line: object, _start: int) -> None:
+    def run_log_line(line: object, _start: int) -> list[Place]:
         if isinstance(line, dict) and line.get("type") == "title":
             if isinstance(line.get("thread_id"), str) and isinstance(line.get("title"), str):
                 _bounded(state["titles"], line["thread_id"], line["title"])
-            return
-        record(agent_run_places(line, state["titles"]))
+            return []
+        return agent_run_places(line, state["titles"])
 
-    def receiver_line(line: object, _start: int) -> None:
-        if isinstance(line, dict):
-            record(receiver_places(line))
+    def receiver_line(line: object, _start: int) -> list[Place]:
+        return receiver_places(line) if isinstance(line, dict) else []
 
     if "agent_runs" in files:
         each(files["agent_runs"], run_log_line)
@@ -740,9 +773,13 @@ def _apply(w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: floa
     if reply["openwebui"] is not None:
         for row in reply["openwebui"]["rows"]:
             try:
-                record(openwebui_places(row, "openwebui-db"))  # `chat` is the row's JSON text, parsed there
+                places = openwebui_places(row, "openwebui-db")  # `chat` is the row's JSON text, parsed there
             except Exception:  # a row of the wrong shape, like a line: dropped, never the poll
                 tally["dropped"] += 1
+                continue
+            found, bad = match(places)
+            tally["dropped"] += bad
+            record(found)
         offsets["openwebui"] = reply["openwebui"]["max"]
     if tally["added"] or any(w.state[k] != v for k, v in state.items()):
         w.state.update(state)
@@ -765,13 +802,17 @@ class _Watched:
     status_text: str = ""
     foreign: set[str] | None = None
     errors_seen: int = 0
+    scan_retry: float = 0.0  # no archived run is scanned before this (a write of its hits failed)
+    stop_note: str | None = None  # the stopped status's note ("archive incomplete")
 
 
 class Watcher:
     """The daemon's loop body: `tick(now)` discovers the workspaces (at most every `discover_every`
     seconds; in between it keeps the last list), polls each running one whose poll is due, scans each new
     archived run of a workspace once, and writes the state and status files. A stop is still seen on the
-    tick its run directory appears: the scan of runs_dir, every tick, marks the workspace stopped."""
+    tick its run directory appears: the scan of runs_dir, every tick, marks the workspace stopped. A
+    hosts.yml rewritten between discoveries (its mtime, statted every tick, is not the one discovered) is
+    not polled under its stale generation: that workspace waits, and the next tick discovers again."""
 
     def __init__(self, hits_dir: str, reports_dir: str, runs_dir: str, output_root: str, transport: Transport,
                  hits_max: int = HITS_FILE_MAX, discover_every: float = DISCOVER_EVERY):
@@ -839,7 +880,7 @@ class Watcher:
         status = {"state": status.get("state"), "since": status.get("since"), "last_poll": status.get("last_poll"),
                   "hits": dict(kinds), "note": status.get("note")}
         return _Watched(ws=ws, state=state, seen=seen, hits=hits, kinds=kinds, status=status, readers={},
-                        foreign=set())
+                        foreign=set(), stop_note=status["note"] if status["state"] == "stopped" else None)
 
     def _save(self, w: _Watched) -> None:
         if w.dirty:
@@ -865,28 +906,47 @@ class Watcher:
             self._set_state(w, "encrypted", now, "canary record is encrypted")
             self._save(w)
             return
+        try:
+            hosts = (Path(ws.output_dir) / "hosts.yml").stat()
+        except OSError:
+            hosts = None
+        if hosts is not None and ws.hosts_mtime_ns is not None and hosts.st_mtime_ns != ws.hosts_mtime_ns:
+            # Rewritten since discovery: its generation is stale, so nothing is polled or scanned under it.
+            self.discovered = None  # discover again on the next tick
+            self._save(w)
+            return
         if w.state["generation"] != ws.generation:  # a fresh instance: every offset starts again from 0
+            # The last generation's runs first, with its own dedup keys: a stop the watcher was down for is
+            # scanned before `seen` is cleared, so what polling already wrote is not written again.
+            if (w.state["generation"] is not None and hosts is not None
+                    and self._scan_runs(w, now, hosts.st_mtime, w.state["generation"], past=True)):
+                self._save(w)  # one is left to scan (its write failed): the reset waits for it
+                return
             w.state = _fresh_state(ws.generation, w.hits.count) | {"archived": w.state["archived"]}
-            w.seen, w.readers, w.dirty = set(), {}, True
-        pending = self._scan_runs(w, now)
+            w.seen, w.readers, w.dirty, w.stop_note = set(), {}, True, None
+        pending = self._scan_runs(w, now, hosts.st_mtime, ws.generation) if hosts is not None else False
         if w.hits.full:
             self._set_state(w, "capped", now, "hits file full")
         elif ws.running:
             if now >= w.next_poll:
                 self._poll(w, now)
         elif not pending:
-            self._set_state(w, "stopped", now)
+            self._set_state(w, "stopped", now, w.stop_note)
         self._save(w)
 
-    def _scan_runs(self, w: _Watched, now: float) -> bool:
+    def _scan_runs(self, w: _Watched, now: float, hosts_mtime: float, generation: str, past: bool = False) -> bool:
         """Scan each archived run of this workspace not yet scanned, once its index.md (written last)
-        exists, over the whole directory with this workspace's dedup keys: what polling already found is
-        not written again. True while this stop's run directory is still being written. A new run
-        directory of this workspace newer than hosts.yml is its stop: `w.ws.running` turns false here,
-        without waiting for the next discovery (which says the same)."""
+        exists, over the whole directory with `generation`'s dedup keys (`w.seen`): what polling already
+        found is not written again. A stop's run directory still without index.md ARCHIVE_WAIT seconds past
+        its mtime is scanned as it is, the stop then noted "archive incomplete". A new run directory of this
+        workspace newer than hosts.yml is its stop: `w.ws.running` turns false here, without waiting for the
+        next discovery (which says the same). An OSError writing the hits leaves the run unscanned, retried
+        after BACKOFF seconds. True while a stop's run directory is still to scan.
+
+        `past`: only the run directories older than hosts.yml (the last generation's, before its reset),
+        index.md or not (the rebuild that followed means its archive is done); `ws.running` untouched."""
         ws, suffix = w.ws, f"_{w.ws.instance}"
         try:
-            hosts_mtime = (Path(ws.output_dir) / "hosts.yml").stat().st_mtime
             entries = sorted(e for e in self.runs_dir.iterdir() if e.name.endswith(suffix))
         except OSError:
             return False
@@ -894,36 +954,51 @@ class Watcher:
         for entry in entries:
             if entry.name in w.state["archived"] or entry.name in w.foreign or not entry.is_dir():
                 continue
-            if not (entry / "index.md").exists():
-                try:
-                    if entry.stat().st_mtime >= hosts_mtime:
-                        pending = True
-                        ws.running = False
-                except OSError:
-                    pass
+            try:
+                mtime = entry.stat().st_mtime
+            except OSError:
                 continue
+            stop = mtime >= hosts_mtime  # this generation's stop
+            if past and stop:
+                continue
+            incomplete = not (entry / "index.md").exists()
+            if incomplete and not past:
+                if not stop:
+                    continue  # an older run's directory, never finished: not this stop
+                ws.running = False
+                if now - mtime < ARCHIVE_WAIT:
+                    pending = True
+                    continue
             if archive_meta(str(entry)).get("workspace") != ws.id:
                 w.foreign.add(entry.name)  # the same instance name, another workspace
                 continue
-            try:
-                if entry.stat().st_mtime >= hosts_mtime:
-                    ws.running = False
-            except OSError:
-                pass
+            if stop:
+                ws.running = False
+            if now < w.scan_retry:
+                pending = True
+                continue
             before = w.hits.count
             meta = {"workspace": ws.id, "instance": ws.instance, "owner": ws.owner}
             try:
-                count = scan_archive(str(entry), w.hits, w.seen, meta, ws.api_host, ws.generation)
-            except RecordError as e:
-                logger.warning("%s: archived run %s not scanned: %s", ws.id, entry.name, e)
+                count = scan_archive(str(entry), w.hits, w.seen, meta, ws.api_host, generation)
+            except RecordError as e:  # the class only: its message can name the run's path
+                logger.warning("%s: archived run not scanned (%s)", ws.id, type(e).__name__)
                 count = 0
+            except OSError as e:  # writing its hits: not marked scanned, tried again (`seen` keeps what was written)
+                w.kinds.update(h["kind"] for h in w.hits.read(after=before) if isinstance(h.get("kind"), str))
+                w.scan_retry, pending = now + BACKOFF, True
+                logger.warning("%s: archived run scan failed (%s), again in %d s", ws.id, type(e).__name__, BACKOFF)
+                continue
             except Exception as e:  # untrusted content: marked scanned all the same, never rescanned every tick
                 logger.warning("%s: archived run scan failed (%s)", ws.id, type(e).__name__)
                 count = w.hits.count - before
             w.kinds.update(h["kind"] for h in w.hits.read(after=before) if isinstance(h.get("kind"), str))
             w.state["archived"].append(entry.name)
             w.dirty = True
-            logger.info("%s: %d new hits from archived run %s", ws.id, count, entry.name)
+            if not past:
+                w.stop_note = "archive incomplete" if incomplete else None
+            logger.info("%s: %d new hits from archived run%s", ws.id, count,
+                        " (incomplete: no index.md)" if incomplete else "")
         return pending
 
     def _offsets(self, w: _Watched) -> dict:
@@ -945,8 +1020,9 @@ class Watcher:
             w.readers = {}  # half-fed: re-read from the committed offsets and run starts
             w.next_poll = now + BACKOFF
             self._set_state(w, "unreachable", now)
-            # Only our own messages: another exception's could quote the reply (int('<token>') would).
-            reason = str(e) if isinstance(e, (PollError, RecordError, OffsetsError)) else type(e).__name__
+            # Only our own messages: another exception's could quote the reply (int('<token>') would), and a
+            # RecordError's can name the output directory's path (the instance's name).
+            reason = str(e) if isinstance(e, (PollError, OffsetsError)) else type(e).__name__
             logger.warning("%s: poll failed (%s), next in %d s", w.ws.id, reason, BACKOFF)
             return
         w.next_poll = now + POLL_EVERY

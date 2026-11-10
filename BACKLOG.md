@@ -12,8 +12,9 @@ start reads this section; keep it short.
 
 <!-- - <item> — from <investigation / review / handoff>; <waits on the user: what> | <due: why soon>. -->
 - Open the upstream PR for `contrib/canary-hit-viewer` from the compare link in fork issue #82 (title and body
-  there), then close the issue; once it has a number, the ledger lines for #77–#81 in `docs/upstream-ports.md`
-  and its *Current work* line (`docs/guides/contributing-upstream.md`, step 6) — from the canary hit viewer slice
+  there), then close the issue; once it has a number, the ledger lines in `docs/upstream-ports.md` for `dc64a92`
+  (#74, the spec) and #77–#81 (#77's noting that its `promptfoo-evals` and `test_airlock.py` changes go up with the
+  ladder's port), and its *Current work* line (`docs/guides/contributing-upstream.md`, step 6) — from the canary hit viewer slice
   5; waits on the user: opening it.
 
 - AG-UI chat: does a reply that finished while away need a mark of its own, and should the open row show its running

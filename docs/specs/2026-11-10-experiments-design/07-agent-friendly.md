@@ -30,7 +30,7 @@ hand, `run` to measure both arms, `results` to read them. The workspace guide's 
 
 | Step | Command | For an agent |
 |---|---|---|
-| Start | `spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--from <experiment>]` | writes the skeleton: `experiments/<name>.yml`, `mitigations/<name>.yml` with a `spe_mitigate_<name>` switch, its default in `group_vars`, `tests/experiments/<name>.yaml` with one labelled test, and threat or path files from their templates when the ids are new; prints each path and the `TODO`s to fill |
+| Start | `spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--injection <surface>] [--from <experiment>]` | writes the skeleton: `experiments/<name>.yml`, `mitigations/<name>.yml` with a `spe_mitigate_<name>` switch, its default in `group_vars`, with `--injection` a `fixtures.json` entry, a payload file and a `spe_inject_<name>` switch defaulting to `false` (01, *Attacks*), `tests/experiments/<name>.yaml` with one labelled test, and threat or path files from their templates when the ids are new; prints each path and the `TODO`s to fill |
 | Check | `check_experiment.py <name> [--json]` | each problem as `file:line: id: what is wrong: what to do`; `--json` the same as a list |
 | Test offline | `spe-eval test` | the offline checks, no instance and no model: the evaluations' unit tests (`pytest` in `platform/promptfoo-evals`, which lint the catalogue and every assertion a test names) and the checker; seconds, so an agent runs it after every edit |
 | Try | `spe-eval arm [<name>] baseline\|mitigated` | applies one arm and exits when the stack answers |

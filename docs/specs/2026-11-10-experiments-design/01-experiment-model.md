@@ -1,19 +1,23 @@
 # The experiment model
 
-An experiment ties four kinds of thing together. Three are descriptions, one file each, beside each other at the
-repository root; the fourth, tests, stays where the suites are. An experiment file names them.
+An experiment ties five kinds of thing together. Three are descriptions, one file each, beside each other at the
+repository root; injections stay in the injection catalogue and tests where the suites are. An experiment file
+names them.
 
 | Kind | Where | Id | Exists today |
 |---|---|---|---|
 | Threat | `threats/TM-NNN-<slug>.md` | `TM-NNN` | yes (TM-001 … TM-005), checked by `validate.py` |
 | Path | `paths/P<n>-<slug>.md` | `P<n>` | no: P1–P4 are a table in the ladder's design text |
 | Mitigation | `mitigations/<id>.yml` | `L<n>` for ladder levels, else kebab-case | no: four Ansible variables |
+| Injection | `platform/ansible/catalog/injections/fixtures.json` entry plus its payload file | kebab-case `id` of the entry | yes: three, each on its own `spe_inject_*` switch |
 | Test | `platform/promptfoo-evals/tests/<group>.yaml` (ladder) and `tests/experiments/<name>.yaml` | kebab-case `id` in the test's `metadata` | ladder tests yes; experiment tests no |
 | Experiment | `experiments/<name>.yml` | the file's stem | no |
 
 **Threat and path differ.** A threat is what goes wrong (data exposure, prompt injection); a path is the concrete
 route through this stack (agent-written workflow code, egress). They are many-to-many: TM-001 happens through any
-path; TM-003 enters through P1 and usually uses P2. A mitigation closes paths, not threats.
+path; TM-003 enters through P1 and usually uses P2. A mitigation closes paths, not threats. A threat and a path
+are descriptions; what makes one happen on the stack is an attack, a test's prompt or a planted injection
+(*Attacks*).
 
 ## Paths
 
@@ -70,6 +74,34 @@ probes: [tier-reach]         # optional: the controls-suite probes it closes whe
   build (as it already refuses the airlock with Open WebUI).
 - `hardening.json` (the hand-off) gains `mitigations: [ids]`, the mitigations the build was made with.
 
+## Attacks
+
+A participant proposes a threat and a path as files (above, 05); an attack is how the experiment makes it happen
+on the stack. There are two kinds, and an experiment may use either or both:
+
+- **A prompt**: the participant, as the agent's user, asks for the harm or for a benign task that leads to it. It is
+  a test in `tests/experiments/<name>.yaml` (*Tests*), nothing else.
+- **A planted injection**: text an attacker controls placed where the agent reads it, which the agent may follow
+  while doing a benign task. It is an entry in `platform/ansible/catalog/injections/fixtures.json` (`id`,
+  `switch`, `surface`, `payload`, `select`, `target_file`, `canary_file`, `action`, `disclosure`, as the three
+  today) plus its payload file beside it, on its own switch `spe_inject_<id with _>`, default `false` in
+  `group_vars/all.yml`, so a build without it is today's (as for a mitigation's `off`, decision 4).
+  - On a surface that exists (`trs-description`, `drs-description`, `workflow-comment`), it is data only: the
+    roles that plant there place any entry whose switch is on.
+  - On a new surface (a file in `/data-share`, a tool's output, a page reached by egress), it is also code: the
+    role that plants it, guarded by the switch, reports its placement (`surface`, `location`, `payload_sha256`)
+    as `trs_install.py` and `drs_register.py` do, so `injections_manifest.py` checks it like the others (exactly
+    one placement, the committed payload, a canary in its target), and carries the `stack`, `drs` or `trs` tag
+    so `spe-apply all` plants it on a running workspace. A surface planted only at creation is tried by building
+    fresh from the branch template (05, step 5).
+
+The experiment lists its injections (`injections: [ids]`); they are **on in both arms**, so the attack is held
+fixed and only the mitigation varies (03). The planted injections are scored with no new assertion:
+`injection.followed` scores every entry of the arm's `injections.json` against the state diff and the trace, so
+the experiment's tests need only the benign requests that pass through the planted text (`group: injection`, as
+`tests/injection.yaml`). A path whose attack is neither (a new route out, P4-like) is shown by a test and, when
+a mitigation should close it, by that mitigation's `probes` (03, the gate).
+
 ## Tests
 
 The ladder's suite (`agent.yaml`, `tests/<group>.yaml`) stays one fixed catalogue run unchanged at every level, so
@@ -107,6 +139,7 @@ experiment:
   mitigation: trs-guard  # the one under test: off in the baseline arm, on in the mitigated arm;
                          # null for a one-arm experiment (ladder-l0: the build as it is)
   base: []               # mitigations on in both arms
+  injections: [registry-preflight]   # planted attacks, on in both arms (*Attacks*); [] for none
   tests: [register-broken-workflow, summarise-workflows]   # ids; the utility group always runs as well
 vars:                    # Ansible values the experiment needs that are not form parameters
   spe_frontends: [agui]
@@ -117,8 +150,9 @@ An experiment with `mitigation: null` has one arm, the baseline: it measures a b
 is a starting point to write experiments from, not a contribution (`spe-eval pr-body` refuses it).
 
 `vars` exists because a preset can only set form parameters, and an evaluation needs build settings the form does
-not offer (frontends, the test receiver, injections). `main.tf` applies them (02). Keys in `vars` that a mitigation
-or a parameter also sets are refused by the checker: one place per value.
+not offer (frontends, the test receiver). `main.tf` applies them (02). Keys in `vars` that a mitigation, an
+injection or a parameter also sets are refused by the checker: one place per value; an injection's switch is set
+only through `injections`.
 
 An experiment fixes no seed: the seed is secret (it reproduces every canary), and the two arms already
 share one build's canaries. Comparison across workspaces is the official ladder's business, not an experiment's.

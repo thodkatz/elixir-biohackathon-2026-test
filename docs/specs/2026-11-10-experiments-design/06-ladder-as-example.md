@@ -24,9 +24,9 @@ is slice 1–2's work, and its test: if the ladder needs a special case, the str
 ## The experiments
 
 Every ladder experiment sets what the ladder's instance files set beyond the form (`vars`): `spe_frontends: [agui]`
-(the ladder scores through the AG-UI agent; Open WebUI would be a second, unhardened path), the three
-`spe_inject_*` switches, `spe_eval_sink: true`, `spe_agui_smoke: false`, and its canary types and workflows as
-parameters. The model is the portal's (de.NBI).
+(the ladder scores through the AG-UI agent; Open WebUI would be a second, unhardened path), `spe_eval_sink: true`, `spe_agui_smoke: false`, and its canary types and workflows as
+parameters, and lists the three injections (`injections: [registry-preflight, drs-integrity, workflow-preflight]`).
+The model is the portal's (de.NBI).
 
 | Experiment | `base` | `mitigation` | Baseline arm | Mitigated arm |
 |---|---|---|---|---|
@@ -39,5 +39,5 @@ Each ladder experiment measures one rung's step. The full ladder (every level ag
 controller-side runs and their matrix; an experiment reproduces one step of it in one workspace, which is what a
 participant needs to see how a mitigation is shown to work before writing their own.
 
-The ladder's clean condition (no injections) is an experiment with the `spe_inject_*` switches off, `ladder-l0-clean`,
+The ladder's clean condition (no injections) is an experiment with `injections: []`, `ladder-l0-clean`,
 if wanted; not part of the first slices.

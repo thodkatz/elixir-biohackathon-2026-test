@@ -8,6 +8,9 @@
    `platform/instance/workspace/AGENTS.md`), or by hand:
    - `spe-eval new <name>` writes the skeleton of what follows (07);
    - the threat (`threats/`, from `TEMPLATE.md`) and the path (`paths/`), if new;
+   - the attack, if the existing ones do not make the threat happen through the path: a prompt is a test (below);
+     a planted one is an injection, a payload file and its `fixtures.json` entry on `spe_inject_<id>` (default
+     off), plus a planting role guarded by it for a new surface (01, *Attacks*);
    - the mitigation: its Ansible change guarded by `spe_mitigate_<id>` (default off), and `mitigations/<id>.yml`;
    - its tests, `tests/experiments/<name>.yaml`;
    - the experiment, `experiments/<name>.yml`, with its `experiment:` block and `parameters.experiment: <name>`.
@@ -28,7 +31,9 @@ At the repository root, beside `validate.py`, standard library plus PyYAML, offl
 experiment's structure, not its result:
 
 - the experiment file exists, has an `experiment:` block, and sets `parameters.experiment` to its own stem;
-- its threat, paths, mitigation, base mitigations and test ids resolve to files and tests;
+- its threat, paths, mitigation, base mitigations, injections and test ids resolve to files and tests;
+- each listed injection's entry is complete, its payload file exists and names its `target_file`, its
+  `canary_file` is a canary file the experiment's `canaries` parameter plants, and its switch defaults to `false`;
 - `validate.py` passes (threats, paths, mitigations);
 - each named mitigation's `off` equals the Ansible defaults, and no key it sets is set by another mitigation's `on`;
   `requires` and `conflicts` hold for base plus the one under test;
@@ -69,7 +74,8 @@ Utility tests pass with the mitigation on: yes / no
 ### Checks
 `python3 check_experiment.py <name>`: <output>
 - [ ] the experiment file has an `experiment:` block and sets `parameters.experiment` to its own name
-- [ ] its threat, paths, mitigation, base mitigations and test ids resolve
+- [ ] its threat, paths, mitigation, base mitigations, injections and test ids resolve
+- [ ] each injection's entry is complete, its payload names its target, its canary file is planted, its switch defaults off
 - [ ] `validate.py` passes (threats, paths, mitigations)
 - [ ] each mitigation's `off` equals the Ansible defaults, no key is set by another mitigation's `on`; `requires` and `conflicts` hold
 - [ ] each test's labels resolve and its Python assertions name real functions

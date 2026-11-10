@@ -49,8 +49,9 @@ branch template (05, step 5). `--from` copies them, so a new experiment normally
    `spe-eval` sets for its own calls (decision 11). `spe-eval arm` takes the lock the same way for its apply.
 2. **Baseline arm.** `spe-apply all` with extra `-e` values (`spe-apply` today passes extra arguments only in its
    `ansible` form; `all` and `stack` learn to pass them too): `on` for each base mitigation, `off` for every other
-   mitigation file (the one under test included), so the arm is exactly its set whatever the form selected;
-   rewrite the VM hand-off's `hardening.json` for this arm; wait until the stack answers.
+   mitigation file (the one under test included), so the arm is exactly its set whatever the form selected, and
+   each injection switch `true` if the experiment lists it, else `false` (the same in both arms, 01, *Attacks*);
+   rewrite the VM hand-off's `hardening.json` and `injections.json` for this arm; wait until the stack answers.
 3. **Run** `run.sh` (its checks, the controls suite and its gate, then the agent suite) with the experiment's tests
    plus the utility group, `--repeat N --no-cache`, `PROMPTFOO_CONFIG_DIR=~/spe-eval/promptfoo` (the viewer's
    database), reports in `~/spe-eval/reports/<experiment>/<run id>/<arm>/` and the eval description

@@ -69,6 +69,7 @@ HITS_DIR = "/data-share/canary-hits"
 STREAM_SECONDS = 30 * 60  # then it ends; EventSource reconnects with Last-Event-ID
 STREAM_MAX = 200  # open streams per server; past it, 503
 STREAM_POLL = 0.5  # seconds between looks at the hits and status files (decision 6: a hit shown within 2 s)
+STREAM_READ = 1 << 20  # bytes of the hits file read per look at most (a catch-up takes several)
 STREAM_PING = 15  # seconds with nothing sent before a ": ping" comment (keeps proxies from closing it)
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -520,8 +521,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
             if self.command != "HEAD":
                 self._stream(wid, self._stream_start())
-        except (BrokenPipeError, ConnectionResetError):
-            pass  # the viewer went away
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
+            pass  # the viewer went away, or stopped reading
         finally:
             with srv.streams_lock:
                 srv.streams -= 1
@@ -540,7 +541,9 @@ class Handler(BaseHTTPRequestHandler):
         srv = self.server
         hits_path, status_path = self._hits_path(wid), self._status_path(wid)
         lines, offset = 0, 0  # complete lines passed so far, and the byte offset after them
-        caught_up = False  # `start` reached, or clamped to the file's end on the first look
+        inode = None  # the hits file's, once seen: a file replaced or cut ends the stream
+        caught_up = False  # `start` reached, or clamped to the file's end once the end was read
+        in_long_line = False  # inside a line longer than one read, skipped (it still counts as a line)
         status_seen = None  # the status file's (mtime, inode) last sent; None: never sent
         ends = time.monotonic() + srv.stream_seconds
         last_sent = time.monotonic()
@@ -550,21 +553,41 @@ class Handler(BaseHTTPRequestHandler):
             if hits_path:
                 try:
                     with open(hits_path, "rb") as f:
+                        st = os.fstat(f.fileno())
+                        if inode is not None and (st.st_ino != inode or st.st_size < offset):
+                            return  # replaced or cut: the browser reconnects and is clamped afresh
+                        inode = st.st_ino
                         f.seek(offset)
-                        data = f.read()
+                        data = f.read(srv.stream_read)
                 except FileNotFoundError:
+                    if inode is not None:
+                        return  # removed after it was read
                     caught_up = True  # no hits yet: nothing to skip, the first hit is id 1
+                except OSError as e:  # the class only: no path but the workspace id, no content
+                    sys.stdout.write(f"hits stream {wid}: {type(e).__name__}, ended\n")
+                    sys.stdout.flush()
+                    return
+            at_end = len(data) < srv.stream_read
+            if in_long_line:
+                nl = data.find(b"\n")
+                offset += len(data) if nl < 0 else nl + 1
+                if nl >= 0:
+                    lines, in_long_line = lines + 1, False
+                data = b"" if nl < 0 else data[nl + 1:]
             # Only complete lines: a line still being written is read again on the next look.
             complete = data[:data.rfind(b"\n") + 1]
-            for raw in complete.splitlines(keepends=True):
+            if not complete and len(data) >= srv.stream_read:  # a whole read and no line end: too long
+                offset, in_long_line = offset + len(data), True
+            for raw in complete.split(b"\n")[:-1]:
                 lines += 1
-                offset += len(raw)
+                offset += len(raw) + 1
                 if lines <= start and not caught_up:
                     continue
                 event = self._hit_event(lines, raw)
                 if event:
                     out.append(event)
-            caught_up = True  # a start past the end is clamped to it: nothing replayed, no error
+            if at_end:
+                caught_up = True  # a start past the end is clamped to it: nothing replayed, no error
             if status_path:
                 try:
                     st = os.stat(status_path)
@@ -738,7 +761,7 @@ def make_server(listen: str, reports_dir: str, coder_url: str, hits_dir: str | N
     srv.daemon_threads = True
     srv.streams, srv.streams_lock = 0, threading.Lock()  # open event streams (ruling 7)
     srv.stream_max, srv.stream_seconds = STREAM_MAX, STREAM_SECONDS
-    srv.stream_poll, srv.stream_ping = STREAM_POLL, STREAM_PING
+    srv.stream_poll, srv.stream_ping, srv.stream_read = STREAM_POLL, STREAM_PING, STREAM_READ
     return srv
 
 

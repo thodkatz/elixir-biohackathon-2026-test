@@ -599,3 +599,74 @@ def test_latency_fake_instance(tmp_path, coder, streams):
         stop.set()
         ticker.join(5)
         srv.shutdown()
+
+
+# --- the stream bounded and hardened ----------------------------------------------------------------
+
+def _line(record: dict, n: int) -> bytes:
+    return (json.dumps(record | {"id": n}) + "\n").encode()
+
+
+def test_partial_line_waits_until_complete(service, streams):
+    base, hits_dir = service
+    second = _line(_record(WID, _openwebui_hit()), 2)
+    path = hits_dir / f"{WID}.jsonl"
+    path.write_bytes(_line(_record(WID, _agui_hit()), 1) + second[:40])
+    s = streams(base, WID)
+    assert s.next(2.0)["id"] == "1"
+    assert s.next(1.0) is None
+    with open(path, "ab") as f:
+        f.write(second[40:])
+    event = s.next(2.0)
+    assert event is not None and event["id"] == "2"
+    assert json.loads(event["data"])["frontend"] == "openwebui"
+
+
+def test_line_longer_than_a_read_is_skipped(server, streams):
+    """A line over one read (1 MiB in service, 4 kB here) is passed over, not waited on forever; it
+    still counts as a line, so the next hit's id is its HitsFile line number."""
+    base, hits_dir, srv = server
+    srv.stream_read = 4096
+    path = hits_dir / f"{WID}.jsonl"
+    path.write_bytes(_line(_record(WID, _agui_hit()), 1) + b'{"x": "' + b"y" * 10_000 + b'"}\n')
+    s = streams(base, WID)
+    assert s.next(2.0)["id"] == "1"
+    assert append(hits_dir, WID, _record(WID, _agui_hit())) == 3
+    event = s.next(3.0)
+    assert event is not None and event["id"] == "3"
+
+
+def test_catch_up_in_bounded_reads(server, streams):
+    base, hits_dir, srv = server
+    srv.stream_read, srv.stream_poll = 4096, 0.05
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()) for _ in range(30)])
+    assert (hits_dir / f"{WID}.jsonl").stat().st_size > 3 * 4096
+    s = streams(base, WID, last_event_id="28")
+    assert [s.next(3.0)["id"], s.next(3.0)["id"]] == ["29", "30"]
+    assert s.next(0.5) is None
+
+
+@pytest.mark.parametrize("change", ["cut", "replaced"])
+def test_stream_ends_when_the_file_is_cut_or_replaced(service, streams, change):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()), _record(WID, _openwebui_hit())])
+    s = streams(base, WID)
+    assert [s.next(2.0)["id"], s.next(2.0)["id"]] == ["1", "2"]
+    path = hits_dir / f"{WID}.jsonl"
+    if change == "cut":
+        path.write_bytes(path.read_bytes()[:10])
+    else:
+        fresh = hits_dir / "fresh.jsonl"
+        fresh.write_bytes(path.read_bytes() + b"\n")
+        fresh.replace(path)
+    assert s.ended(3.0)
+
+
+def test_unreadable_hits_file_ends_with_one_log_line(service, streams, capfd):
+    base, hits_dir = service
+    (hits_dir / f"{WID}.jsonl").mkdir()  # open() fails with an OSError that is not FileNotFoundError
+    s = streams(base, WID)
+    assert s.ended(3.0)
+    out, _ = capfd.readouterr()
+    assert f"hits stream {WID}: IsADirectoryError, ended\n" in out
+    assert str(hits_dir) not in out

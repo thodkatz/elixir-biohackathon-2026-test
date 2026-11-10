@@ -8,20 +8,33 @@ PR adds; each is justified by the evaluation pipeline (`spe-eval run`, the check
 
 | Kind | Adds | Must not add | The experiment | Its evidence |
 |---|---|---|---|---|
-| **red** (attack) | at least one attack: a planted injection or a test prompt, with its tests; threat and path files when new | a mitigation | `mitigation: null`; `base` names the build it attacks (e.g. `[L1, L2]`: "breaks `ladder-l2`") | the baseline arm: at least one of its tests records the harm (a security metric fails) |
-| **blue** (mitigation) | one mitigation (its Ansible change behind `spe_mitigate_<id>`, `mitigations/<id>.yml`) | an attack, a threat or a path | the mitigation under test; `injections` and `tests` name attacks already on `main` (the ones on the paths it `closes`) | both arms: baseline vs mitigated, the utility tests passing with it on |
+| **red** (attack) | at least one attack: a planted injection or a test prompt, with its tests; threat and path files when new | a mitigation | `mitigation: null`; `base` names the build it attacks (e.g. `[L1, L2]`: "breaks `ladder-l2`") | the baseline arm: a test the experiment runs records the harm (a security metric fails; `injection.followed` included, for a PR that adds only an injection) |
+| **blue** (mitigation) | one mitigation (its Ansible change behind `spe_mitigate_<id>`, `mitigations/<id>.yml`) | an attack, a threat or a path | the mitigation under test, new or changed; `injections` and `tests` name attacks already on the target ref (the ones on the paths it `closes`) | both arms: baseline vs mitigated, the utility tests passing with it on |
 | **end-to-end** | an attack and a mitigation against it, threat and path files when new | | as in 01 | both arms, as blue |
-| **other** | anything that is not an experiment: a fix, a doc, a tool | an `experiments/*.yml` | none | review by hand |
+| **other** | anything that is not an experiment: a fix, a doc, a tool | an `experiments/*.yml`, or any threat, path, mitigation, injection or test | none | review by hand |
 
 - **A new threat or path comes with an attack.** It is a description; what makes it real on the stack is an
   attack that makes it happen (01, *Attacks*). So it arrives in a red or end-to-end PR, never alone; an idea
-  without an attack yet is an issue (or an *other* PR, reviewed by hand).
-- **The kind is read from the files, not declared.** `check_experiment.py <name>` compares the branch with the
-  branch the PR targets (`--base`, default `origin/main`) and the experiment file: a new injection or test and no
-  mitigation under test is red; a new mitigation under test and no new attack is blue; both is end-to-end. It
-  prints the kind first and applies that kind's checks (*`check_experiment.py`*). A branch that fits no kind (a
-  new threat with no attack, a blue PR adding a test of its own, two experiment files) is refused with what to
-  add or remove. Since the files decide, the participant, the reviewer and a later CI get the same answer.
+  without an attack yet is an issue, not a PR.
+- **The kind is read from the files, not declared.** `check_experiment.py` compares the branch with the
+  **target ref**, the branch the PR targets (`--base`, default `origin/main`; not the experiment's `base:`
+  mitigations). *New* means added or changed against it, so improving L1 makes its mitigation new. It reads
+  every catalogue file the branch makes new (threats, paths, mitigations, injections, tests) and the experiment
+  file:
+
+  | New on the branch | Experiment's `mitigation` | Kind |
+  |---|---|---|
+  | an attack (an injection or a test), no mitigation | `null` | red |
+  | an attack, and the mitigation under test | new | end-to-end |
+  | no attack | new, or an existing one on a new `base` (an interaction) | blue |
+  | no catalogue file and no experiment file | | other |
+
+  It prints the kind first and applies that kind's checks (*`check_experiment.py`*). A branch that fits no row is
+  refused with what to add or remove: a new attack against an unchanged mitigation under test (to show a bypass,
+  put that mitigation in `base` with `mitigation: null`: red), a new threat or path with no attack, a new
+  catalogue file with no experiment file, a blue branch adding a test, an experiment that adds nothing (`null`,
+  no new attack), two experiment files. Since the files decide, the participant, the reviewer and a later CI get
+  the same answer.
 - **The evidence is checked where it lives.** The checker stays offline and structural; the result is the run's.
   `spe-eval pr-body` refuses a red PR whose latest run recorded no harm (nothing was shown) and a blue or
   end-to-end PR with no mitigated arm, and puts the counts in the body; the reviewer reproduces them from
@@ -33,7 +46,7 @@ PR adds; each is justified by the evaluation pipeline (`spe-eval run`, the check
    one to build on. Nothing new is needed to create it; the participant's own experiment is written inside it.
 2. **Build the experiment**, usually by asking the workspace's coding agent (Coder Agents, which follows
    `platform/instance/workspace/AGENTS.md`), or by hand:
-   - `spe-eval new <name> --kind red|blue|end-to-end` writes the skeleton of what the kind needs from the list below
+   - `spe-eval new <name> [--kind red|blue|end-to-end]` (default `end-to-end`) writes the skeleton of what the kind needs from the list below
      (07); `--kind` only picks the skeleton, so a red start that grows a mitigation becomes end-to-end;
    - the threat (`threats/`, from `TEMPLATE.md`) and the path (`paths/`), if new (red, end-to-end);
    - the attack (red, end-to-end), if the existing ones do not make the threat happen through the path: a prompt
@@ -61,10 +74,11 @@ access there and step 6 is an upstream PR.
 
 At the repository root, beside `validate.py`, standard library plus PyYAML, offline, under a minute. It checks the
 experiment's structure, not its result. Without `<name>` it takes the one experiment file the branch adds or
-changes against `--base`; with none, the kind is *other* and there is nothing for it to check.
+changes against the target ref; with none, the kind is *other* if the branch makes no catalogue file new (the
+only check then), and refused otherwise.
 
 It first prints the kind (*Kinds of contribution*) and what decided it, e.g. `kind: red (new: injection
-drs-desc-v2, test leak-via-drs; mitigation under test: none)`. Comparing with `--base` reads git refs only, so it
+drs-desc-v2, test leak-via-drs; mitigation under test: none)`. Comparing with the target ref reads git refs only, so it
 stays offline; `spe-eval new` and `pr-body` run `git fetch` first so the base is current, and a reviewer fetches
 before running it. Then, for every measured kind:
 
@@ -80,7 +94,7 @@ before running it. Then, for every measured kind:
 - its `parameters` keys are parameters of the new template's `main.tf`, and its `vars` set no key a mitigation sets;
 - the branch adds or changes one experiment file, and fits its kind: a new threat or path comes with a new attack;
   red adds no mitigation file and its experiment has `mitigation: null`; blue adds no injection, test, threat or
-  path, and its experiment's injections and tests are all on the base.
+  path, and its experiment's injections and tests are all on the target ref.
 
 Each refusal names the file and the id. Its unit tests cover one refusal each, and each kind on a fixture branch.
 `--json` adds `kind` and what decided it. `--list-checks [--kind <kind>]` prints one line per check above that
@@ -99,16 +113,19 @@ picks the template from the kind; `CONTRIBUTING.md` and the workspace guide say 
 - **`spe-eval pr-body [<name>] [--run <id>]`** runs the checker, then prints three things: a title with the
   kind's prefix (`[red] <one line>`, `[blue] …`, `[end-to-end] …`, `[other] …`), the body (the kind's template filled in
   from the files, the run's counts and the checker's output), and the new-PR link
-  (`…/compare/main...<branch>?quick_pull=1&template=<kind>.md`). It refuses, exit 1, a red experiment whose
+  (`https://github.com/<target>/compare/main...<head>?quick_pull=1&template=<kind>.md`), built from the remote
+  the PR targets (`upstream` when it exists, else `origin`): `<head>` is `<branch>` when the branch is pushed
+  there, `<owner>:<branch>` when it is pushed to another remote (a fork). It refuses, exit 1, a red experiment whose
   latest run recorded no harm, and a blue or end-to-end one with no mitigated arm. The body can also go to
   `gh pr create --title … --body-file -`.
 - **Templates**, in `.github/PULL_REQUEST_TEMPLATE/`: `red.md`, `blue.md`, `end-to-end.md` and
   `other.md`. Each lists only its kind's files, result and checks.
 - **The default**, `.github/pull_request_template.md`, is for a PR opened by hand: it asks which kind this is and
-  gives the four links that reopen the page with each template, and says that `spe-eval pr-body` does this for
-  you. Whether GitHub still applies it beside the template directory is untried: slice 6 checks on the fork,
-  and if not, `CONTRIBUTING.md`'s same four links are the by-hand route.
-- **Labels**, `red-team`, `blue-team`, `end-to-end`, `other`, created once on upstream by a maintainer. A PR
+  says to run `spe-eval pr-body`, or to add `&template=<kind>.md` to the compare page's URL and reload. It cannot
+  hold working links (the text knows no branch, and a link in a created PR resolves against the PR). Whether
+  GitHub still applies it beside the template directory is untried: slice 6 checks on the fork, and if not,
+  `CONTRIBUTING.md`'s same URL pattern is the by-hand route.
+- **Labels**, one per kind and named as it (`red`, `blue`, `end-to-end`, `other`), created once on upstream by a maintainer. A PR
   template cannot set labels, and an author from a fork usually cannot add them, so the reviewer adds the one the
   checker names. A wrong template does no harm: the checker's kind wins, and the reviewer labels by it.
 

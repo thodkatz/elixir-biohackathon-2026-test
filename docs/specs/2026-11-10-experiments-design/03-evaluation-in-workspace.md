@@ -28,10 +28,18 @@ container it would need the Docker socket and the hand-off mounted, which decisi
 ## `spe-eval`
 
 ```
-spe-eval run [--repeat N]                  both arms of the workspace's experiment
+spe-eval run [<name>] [--repeat N]         both arms of an experiment in the clone (default: the one built with)
 spe-eval arm baseline|mitigated            apply one arm (spe-apply all with its mitigation values), no run
 spe-eval status                            the lock, the current arm, the last run's result lines
 ```
+
+**Which experiment.** A workspace is created from an experiment that already exists (`ladder-l0` by default: the
+plain build, measurable); a participant's own experiment is written inside it (`spe-eval new <name> --from
+<experiment>`, 07) and does not exist until then. So `run`, `arm`, `results` and `pr-body` take an experiment
+name and read it from the clone, defaulting to the one the workspace was built with. Its mitigations are applied
+live, but its `vars` and `parameters` (frontends, test receiver, data, canaries) act at creation: `spe-eval`
+refuses an experiment whose values differ from the build's, naming each key, and says to build it fresh from its
+branch template (05, step 5). `--from` copies them, so a new experiment normally runs where it was written.
 
 `run`, for an experiment:
 

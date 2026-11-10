@@ -2,7 +2,8 @@
 
 ## The path
 
-1. **A workspace from `spe-experiments`**, with any experiment (`ladder-l0` for a plain one, or one to build on).
+1. **A workspace from `spe-experiments`**, with an existing experiment: `ladder-l0` (the default, the plain build) or
+   one to build on. Nothing new is needed to create it; the participant's own experiment is written inside it.
 2. **Build the experiment**, usually by asking the workspace's coding agent (Coder Agents, which follows
    `platform/instance/workspace/AGENTS.md`), or by hand:
    - `spe-eval new <name>` writes the skeleton of what follows (07);
@@ -10,7 +11,7 @@
    - the mitigation: its Ansible change guarded by `spe_mitigate_<id>` (default off), and `mitigations/<id>.yml`;
    - its tests, `tests/experiments/<name>.yaml`;
    - the experiment, `experiments/<name>.yml`, with its `experiment:` block and `parameters.experiment: <name>`.
-3. **Try it live**: `spe-eval arm mitigated` to apply it, chat with the agent; then `spe-eval run` for the two
+3. **Try it live**: `spe-eval arm <name> mitigated` to apply it, chat with the agent; then `spe-eval run` for the two
    arms, read with `spe-eval results` or in **Evaluations**.
 4. **Check**: `python3 check_experiment.py <name>`. (Every step has a command for a coding agent: 07.)
 5. **Build it fresh** (when the change acts only at creation, or to confirm a clean build): push

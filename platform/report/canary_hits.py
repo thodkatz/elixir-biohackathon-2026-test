@@ -6,7 +6,8 @@ across events and polls is matched whole), the agent's run log (agent_run_places
 chats from its database or its archive export (openwebui_places) and the test receiver's request
 log (receiver_places). hits_for gives the partial hit record per canary found in a place; the
 watcher adds `id`, `detected`, `workspace`, `instance` and `owner`, and keeps dedup_key in its
-state, never in the record.
+state, never in the record. HitsFile is a workspace's hits file: one JSON line per hit, `id` its line
+number (decision 10), mode 0640, capped at 10 MB.
 
 Standard library only: the portal runs this from its repository checkout with the system Python.
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -316,3 +318,63 @@ def dedup_key(hit: dict, generation: str) -> str:
     call_id = (hit.get("tool") or {}).get("call_id")
     parts = (hit.get("workspace"), generation, hit.get("run"), hit.get("place"), call_id, hit["canary"]["token"])
     return hashlib.sha256("|".join("" if p is None else str(p) for p in parts).encode()).hexdigest()
+
+
+# The hits file
+
+HITS_FILE_MAX = 10_000_000  # bytes per hits file (spec *Watcher*, untrusted reader output)
+
+
+class HitsFile:
+    """One hits file: a hit per JSON line, its `id` the line number from 1, so an id carries nothing of
+    the canary. Created with mode 0640 (portal-only). Past `max_bytes` nothing more is written: `append`
+    returns None and `full` is true, which the pages say."""
+
+    def __init__(self, path: str, max_bytes: int = HITS_FILE_MAX):
+        self.path, self.max_bytes = path, max_bytes
+        self.count, self.size, self.full = 0, 0, False
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except FileNotFoundError:
+            return
+        self.size = len(data)
+        self.count = data.count(b"\n")
+        self.full = self.size >= max_bytes
+
+    def append(self, hit: dict) -> int | None:
+        if self.full:
+            return None
+        hit["id"] = self.count + 1
+        line = (json.dumps(hit, ensure_ascii=False) + "\n").encode()
+        if self.size + len(line) > self.max_bytes:
+            del hit["id"]
+            self.full = True
+            return None
+        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o640)
+        try:
+            if self.size == 0:
+                os.fchmod(fd, 0o640)  # whatever the umask
+            os.write(fd, line)
+        finally:
+            os.close(fd)
+        self.count, self.size = self.count + 1, self.size + len(line)
+        return hit["id"]
+
+    def read(self, after: int = 0) -> list[dict]:
+        """The hits whose id is past `after`, in order; a line that does not parse is skipped."""
+        out = []
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                for n, line in enumerate(f, 1):
+                    if n <= after:
+                        continue
+                    try:
+                        hit = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(hit, dict):
+                        out.append(hit)
+        except FileNotFoundError:
+            pass
+        return out

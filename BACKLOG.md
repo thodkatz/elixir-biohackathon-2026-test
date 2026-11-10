@@ -62,6 +62,9 @@ start reads this section; keep it short.
   logs socketserver's traceback (code lines and the message, no canary value seen so far) — a `handle_error` that
   logs the class only would make decision 10 strict — from the canary hit viewer slice 3 final review; waits
   because the setup steps set the permissions and the journal is admin-only.
+- Canary hits: `test_status_event` (`platform/report/tests/test_hits_service.py`) flakes about 1 run in 15; the
+  stream's status-change check (`os.stat` mtime and inode) may see an unchanged file as changed on virtiofs —
+  from PR #79's review round; waits because it is rare and the page is unaffected (a resent status is harmless).
 - Canary hits pages: `static/hits.js` has no browser test (the screenshot harness covers it once); a Playwright
   test of a hit arriving, the counts and "Group by run" — from the canary hit viewer slice 3 final review; waits
   because what must not go wrong (escaping, the event payload, notification fields) is tested on the server.

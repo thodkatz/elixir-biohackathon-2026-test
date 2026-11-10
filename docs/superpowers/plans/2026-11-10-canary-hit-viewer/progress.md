@@ -109,3 +109,8 @@ slice is the README's slices table; the handoffs say what each session did.
 25. **A logged-out visitor to the participant page returns to it after login** (`redirect=/reports/<id>/hits`),
     not to the report as the plan's task text had it (`/reports/<id>`), which the final review found sent them to
     the wrong page. *Cost if wrong:* none; `hits.json` and the stream still answer 401.
+26. **A hit that arrives live goes to the top of the list**, in the order the watcher detected it, while a reload
+    sorts by `at` (else `detected`). An archive-scan hit with an older `at` can therefore move down on a reload.
+    Placing it by `at` live would mean re-sorting in the script against the one-renderer rule (ruling 8), for a
+    cosmetic difference (PR #79's review, finding 3). *Cost if wrong:* a participant sees a hit change place after a
+    reload.

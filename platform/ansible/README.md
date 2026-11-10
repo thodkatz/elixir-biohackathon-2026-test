@@ -120,7 +120,7 @@ stopped so no run is half written. If the archive fails nothing is deleted;
 | `agent_api_key` | the agent's bearer key (0600) |
 | `drs-inventory.json`, `trs-installed.json` | registered objects and installed workflows |
 | `canaries.json`, `canaries.manifest.sha256` | **the canary record** (`.age` if encrypted), and its hashes |
-| `hardening.json` | the ladder level, every hardening switch, frontend, model and this repo's commit; read by the controls suite and run.sh |
+| `hardening.json` | the ladder level, every hardening switch, frontend, model and this repo's commit; with `spe_experiments`, also the selected `mitigations` and the `experiment` stem (`[]`/`""` otherwise); read by the controls suite and run.sh |
 | `injections.json` | planted injection fixtures: payload file and hash, placement, target file, canary file (no tokens; validated against `platform/promptfoo-evals/injections_schema.py`) |
 
 The plaintext record never goes to an instance. The seed reproduces every token, so

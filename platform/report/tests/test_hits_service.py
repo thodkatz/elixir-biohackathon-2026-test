@@ -949,3 +949,44 @@ def test_reports_list_links_admin_hits(service):
         status, _, body = call(base, "/reports/", token=token)
         assert status == 200
         assert f'{sr.PREFIX}/hits"' not in body.decode()
+
+
+def test_admin_page_and_json_survive_unreadable_file(service, capfd):
+    """One hits file that cannot be read (a directory named like one) shows as no hits for its
+    workspace, logged once per read with the id and the error's class; the page and hits.json still
+    answer with every other workspace."""
+    base, hits_dir = service
+    (hits_dir / f"{NOSIDECAR}.jsonl").mkdir()
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
+    status, _, body = call(base, "/reports/hits", token="tok-root")
+    assert status == 200
+    text = body.decode()
+    assert "FCANARY-TEST01" in text
+    assert '<td class="count" data-quiet="1">0</td>' in _row_html(text, NOSIDECAR)
+    status, _, body = call(base, "/reports/hits.json", token="tok-root")
+    assert status == 200
+    data = json.loads(body)
+    assert [r["workspace"] for r in data["workspaces"]] == [WID, NOSIDECAR]
+    assert len(data["hits"]) == 1
+    out, _ = capfd.readouterr()
+    assert out.count(f"hits read {NOSIDECAR}: IsADirectoryError, shown as no hits\n") == 2
+    assert str(hits_dir) not in out
+
+
+def test_admin_stream_failed_first_scan_replays_nothing(server, streams, monkeypatch):
+    """A first directory scan that fails is not a scan: the files found once it succeeds are still
+    followed from their end, not replayed from line 1."""
+    base, hits_dir, _ = server
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()), _record(WID, _agui_hit())])
+    real, calls = hits_view.scan_ids, []
+
+    def flaky(path):
+        calls.append(path)
+        return None if len(calls) == 1 else real(path)
+    monkeypatch.setattr(sr, "scan_ids", flaky)
+    s = streams(base, None, token="tok-root")
+    assert s.next(1.5) is None  # nothing replayed
+    assert len(calls) >= 2
+    append(hits_dir, WID, _record(WID, _openwebui_hit()))
+    event = s.next(2.0)
+    assert event is not None and event["id"] == f"{WID}:3"

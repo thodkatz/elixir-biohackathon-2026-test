@@ -109,8 +109,9 @@ link to anyone else:
 
 - `GET /reports/hits` — every workspace with hits or a status file, newest first
   (`hits_view.workspace_rows`): a table (name linking to that workspace's own `/hits` page, owner,
-  instance, the viewer's Coder state for it, loud counts, quiet count, newest hit, watcher status;
-  a row with no state lookup or a failed one leaves that cell blank), the same banner as the
+  instance, the viewer's Coder state for it, loud counts, quiet count, "Newest (detected)": the
+  newest hit's `detected`, watcher status; a row with no state lookup or a failed one leaves that
+  cell blank; a hits file that cannot be read shows as no hits, logged), the same banner as the
   participant page, then every workspace's hits merged, newest first by `detected` (the watcher's
   clock, not the instance's own `at`). Four filters (kind, type, frontend, workspace), applied in
   the browser over what the page already rendered. Capped at 500 hits (`ADMIN_PAGE_HITS`; "N more,

@@ -63,7 +63,7 @@ import markdown
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from canary_hits import HitsFile  # noqa: E402
 from hits_view import (LOUD, UUID_RE, admin_body, empty_text, hit_html, newest_first,  # noqa: E402
-                       participant_body, read_all, read_status, status_line, workspace_ids,
+                       participant_body, read_all, read_status, scan_ids, status_line,
                        workspace_rows)
 
 PREFIX = "/reports"
@@ -438,7 +438,6 @@ class Tail:
         return out
 
 
-
 class Handler(BaseHTTPRequestHandler):
     server_version = "sperange-report/1"
     store: Store
@@ -722,7 +721,10 @@ class Handler(BaseHTTPRequestHandler):
         def look():
             nonlocal first
             out = []
-            for wid in workspace_ids(self.hits_dir):
+            wids = scan_ids(self.hits_dir)
+            if wids is None:
+                return []  # the directory could not be listed: try again, still the first scan
+            for wid in wids:
                 if wid in dropped:
                     continue
                 if wid not in tails:

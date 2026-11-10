@@ -29,6 +29,7 @@ import html
 import json
 import os
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -273,12 +274,13 @@ def read_status(path: str) -> dict | None:
     return status if isinstance(status, dict) else None
 
 
-def workspace_ids(hits_dir: str) -> list[str]:
-    """Every workspace the hits directory knows: a `<uuid>.jsonl` or a `<uuid>.status.json`."""
+def scan_ids(hits_dir: str) -> list[str] | None:
+    """Every workspace the hits directory knows: a `<uuid>.jsonl` or a `<uuid>.status.json`; None
+    when the directory cannot be listed (the admin stream then tells a failed scan from an empty one)."""
     try:
         names = os.listdir(hits_dir)
     except OSError:
-        return []
+        return None
     out = set()
     for name in names:
         for suffix in (".jsonl", ".status.json"):
@@ -287,12 +289,25 @@ def workspace_ids(hits_dir: str) -> list[str]:
     return sorted(out)
 
 
+def workspace_ids(hits_dir: str) -> list[str]:
+    """`scan_ids`, with an unlistable directory read as an empty one."""
+    return scan_ids(hits_dir) or []
+
+
 def read_all(hits_dir: str) -> dict[str, list[dict]]:
     """Every workspace's hits, by workspace id, each tagged with that id as `workspace` (the file's
-    name says whose hits they are, whatever a record says)."""
+    name says whose hits they are, whatever a record says). A file that cannot be read (bad
+    permissions, a directory by that name) counts as no hits, logged with the workspace id and the
+    error's class only, so its row and every other workspace still render."""
     out = {}
     for wid in workspace_ids(hits_dir):
-        out[wid] = [h | {"workspace": wid} for h in HitsFile(os.path.join(hits_dir, wid + ".jsonl")).read()]
+        try:
+            hits = HitsFile(os.path.join(hits_dir, wid + ".jsonl")).read()
+        except OSError as e:
+            sys.stdout.write(f"hits read {wid}: {type(e).__name__}, shown as no hits\n")
+            sys.stdout.flush()
+            hits = []
+        out[wid] = [h | {"workspace": wid} for h in hits]
     return out
 
 
@@ -369,7 +384,7 @@ def admin_body(rows: list[dict], hits: list[dict], states: dict[str, str | None]
             f'<td class="newest">{_esc(r["newest"])}</td><td class="status">{_esc(r["status"])}</td></tr>')
     head = "".join(f"<th>{_esc(k)}</th>" for k in LOUD_KINDS)
     table = ('<table class="workspaces"><thead><tr><th>Workspace</th><th>Owner</th><th>Instance</th>'
-             f'<th>State</th>{head}<th>also seen</th><th>Newest hit</th><th>Watcher</th></tr></thead>'
+             f'<th>State</th>{head}<th>also seen</th><th>Newest (detected)</th><th>Watcher</th></tr></thead>'
              f'<tbody>{"".join(trs)}</tbody></table>'
              if trs else f'<p class="muted">{_esc(NOT_WATCHED)}</p>')
 

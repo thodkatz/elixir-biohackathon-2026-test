@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -129,15 +130,27 @@ def archive_meta(run_dir: str) -> dict:
 
 def write_html(path: str, meta: dict, hits_list: list[dict]) -> None:
     """The run's hits file rendered as a standalone participant page (the early output), mode 0640
-    like the hits file itself (os.open + fchmod, whatever the umask)."""
+    like the hits file itself (fchmod, whatever the umask). Written to a temporary file in the same
+    directory and moved into place with os.replace, so a reader never sees a half-written page."""
     title = f"Canary hits: {meta.get('instance') or meta.get('workspace') or 'workspace'}"
     doc = standalone(title, participant_body(meta, hits_list, None)).encode()
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
+    target = Path(path)
+    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
     try:
-        os.fchmod(fd, 0o640)
-        os.write(fd, doc)
-    finally:
-        os.close(fd)
+        try:
+            os.fchmod(fd, 0o640)
+            view = memoryview(doc)
+            while view:
+                view = view[os.write(fd, view):]
+        finally:
+            os.close(fd)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _api_host(given: str | None, instance: str | None) -> str | None:
@@ -158,7 +171,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Scan an archived run directory into a canary hits file.")
     parser.add_argument("--archive", required=True, metavar="RUN_DIR", help="the archived run directory")
     parser.add_argument("--out", required=True, metavar="HITS.jsonl", help="the hits file to append to")
-    parser.add_argument("--html", metavar="PAGE.html", help="also render the hits file as a standalone participant page")
+    parser.add_argument("--html", metavar="PAGE.html", help="also render a standalone participant page from the whole --out hits file"
+                        " (every hit in it, from all runs scanned into it, not only this one)")
     parser.add_argument("--api-host", metavar="HOST", help="the instance's API host (default: its hosts.yml)")
     args = parser.parse_args(argv)
     meta = archive_meta(args.archive)

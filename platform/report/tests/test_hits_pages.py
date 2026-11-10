@@ -75,3 +75,74 @@ def test_standalone_has_no_script_and_inlines_css():
 def test_archived_status_none_says_archived():
     body = participant_body(META, [], None)
     assert "archived" in body.lower()
+
+
+def _also_seen_block(body: str) -> str:
+    start = body.index('<details class="also-seen">')
+    end = body.index("</details></section>", start)
+    return body[start:end]
+
+
+def test_quiet_kinds_listed_under_also_seen():
+    hits = [hit("touched", "tool_result", at="2026-11-10T14:00:00Z"),
+            hit("seen", "tool_result", at="2026-11-10T14:05:00Z", run="rQUIET")]
+    body = participant_body(META, hits, None)
+    assert "<summary>also seen (1)</summary>" in body
+    block = _also_seen_block(body)
+    assert "run rQUIET" in block
+    assert body.count("run rQUIET") == 1  # only inside the block
+    # loud hits come first, before the block
+    assert body.index("kind-touched") < body.index('<details class="also-seen">')
+
+
+def test_no_also_seen_block_without_quiet_hits():
+    body = participant_body(META, [hit("touched", "tool_result")], None)
+    assert 'class="also-seen"><summary>' not in body
+    assert "<details class=\"also-seen\"" not in body
+
+
+def test_quiet_hits_newest_first():
+    hits = [hit("args", "tool_args", at="2026-11-10T14:00:00Z", run="rOLD"),
+            hit("prompt", "prompt", at="2026-11-10T14:09:00Z", run="rNEW")]
+    block = _also_seen_block(participant_body(META, hits, None))
+    assert block.index("run rNEW") < block.index("run rOLD")
+
+
+def test_headline_labels_seen_as_metadata():
+    hits = [hit("seen", "tool_result"), hit("args", "tool_args"), hit("prompt", "prompt")]
+    body = participant_body(META, hits, None)
+    assert "also seen: 3 (metadata, args, prompt)" in body
+
+
+def test_unknown_or_null_kind_counted_under_also_seen():
+    hits = [hit("touched", "tool_result"), hit("bogus", "x", run="rBOGUS"), hit(None, "x", run="rNULL")]
+    body = participant_body(META, hits, None)
+    assert "1 leak" in body
+    assert "also seen: 2" in body
+    assert "<summary>also seen (2)</summary>" in body
+    block = _also_seen_block(body)
+    assert "run rBOGUS" in block and "run rNULL" in block
+
+
+def test_status_text_escaped_once():
+    body = participant_body(META, [], "a & b")  # not a dict: the fallback
+    assert "a &amp; b" in body
+    assert "&amp;amp;" not in body
+
+
+HOSTILE = "<img src=x onerror=alert(1)>"
+
+
+def test_hostile_fields_escaped_everywhere():
+    text = f"{HOSTILE} FCANARY-TEST01 {HOSTILE}"
+    start = text.index("FCANARY")
+    h = hit("touched", "tool_result", prompt=HOSTILE,
+            tool={"name": "read_file", "call_id": "c1", "args": HOSTILE, "result": HOSTILE},
+            canary={"type": "vcf-canary-variant", "file": HOSTILE, "token": "FCANARY-TEST01"},
+            excerpt={"text": text, "start": start, "end": start + len("FCANARY-TEST01")})
+    for kind in ("touched", "seen"):
+        doc = standalone("Canary hits", participant_body(META, [h | {"kind": kind}], None))
+        assert "<img" not in doc
+        assert "&lt;img src=x onerror=alert(1)&gt;" in doc
+        assert doc.count("&lt;img") >= 6  # excerpt x2, prompt, args, result, file
+        assert "<mark>FCANARY-TEST01</mark>" in doc

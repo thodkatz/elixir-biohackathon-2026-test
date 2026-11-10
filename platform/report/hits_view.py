@@ -17,10 +17,13 @@ from pathlib import Path
 
 NOTICE = "Matching is literal: an encoded, split or paraphrased canary is not seen."
 
-# Loud kinds, in the headline's order (spec *Participant page* mockup); quiet kinds collapse into
-# "also seen".
+# Loud kinds, in the headline's order (spec *Participant page* mockup); quiet kinds, and any hit whose
+# kind is unknown or missing, collapse into "also seen" (spec *Hits*).
 LOUD_KINDS = ("touched", "answer", "sent", "delivered")
 QUIET_KINDS = ("seen", "args", "prompt")
+# The headline's "also seen" label for each quiet kind (mockup: "(metadata, args, prompt)").
+QUIET_LABELS = {"seen": "metadata", "args": "args", "prompt": "prompt"}
+OTHER_LABEL = "other"
 FRONTEND_LABELS = {"agui": "AG-UI", "openwebui": "Open WebUI"}
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -87,23 +90,24 @@ def _hit_html(hit: dict) -> str:
 
 
 def _counts(hits: list[dict]) -> dict[str, int]:
-    out = {k: 0 for k in LOUD_KINDS + QUIET_KINDS}
+    """Hits per kind; a hit whose kind is unknown or missing counts as OTHER_LABEL, a quiet one."""
+    out = {k: 0 for k in LOUD_KINDS + QUIET_KINDS + (OTHER_LABEL,)}
     for h in hits:
         kind = h.get("kind")
-        if kind in out:
-            out[kind] += 1
+        out[kind if kind in LOUD_KINDS or kind in QUIET_KINDS else OTHER_LABEL] += 1
     return out
 
 
 def _headline(hits: list[dict]) -> str:
     counts = _counts(hits)
     loud_total = sum(counts[k] for k in LOUD_KINDS)
-    quiet_total = sum(counts[k] for k in QUIET_KINDS)
+    quiet_total = len(hits) - loud_total
     per_kind = " &middot; ".join(f"{_esc(k)} {counts[k]}" for k in LOUD_KINDS)
     out = (f'<div class="headline"><span class="leaks">{loud_total} leak{"" if loud_total == 1 else "s"}</span>'
            f'<span class="per-kind">{per_kind}</span>')
     if quiet_total:
-        quiet_kinds = ", ".join(k for k in QUIET_KINDS if counts[k])
+        quiet_kinds = ", ".join([QUIET_LABELS[k] for k in QUIET_KINDS if counts[k]]
+                                + ([OTHER_LABEL] if counts[OTHER_LABEL] else []))
         out += f'<span class="also-seen">also seen: {quiet_total} ({_esc(quiet_kinds)})</span>'
     out += "</div>"
     return out
@@ -117,7 +121,7 @@ def _status_text(status: dict | None) -> str:
         return "archived run"
     if isinstance(status, dict) and isinstance(status.get("text"), str):
         return status["text"]
-    return _esc(status)
+    return str(status)  # plain: _header escapes it
 
 
 def _header(meta: dict, hits: list[dict], status: dict | None) -> str:
@@ -131,11 +135,18 @@ def _header(meta: dict, hits: list[dict], status: dict | None) -> str:
 
 def participant_body(meta: dict, hits: list[dict], status: dict | None) -> str:
     """The participant page's body (spec *Participant page*): header (workspace, status), the
-    headline counts, the literal-matching notice, then every hit newest first, collapsed under
-    <details>. `meta` is `workspace`/`instance`/`owner` (canary_watch.archive_meta's shape); `status`
-    is None for an archived run."""
-    ordered = sorted(hits, key=lambda h: (h.get("at") or h.get("detected") or ""), reverse=True)
-    items = "".join(_hit_html(h) for h in ordered)
+    headline counts, the literal-matching notice, then the loud hits newest first, each collapsed
+    under <details>, then the quiet ones (and any of unknown kind) newest first inside one collapsed
+    "also seen (N)" block (spec *Hits*), left out when there are none. `meta` is
+    `workspace`/`instance`/`owner` (canary_watch.archive_meta's shape); `status` is None for an
+    archived run."""
+    ordered = sorted(hits, key=lambda h: str(h.get("at") or h.get("detected") or ""), reverse=True)
+    loud = [h for h in ordered if h.get("kind") in LOUD_KINDS]
+    quiet = [h for h in ordered if h.get("kind") not in LOUD_KINDS]
+    items = "".join(_hit_html(h) for h in loud)
+    if quiet:
+        items += (f'<details class="also-seen"><summary>also seen ({len(quiet)})</summary>'
+                  f'{"".join(_hit_html(h) for h in quiet)}</details>')
     if not items:
         items = '<p class="muted">No hits yet.</p>'
     return (

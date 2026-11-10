@@ -131,13 +131,19 @@ def test_meta_from_run_yml_without_report(tmp_path):
 
 def test_cli_logs_no_token(tmp_path):
     out = tmp_path / "hits.jsonl"
+    page = tmp_path / "hits.html"
     done = subprocess.run([sys.executable, str(WATCH), "--archive", str(RUN), "--out", str(out),
-                           "--api-host", API_HOST], capture_output=True, text=True, timeout=60)
+                           "--html", str(page), "--api-host", API_HOST], capture_output=True, text=True, timeout=60)
     assert done.returncode == 0, done.stderr
     logs = done.stdout + done.stderr
     assert logs.strip()
+    assert TOKENS
     for token in TOKENS:
         assert token not in logs
+    assert "FCANARY" not in logs and "MCANARY" not in logs
+    assert stat.S_IMODE(page.stat().st_mode) == 0o640
+    assert "<mark>" in page.read_text()
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".")] == []  # no temp file left
     assert len(out.read_text().splitlines()) > 0
     assert {json.loads(line)["workspace"] for line in out.read_text().splitlines()} == {WORKSPACE}
 

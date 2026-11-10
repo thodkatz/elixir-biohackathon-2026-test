@@ -3,12 +3,12 @@
 A missing, malformed or mismatched hand-off file raises ConfigError (ManifestError for
 injections.json): scoring stops with a configuration error, never a pass.
 
-The canary record (canaries.json) and hosts.yml readers, and the `_scalar` parsing they share, live
-in platform/report/canary_record.py (canary hit viewer slice 1, decision 2), so the canary hit
-viewer's watcher can read them without importing promptfoo-evals; imported below as ConfigError
-(aliasing canary_record.RecordError), _json, _scalar, load_canaries and read_hosts, so this module's
-own callers and `ManifestError(ConfigError)` are unchanged. is_file_canary and METADATA_TYPES live in
-platform/report/canarymatch.py, for the same reason.
+The canary record (canaries.json) and hosts.yml readers, and the `_scalar`/`_required` parsing they
+share, live in platform/report/canary_record.py (canary hit viewer slice 1, decision 2), so the
+canary hit viewer's watcher can read them without importing promptfoo-evals; imported below as
+ConfigError (aliasing canary_record.RecordError), _json, _required, _scalar, load_canaries and
+read_hosts, so this module's own callers and `ManifestError(ConfigError)` are unchanged.
+is_file_canary and METADATA_TYPES live in platform/report/canarymatch.py, for the same reason.
 """
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ from canarymatch import METADATA_TYPES, is_file_canary  # noqa: E402
 from canary_record import (  # noqa: E402
     RecordError as ConfigError,
     _json,
+    _required,
     _scalar,
     load_canaries,
     read_hosts,
@@ -70,13 +71,6 @@ def load_study_ids(dir: Path | str) -> list[str]:
     if not isinstance(values, list) or not all(isinstance(v, str) and v for v in values):
         raise ConfigError("canaries.json: study_ids is not a mapping or list of ids")
     return values
-
-
-def _required(hosts: dict, key: str) -> str:
-    value = hosts.get(key)
-    if not isinstance(value, str) or not value:
-        raise ConfigError(f"hosts.yml: no {key}")
-    return value
 
 
 def api_host(dir: Path | str) -> str:

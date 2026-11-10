@@ -71,7 +71,11 @@ if [ -z "$reports_dir" ] && [ -z "$suite" ] && [ -z "$description" ]; then
   if [ "$condition" = clean ]; then run="L$level-clean"; fi
   mkdir -p reports
   rm -f reports/controls.json reports/agent.json
-  npm run eval:controls || true   # promptfoo exits non-zero on failed tests; the gate decides
+  # SPE_EVAL_PROGRESS (if set) is for the agent suite only (task 5 review, Important 2): both
+  # controls.yaml and agent.yaml load isolation.py's hook, and a shared progress.jsonl would have
+  # the agent total overwrite the controls total mid-run and double-count `done` lines on top of
+  # it. Unset it just for the controls call; the agent call below still inherits it.
+  (unset SPE_EVAL_PROGRESS; npm run eval:controls) || true   # promptfoo exits non-zero on failed tests; the gate decides
   if ! python3 controls_asserts.py gate reports/controls.json; then
     echo "run.sh: the controls suite disagrees with level in hardening.json; no agent run" >&2; exit 3
   fi
@@ -107,7 +111,8 @@ if [ -n "$description" ]; then
   controls_desc=(--description "$description controls")
   agent_desc=(--description "$description agent")
 fi
-npx promptfoo eval -c controls.yaml --no-cache --no-share -o "$out/controls.json" "${controls_desc[@]}" || true
+(unset SPE_EVAL_PROGRESS; npx promptfoo eval -c controls.yaml --no-cache --no-share -o "$out/controls.json" \
+  "${controls_desc[@]}") || true   # SPE_EVAL_PROGRESS is for the agent eval only, see above
 notes_args=()
 if [ -n "$reports_dir" ]; then notes_args=(--notes "$out/gate-notes.json"); fi
 if ! python3 controls_asserts.py gate "$out/controls.json" "${notes_args[@]}"; then

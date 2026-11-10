@@ -15,6 +15,12 @@ HERE = Path(__file__).resolve().parents[1]
 FAKE_NPM = """#!/bin/sh
 echo "$*" >> "$FAKE_NPM_LOG"
 mkdir -p reports
+if [ -n "${FAKE_PROGRESS_LOG:-}" ]; then
+  case "$2" in
+    eval:controls) echo "controls=${SPE_EVAL_PROGRESS:-}" >> "$FAKE_PROGRESS_LOG" ;;
+    eval:agent) echo "agent=${SPE_EVAL_PROGRESS:-}" >> "$FAKE_PROGRESS_LOG" ;;
+  esac
+fi
 case "$2" in
   eval:controls) cp "$FAKE_CONTROLS" reports/controls.json; exit 100 ;;
   eval:agent) echo '{"results": {"results": []}}' > reports/agent.json; exit 100 ;;
@@ -30,6 +36,13 @@ is_agent=0
 for a in "$@"; do
   if [ "$a" = "--repeat" ]; then is_agent=1; fi
 done
+if [ -n "${FAKE_PROGRESS_LOG:-}" ]; then
+  if [ "$is_agent" = 1 ]; then
+    echo "agent=${SPE_EVAL_PROGRESS:-}" >> "$FAKE_PROGRESS_LOG"
+  else
+    echo "controls=${SPE_EVAL_PROGRESS:-}" >> "$FAKE_PROGRESS_LOG"
+  fi
+fi
 if [ "$is_agent" = 1 ]; then
   echo '{"results": {"results": []}}' > "$out"
 else
@@ -67,10 +80,10 @@ def setup(tmp_path):
     write_hosts(hand, hosts("t-01"))  # handoff.load_hardening checks the instance against hosts.yml
     log = tmp_path / "npm.log"
 
-    def run(rows, repeat="3", *extra):
+    def run(rows, repeat="3", *extra, env_extra=None):
         (tmp_path / "controls.json").write_text(json.dumps({"results": {"results": rows}}))
         env = {**os.environ, "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}", "FAKE_NPM_LOG": str(log),
-               "FAKE_CONTROLS": str(tmp_path / "controls.json")}
+               "FAKE_CONTROLS": str(tmp_path / "controls.json"), **(env_extra or {})}
         p = subprocess.run(["bash", str(work / "run.sh"), str(hand), repeat, *extra], env=env, capture_output=True,
                            text=True)
         calls = log.read_text().splitlines() if log.exists() else []
@@ -104,6 +117,29 @@ def test_injected_runs_the_whole_suite_uncached_and_files_its_labels(setup):
     label = json.loads((out / "run.json").read_text())
     assert label["canaries_sha256"] == handoff.canaries_digest(hand)
     assert label["started"].endswith("Z") and len(label["started"]) == 20
+
+
+def test_progress_env_set_only_for_the_agent_eval_default_path(setup, tmp_path):
+    # task 5 review, Important 2: controls.yaml and agent.yaml both load isolation.py's progress
+    # hook, so a shared SPE_EVAL_PROGRESS double-counts `done` once the agent suite's own `total`
+    # line lands on top of the controls suite's. run.sh must unset it for the controls call only.
+    run, _work, _hand = setup
+    progress_log = tmp_path / "progress-calls.log"
+    code, _calls, _err = run(rows(), "3", env_extra={"SPE_EVAL_PROGRESS": str(tmp_path / "progress.jsonl"),
+                                                       "FAKE_PROGRESS_LOG": str(progress_log)})
+    assert code == 0
+    assert progress_log.read_text().splitlines() == ["controls=", f"agent={tmp_path / 'progress.jsonl'}"]
+
+
+def test_progress_env_set_only_for_the_agent_eval_non_default_path(setup, tmp_path):
+    run, work, _hand = setup
+    target = work.parent / "progress-reports"
+    progress_log = tmp_path / "progress-calls-2.log"
+    code, _calls, _err = run(rows(), "3", "--reports-dir", str(target),
+                             env_extra={"SPE_EVAL_PROGRESS": str(tmp_path / "progress.jsonl"),
+                                        "FAKE_PROGRESS_LOG": str(progress_log)})
+    assert code == 0
+    assert progress_log.read_text().splitlines() == ["controls=", f"agent={tmp_path / 'progress.jsonl'}"]
 
 
 def test_clean_runs_the_whole_suite_in_its_own_directory(setup):

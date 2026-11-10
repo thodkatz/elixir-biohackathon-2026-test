@@ -20,9 +20,10 @@ ladder experiments as worked examples. Nothing an agent needs is only in a UI or
 | Check | `check_experiment.py <name> [--json]` | each problem as `file:line: id: what is wrong: what to do`; `--json` the same as a list |
 | Try | `spe-eval arm baseline\|mitigated` | applies one arm and exits when the stack answers |
 | Run | `spe-eval run [--repeat N] [--detach]` | `--detach` starts the run in the background (a user systemd unit) and returns at once with its id; the agent's own command timeouts never cut a run short |
-| Watch | `spe-eval status [--json]` | the lock, arm, test *k* of *n*, last error; `spe-eval wait [--timeout S]` blocks until the run ends or the timeout passes, for agents that can wait in bounded steps |
-| Read | `spe-eval results [--json] [--test <id>]` | the two arms side by side as text: per test and metric, baseline and mitigated pass counts, the utility tests' outcome, and a one-line verdict per metric (closed, narrowed, unchanged, worse); `--test` adds that test's assertion reasons |
-| Share | `spe-eval pr-body <name>` | prints the PR template filled in: the files, the counts, the checker's output, ready to paste or pass to `gh pr create --body-file -` |
+| Watch | `spe-eval status [--json]` | the lock, the run id, arm, test *k* of *n*, last error; `spe-eval wait [--timeout S]` blocks until the run ends or the timeout passes, for agents that can wait in bounded steps |
+| List | `spe-eval runs [--json]` | every kept run, newest first: id, experiment, mitigation sets, model, repeat, how it ended |
+| Read | `spe-eval results [--run <id>] [--json] [--test <id>]` | the latest run, or the one named; the two arms side by side as text: per test and metric, baseline and mitigated pass counts, the utility tests' outcome, and a one-line verdict per metric (closed, narrowed, unchanged, worse); `--test` adds that test's assertion reasons |
+| Share | `spe-eval pr-body <name> [--run <id>]` | prints the PR template filled in, from the latest run of `<name>` or the one named: the files, the counts, the checker's output, ready to paste or pass to `gh pr create --body-file -` |
 
 Every command is non-interactive, prints no secrets, and exits 0 on success, 1 on a failure of the thing checked
 (a failed check, a run whose gate refused), 2 on a usage or configuration error, so an agent can branch on it

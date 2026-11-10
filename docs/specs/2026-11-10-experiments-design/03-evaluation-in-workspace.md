@@ -39,12 +39,19 @@ spe-eval status                            the lock, the current arm, the last r
 2. **Baseline arm.** `spe-apply all` with extra `-e` values (`spe-apply` today passes extra arguments only in its
    `ansible` form; `all` and `stack` learn to pass them too) with the base mitigations' `on` and the mitigation under test's `off`;
    rewrite the VM hand-off's `hardening.json` for this arm; wait until the stack answers.
-3. **Run** `run.sh` with reports in `reports/<experiment>/<arm>/` (its checks, the controls suite and its gate, then the agent suite) with the experiment's
+3. **Run** `run.sh` with reports in `reports/<experiment>/<run id>/<arm>/` (its checks, the controls suite and its gate, then the agent suite) with the experiment's
    tests plus the utility group, `--repeat N --no-cache`, `PROMPTFOO_CONFIG_DIR=~/spe-eval/promptfoo` (the viewer's
-   database), and an eval description `<experiment> baseline [<mitigation ids>] <model>`.
+   database), and an eval description `<experiment> <run id> baseline [<mitigation ids>] <model>`.
 4. **Mitigated arm.** The same with the mitigation under test `on`; run again, described `… mitigated …`.
 5. **Return** to the arm the workspace was built with (its `spe_mitigations`), release the lock, print where the
    results are: the Evaluations app.
+
+**Every run is kept.** A run's id is its start time in UTC (`20261110T142301Z`), fixed when the lock is taken and
+recorded in each arm's `run.json`. Nothing `spe-eval` writes is deleted or overwritten by a later run: each run
+gets a new reports directory (`spe-eval` refuses one that already exists, so `run.sh`'s clearing of its own
+reports directory never reaches an earlier run), its evals are added to the promptfoo database beside the earlier
+ones, and its window is appended to `windows.jsonl`. A run that fails or is stopped keeps what it wrote, and its
+`run.json` says how it ended. Reading commands (07) take the latest run unless given `--run <id>`.
 
 `repeat` defaults to 1 for an experiment (a participant's iteration); the ladder's 3 or 5 is a flag away. The run
 uses whatever model the workspace's agent is configured with, paid or not; `spe-eval` puts no guard on the provider.
@@ -88,6 +95,8 @@ would otherwise bury the participant's own.
 
 ## Archive
 
-On stop, `archive.yml` copies `~/spe-eval/reports/` (each arm's `controls.json`, `agent.json`, `hardening.json`,
-`run.json`) and `~/spe-eval/promptfoo/` into the run directory's `evals/` (decision 13). They hold canaries, as the
+On stop, `archive.yml` copies all of `~/spe-eval/reports/` (every run, each arm's `controls.json`, `agent.json`,
+`hardening.json`, `run.json`), `~/spe-eval/promptfoo/` (every eval) and `windows.jsonl` into the run directory's
+`evals/` (decision 13). Stop destroys the VM, so this copy is what survives a workspace session; the next start
+begins with empty directories, and earlier sessions stay in their own run directories on the portal. They hold canaries, as the
 run directory's chats and `canaries.json` already do.

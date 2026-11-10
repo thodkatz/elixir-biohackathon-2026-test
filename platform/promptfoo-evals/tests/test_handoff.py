@@ -114,7 +114,10 @@ def test_hardening_from_another_instance_is_refused(handoff_dir):
 
 @pytest.mark.parametrize("change", [
     {"schema_version": 2}, {"level": 6}, {"level": 1.5}, {"model": ""}, {"switches": {"spe_harden_egress": True}},
-    {"restore_seconds": "61"}, {"injections": None}, {"injections": "yes"}])
+    {"restore_seconds": "61"}, {"injections": None}, {"injections": "yes"},
+    # Review Fix round 1: injections not in (True, False, "mixed") let 1 == True, 0 == False, 1.0 == True
+    # through (Python equality, not identity); isinstance(..., bool) or == "mixed" does not.
+    {"injections": 1}, {"injections": 0}, {"injections": 1.0}])
 def test_malformed_hardening(handoff_dir, change):
     (handoff_dir / "hardening.json").write_text(json.dumps(hardening(**change)))
     with pytest.raises(handoff.ConfigError, match="hardening.json"):

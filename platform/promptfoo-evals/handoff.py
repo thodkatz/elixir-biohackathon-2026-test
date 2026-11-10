@@ -156,7 +156,7 @@ def check_hardening(record: object) -> dict:
     if level != counted:
         raise ConfigError(f"hardening.json: level {level} does not match {counted} leading switches on")
     injections = record.get("injections")
-    if injections not in (True, False, "mixed"):
+    if not (isinstance(injections, bool) or injections == "mixed"):
         raise ConfigError("hardening.json: injections must be true (every spe_inject_* on), false (all off) "
                           "or \"mixed\" (an experiment's arm)")
     restore = record.get("restore_seconds")

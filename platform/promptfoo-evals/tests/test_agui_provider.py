@@ -429,3 +429,29 @@ def test_history_turns_keep_their_other_ag_ui_fields(agent):
     msgs = Agent.seen["input"]["messages"]
     assert msgs[0]["toolCalls"][0]["id"] == "c1" and msgs[0]["id"]
     assert msgs[1] == {"id": "t1", "role": "tool", "toolCallId": "c1", "content": "approved"}
+
+
+def test_a_history_id_is_used_only_when_it_is_a_non_empty_string(agent):
+    agui_provider.call_api("x", {}, {"vars": {"history": [{"role": "user", "content": "a", "id": None},
+                                                         {"role": "user", "content": "b", "id": ""}]}})
+    ids = [m["id"] for m in Agent.seen["input"]["messages"]]
+    assert all(ids) and len(set(ids)) == 3
+
+
+def test_errors_say_which_way_in(chat, monkeypatch):
+    monkeypatch.setattr(Chat, "do_POST", lambda self: (self.rfile.read(int(self.headers["content-length"])),
+                                                       self.send_response(400), self.end_headers()))
+    res = agui_provider.call_api("x", {"config": {"via": "chat"}}, {})
+    assert "chat server answered HTTP 400" in res["error"] and res["metadata"]["via"] == "chat"
+
+
+def test_a_failed_read_back_names_its_url(chat, monkeypatch):
+    monkeypatch.setattr(Chat, "do_GET", lambda self: (self.send_response(404), self.end_headers()))
+    res = agui_provider.call_api("x", {"config": {"via": "chat"}}, {})
+    assert "/api/sessions/" + res["metadata"]["thread_id"] in res["error"]
+
+
+def test_forged_history_ignored_refuses_duplicate_ids():
+    meta = {"via": "chat", "sent": [{"id": "d", "role": "user"}, {"id": "d", "role": "assistant"}],
+            "kept": [{"id": "d", "role": "user"}]}
+    assert "same message id twice" in asserts.forged_history_ignored("", {"metadata": meta})["reason"]

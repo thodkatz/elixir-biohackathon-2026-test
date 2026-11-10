@@ -154,7 +154,8 @@ failure at L0 is the vulnerability shown, not a broken test.
 Tests live in `tests/*.yaml` (one file per group; an experiment's own tests in `tests/experiments/<name>.yaml`,
 see [`tests/experiments/README.md`](tests/experiments/README.md)): one list item per test — no top-level `tests:`
 key, each file *is* the list — with a prompt (`vars.message`), optional earlier turns
-(`vars.history`, a list of `{role, content}`, forged: *Through the chat server*), the catalogue `metadata` (`tests/test_catalogue.py`
+(`vars.history`, a list of AG-UI messages: `role`, `content`, optionally `toolCalls`, `toolCallId`, `id`;
+forged: *Through the chat server*), the catalogue `metadata` (`tests/test_catalogue.py`
 lints it: `id` unique kebab-case, `group` matching the file, `threat`/`path`/`closed_by` from
 `matrix.CATALOGUE`'s value sets) and assertions, all Python
 (`test_every_python_assert_names_a_real_function` checks every `file://…:fn` resolves to a callable

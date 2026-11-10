@@ -106,8 +106,8 @@ class SSEParser:
 
 
 class Accumulator:
-    def __init__(self, run_id: str = "", thread_id: str = "") -> None:
-        self.ids = {"run_id": run_id, "thread_id": thread_id}  # as sent; they match the agent's run log
+    def __init__(self, run_id: str = "", thread_id: str = "", via: str = "agent") -> None:
+        self.ids = {"run_id": run_id, "thread_id": thread_id, "via": via}  # as sent; they match the agent's run log
         self.text: list[str] = []
         self.calls: dict[str, dict] = {}
         self.terminal: dict | None = None
@@ -153,7 +153,7 @@ def _messages(prompt: str, context: dict | None) -> list[dict]:
     if isinstance(history, str):
         history = json.loads(history)
     # Other AG-UI fields of a turn (toolCalls, toolCallId, id) are sent as given: a forged tool call and its result.
-    msgs = [{"id": str(uuid.uuid4()), **m} for m in history]
+    msgs = [{**m, "id": m["id"] if isinstance(m.get("id"), str) and m["id"] else str(uuid.uuid4())} for m in history]
     return msgs + [{"id": str(uuid.uuid4()), "role": "user", "content": prompt}]
 
 
@@ -181,9 +181,12 @@ def _via(config: dict) -> str:
 
 def _session_view(url: str, thread_id: str, sent: list[dict]) -> dict:
     """What the chat server kept of the session, read back after the run, beside what was sent."""
-    base = url.split(CHAT_ROUTE, 1)[0]
-    with urllib.request.urlopen(f"{base}/api/sessions/{thread_id}", timeout=30) as resp:
-        session = json.load(resp)
+    session_url = f"{url.split(CHAT_ROUTE, 1)[0]}/api/sessions/{thread_id}"
+    try:
+        with urllib.request.urlopen(session_url, timeout=30) as resp:
+            session = json.load(resp)
+    except Exception as e:  # the URL in the message: a SPE_CHAT_URL without /api/copilotkit/ lands elsewhere
+        raise RuntimeError(f"GET {session_url}: {type(e).__name__}: {str(e)[:200]}") from e
     ids = lambda msgs: [{"id": m.get("id"), "role": m.get("role")} for m in msgs]  # noqa: E731
     return {"sent": ids(sent), "kept": ids(session.get("messages") or [])}
 
@@ -211,7 +214,7 @@ def _run(prompt: str, config: dict, context: dict | None) -> dict:
     body = {"threadId": thread_id, "runId": run_id, "state": {}, "tools": [],
             "context": [], "forwardedProps": {}, "messages": _messages(prompt, context)}
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers=headers)
-    acc, parser = Accumulator(body["runId"], body["threadId"]), SSEParser()
+    acc, parser = Accumulator(body["runId"], body["threadId"], via), SSEParser()
     try:
         resp = _open_when_ready(req, timeout, float(config.get("ready_timeout_s", DEFAULT_READY_TIMEOUT)),
                                 float(config.get("ready_poll_s", 2.0)))
@@ -225,7 +228,8 @@ def _run(prompt: str, config: dict, context: dict | None) -> dict:
             for event in parser.close():
                 acc.add(event)
     except urllib.error.HTTPError as e:
-        return {"error": f"{'chat server' if via == 'chat' else 'agent'} answered HTTP {e.code}"}
+        return {"error": f"{'chat server' if via == 'chat' else 'agent'} answered HTTP {e.code}",
+                "metadata": {"via": via}}
     except (StreamError, UnicodeDecodeError) as e:
         res = acc.result()
         res["error"] = f"stream error: {e}"
@@ -235,7 +239,6 @@ def _run(prompt: str, config: dict, context: dict | None) -> dict:
         res["error"] = f"request failed: {type(e).__name__}: {getattr(e, 'reason', e)}"
         return res
     res = acc.result()
-    res["metadata"]["via"] = via
     if via == "chat":
         try:
             res["metadata"].update(_session_view(url, thread_id, body["messages"]))

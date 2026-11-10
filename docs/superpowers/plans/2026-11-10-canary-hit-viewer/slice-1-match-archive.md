@@ -3,15 +3,17 @@
 Branch `impl/canary-hit-viewer-1-match-archive`. Spec: decisions 2, 3, 4, 5, 11 (*Matching*, *Sources*, *Hits*),
 *Early output*, clarification 1. Global constraints: [README](README.md#global-constraints).
 
-### Task 1: `canarymatch.py`, with `metrics.py` and `handoff.py` on it
+### Task 1: `canarymatch.py` and `canary_record.py`, with `metrics.py` and `handoff.py` on them
 
 Decision 2.
 
 **Files:**
-- Create: `platform/report/canarymatch.py`, `platform/report/tests/test_canarymatch.py`
+- Create: `platform/report/canarymatch.py`, `platform/report/canary_record.py` (ruling 2),
+  `platform/report/tests/test_canarymatch.py`
 - Modify: `platform/promptfoo-evals/metrics.py` (drop `_unescape`, `_texts`, `_word`, `_found`,
   `URL`, `_hosts`, `_received`; import them), `platform/promptfoo-evals/handoff.py` (`METADATA_TYPES`,
-  `is_file_canary` imported from `canarymatch`)
+  `is_file_canary` imported from `canarymatch`; `ConfigError`, `_scalar`, `read_hosts`, `load_canaries` from
+  `canary_record`)
 - Test: `platform/promptfoo-evals/tests/test_metrics.py` (add one test),
   `platform/agui/pydantic-ai-agent/tests/test_airlock.py` (add one test)
 
@@ -22,6 +24,10 @@ Decision 2.
   `spans(token: str, text: str) -> list[tuple[int, int]]`; `METADATA_TYPES: frozenset[str]`;
   `is_file_canary(entry: dict) -> bool`. Bodies move verbatim from `metrics.py`/`handoff.py`; only `spans` is new
   (`[m.span() for m in word(token).finditer(text)]`).
+- Produces, in `canary_record`: `class RecordError(Exception)`; `load_canaries(dir) -> list[dict]`;
+  `read_hosts(dir) -> dict`; `_scalar`; bodies verbatim from `handoff.py` with `ConfigError` read as `RecordError`
+  (`load_canaries`'s private `_json` comes along). `handoff.py`: `from canary_record import RecordError as
+  ConfigError, _scalar, load_canaries, read_hosts`, so `ManifestError(ConfigError)` and every caller are unchanged.
 - `metrics.py` imports by path: `sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "report"))`, then
   `from canarymatch import texts as _texts, found as _found, …`, so its metric bodies stay unchanged.
 
@@ -30,7 +36,8 @@ Decision 2.
   `word("FCANARY-TEST01")` matches), `test_word_is_whole_word` (no match in `FCANARY-TEST011`),
   `test_spans_positions` (`spans("FCANARY-TEST01", "ab FCANARY-TEST01 c") == [(3, 17)]`),
   `test_received_form_decoded` (`received({"path": "/x?q=FCANARY%2DTEST01", "body": None})` matches),
-  `test_hosts`, `test_is_file_canary` (a `drs-…` metadata type is not a file canary; take the type names from
+  `test_hosts`, `test_record_readers` (`read_hosts` and `load_canaries` over a `hosts.yml` and `canaries.json` written to
+  `tmp_path`; an encrypted-only record raises `RecordError`), `test_is_file_canary` (a `drs-…` metadata type is not a file canary; take the type names from
   `handoff.METADATA_TYPES` as it is now). In `test_metrics.py`: `test_matching_lives_in_canarymatch`: the source
   of `metrics.py` defines none of `def _texts`, `def _unescape`, `def _word`, `def _found`, `def _received`,
   `def _hosts`. In `test_airlock.py`: `test_airlock_does_not_import_canarymatch` (the airlock's source has no
@@ -38,10 +45,11 @@ Decision 2.
 - [ ] **Step 2: Run** `uv run --with pytest --with markdown pytest platform/report/tests/test_canarymatch.py -q` and
   `(cd platform/promptfoo-evals && uv run --group dev pytest tests/test_metrics.py -q)`. Expected: FAIL (no module
   `canarymatch`; the grep test fails).
-- [ ] **Step 3: Move the functions** into `canarymatch.py` and import them in `metrics.py` and `handoff.py`.
+- [ ] **Step 3: Move the functions** into `canarymatch.py` and `canary_record.py` and import them in `metrics.py`
+  and `handoff.py`; `canary_record.py` and `canarymatch.py` import nothing from `platform/promptfoo-evals/`.
 - [ ] **Step 4: Run** both suites in full and the agent's. Expected: PASS, with every pre-existing metrics test
   unchanged.
-- [ ] **Step 5: Commit** `Move canary matching into platform/report/canarymatch.py`.
+- [ ] **Step 5: Commit** `Move canary matching and the record readers into platform/report`.
 
 ### Task 2: places and hits, per source
 

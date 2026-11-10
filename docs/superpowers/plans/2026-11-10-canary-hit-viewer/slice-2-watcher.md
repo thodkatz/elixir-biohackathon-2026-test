@@ -64,8 +64,8 @@ Decisions 1, 9; ruling 6.
   one instance, the newer (mtime) only; `encrypted` when only `canaries.json.age` is there; `running` when
   `hosts.yml` is newer than every `<runs_dir>/*_<instance>` directory. SSH user, host and key: as the archive
   playbook connects (read `platform/ansible/playbooks/archive.yml` and the `handoff` role's `hosts.yml` keys; the
-  key is `<output_dir>/ssh_key`). `hosts.yml` is read with `handoff.read_hosts` (imported by path from
-  `platform/promptfoo-evals/`).
+  key is `<output_dir>/ssh_key`). `hosts.yml` is read with `canary_record.read_hosts`, the record with
+  `canary_record.load_canaries` (ruling 2).
 - Defaults: `--reports-dir /data-share/reports`, `--runs-dir /data-share/runs`, `--hits-dir
   /data-share/canary-hits`, `--output-root` `<repo>/platform/ansible/output` (from the script's own path).
 

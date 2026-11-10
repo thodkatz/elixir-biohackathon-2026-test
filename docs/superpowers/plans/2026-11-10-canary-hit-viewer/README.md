@@ -10,9 +10,10 @@ around it, on a "Canary hits" page; Coder owners see every workspace's hits on o
 decisions 1–11, *Early output*, clarification 1 (Open WebUI's chats are a source). Latest clarification when this
 plan was written: 1. Each slice file names the decisions it implements.
 
-**Architecture.** Four modules in `platform/report/`, standard library only, each with one job:
+**Architecture.** Five modules in `platform/report/`, standard library only, each with one job:
 
 - `canarymatch.py`: whether and where a canary is in a text (decision 2); `metrics.py` imports it.
+- `canary_record.py`: reads the canary record and `hosts.yml` (ruling 2); `handoff.py` imports it.
 - `canary_hits.py`: turns one source's records into **places** (a text with its trace: frontend, session, run,
   prompt, tool) and places into **hits** (kind, excerpt), dedups them, and appends them to a hits file.
 - `canary_watch.py`: the watcher: `--archive` scans one archived run (slice 1); the daemon finds running
@@ -38,10 +39,15 @@ Each is *decision, why, cost if wrong*; a slice that departs from this plan adds
    `openwebui-export.json` holds, so one parser serves live and archive. *Cost if wrong:* an Open WebUI upgrade
    renames the table or columns; the reader then reports the source as unreadable (the page says so) and the
    fallback is the API (`/api/v1/chats/all/db`, as `export_openwebui.py` calls it) with credentials passed on stdin.
-2. **`is_file_canary` and `METADATA_TYPES` move into `canarymatch.py`**; `promptfoo-evals/handoff.py` imports them
-   from there. *Why:* the watcher needs the file/metadata rule for `touched` vs `seen` (decision 4), and one rule
-   has one copy (decision 2). The watcher imports `handoff` by path only for `load_canaries` and `read_hosts`,
-   the hand-off format's owner. *Cost if wrong:* none expected.
+2. **The watcher imports nothing from `platform/promptfoo-evals/`.** `is_file_canary` and `METADATA_TYPES` move
+   into `canarymatch.py`; `load_canaries`, `read_hosts` (with its `_scalar`) and the error they raise move into a
+   new `platform/report/canary_record.py` (`RecordError`); `promptfoo-evals/handoff.py` imports all of them from
+   there (`from canary_record import RecordError as ConfigError, …`, so its callers and `ManifestError` keep
+   working). *Why:* the watcher needs the file/metadata rule for `touched` vs `seen` (decision 4) and the record and
+   `hosts.yml` readers, and upstream has `platform/report/` but neither `handoff.py` nor `metrics.py` (checked
+   2026-11-10, slice 5): an import of `handoff` would break the port. One rule keeps one copy (decision 2).
+   *Cost if wrong:* none expected; the ladder's upstream port then needs `canary_record.py` and `canarymatch.py`
+   upstream first (slice 5 says so in `BACKLOG.md`).
 3. **Agent run log hits are `frontend: "agui"`.** Only the AG-UI chat drives the agent (Open WebUI calls the model
    itself, clarification 1). *Cost if wrong:* another frontend added on the agent gets mislabelled until the run
    log names its caller.
@@ -56,6 +62,16 @@ Each is *decision, why, cost if wrong*; a slice that departs from this plan adds
    `running`|`stopped`|`unreachable`|`encrypted`|`capped`, `since`, `last_poll`), which the pages read for the
    header ("running · watched 3 s ago"). *Why:* the service must not hold the watcher's state or SSH access
    (spec ruling 4). *Cost if wrong:* none.
+7. **Event streams are bounded**: each ends after 30 minutes (the browser reconnects and resumes), and the service
+   holds at most 200 open streams (503 past it). *Why:* the service is a `ThreadingHTTPServer`, one thread per open
+   stream; without a bound, open tabs pile up threads. *Cost if wrong:* a busy event (more than 200 open pages)
+   sees 503s and a page that stops updating until reload; raise the cap.
+8. **The stream carries each hit's HTML, rendered by the server** (`hits_view.hit_html`), which the page script
+   inserts. *Why:* one renderer, in Python, escaped and tested once; the script holds no template to drift from
+   it. *Cost if wrong:* none expected; the CSP still forbids inline script, so escaped HTML cannot run.
+9. **The admin page shows the newest 500 hits and `hits.json` the newest 2000**; each workspace's own page and
+   JSON hold all of it. *Why:* 50 workspaces at the 10 MB cap would be half a gigabyte per page load. *Cost if
+   wrong:* an admin follows the workspace link for older hits.
 
 ## Global Constraints
 
@@ -64,7 +80,7 @@ Every task's requirements include these.
 - **Tests, before every commit:** `uv run --with pytest --with markdown pytest platform/report/tests -q` and, for a
   slice touching `metrics.py` or `handoff.py`, `(cd platform/promptfoo-evals && uv run --group dev pytest -q)`;
   slice 1 also `(cd platform/agui/pydantic-ai-agent && uv run --group dev pytest -q)` (the airlock test). New tests live in `platform/report/tests/` (`test_canarymatch.py`, `test_canary_hits.py`,
-  `test_canary_watch.py`, `test_hits_pages.py`).
+  `test_canary_reader.py`, `test_canary_watch.py`, `test_hits_pages.py`, `test_hits_service.py`).
 - **Standard library only** in `platform/report/` (the portal runs it from the checkout with the system Python).
 - **Nothing on the instance changes** (decision 1): no file under `platform/instance/`, no task in a role that runs
   on the instance. A test asserts the reader opens files read-only.
@@ -91,13 +107,14 @@ Every task's requirements include these.
 | File | Slice | Job |
 |---|---|---|
 | `platform/report/canarymatch.py` | 1 | matching functions, file/metadata rule |
-| `platform/promptfoo-evals/metrics.py`, `handoff.py` | 1 | import from `canarymatch` instead of defining |
+| `platform/report/canary_record.py` | 1 | `load_canaries`, `read_hosts` (ruling 2) |
+| `platform/promptfoo-evals/metrics.py`, `handoff.py` | 1 | import from `canarymatch` and `canary_record` instead of defining |
 | `platform/report/canary_hits.py` | 1 | places per source, hits, dedup, `HitsFile` |
 | `platform/report/hits_view.py` | 1, 3, 4 | HTML for hits (static file, participant page, admin page) |
 | `platform/report/canary_watch.py` | 1 (`--archive`), 2 (daemon) | the watcher |
 | `platform/report/canary_reader.py` | 2 | the reader sent to the instance |
 | `platform/coder/deploy/sperange-canary-watch.service`, `platform/coder/README.md` | 2 | unit, hits root setup |
-| `platform/report/sperange_report.py`, `static/hits.js`, `static/hits.css` | 3, 4 | routes, event streams, page script |
+| `platform/report/sperange_report.py`, `static/hits.js`, `static/hits-admin.js`, `static/hits.css` | 3, 4 | routes, event streams, page scripts |
 | `platform/coder/template/main.tf` | 3 | the "Canary hits" app |
 | `platform/report/README.md` | 2, 3, 4 | what the watcher and pages do, how to run `--archive` |
 

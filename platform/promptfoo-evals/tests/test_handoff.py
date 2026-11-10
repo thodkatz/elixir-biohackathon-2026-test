@@ -132,6 +132,57 @@ def test_hardening_level_disagrees_with_the_switches(handoff_dir):
     assert "1" in str(excinfo.value)
 
 
+def test_hardening_accepts_mixed_injections(handoff_dir):
+    # R4: an experiment's arm that plants only some fixtures; check_hardening alone accepts it
+    # (condition(), the ladder's own route, still refuses it: test_mixed_is_refused).
+    (handoff_dir / "hardening.json").write_text(json.dumps(hardening(injections="mixed")))
+    assert handoff.load_hardening(handoff_dir)["injections"] == "mixed"
+
+
+def test_hardening_accepts_mitigations_and_experiment(handoff_dir):
+    record = hardening(mitigations=["L1", "trs-guard"], experiment="trs-guard")
+    (handoff_dir / "hardening.json").write_text(json.dumps(record))
+    loaded = handoff.load_hardening(handoff_dir)
+    assert loaded["mitigations"] == ["L1", "trs-guard"] and loaded["experiment"] == "trs-guard"
+
+
+def test_hardening_accepts_the_spe_experiments_defaults(handoff_dir):
+    # platform/ansible/README.md: a spe_experiments build with no experiment selected writes
+    # mitigations: [] and experiment: "", not absent.
+    record = hardening(mitigations=[], experiment="")
+    (handoff_dir / "hardening.json").write_text(json.dumps(record))
+    loaded = handoff.load_hardening(handoff_dir)
+    assert loaded["mitigations"] == [] and loaded["experiment"] == ""
+
+
+@pytest.mark.parametrize("change", [{"mitigations": "L1"}, {"mitigations": [1]}, {"mitigations": [""]},
+                                     {"experiment": 1}, {"experiment": True}])
+def test_malformed_mitigations_or_experiment(handoff_dir, change):
+    (handoff_dir / "hardening.json").write_text(json.dumps(hardening(**change)))
+    with pytest.raises(handoff.ConfigError, match="hardening.json"):
+        handoff.load_hardening(handoff_dir)
+
+
+def test_mitigation_probes(repo_root):
+    mitigations = repo_root / "mitigations"
+    mitigations.mkdir(parents=True)
+    (mitigations / "trs-guard.yml").write_text("id: trs-guard\nname: x\nprobes: [trs-write, wes-inline]\n")
+    (mitigations / "none.yml").write_text("id: none\nprobes: []\n")
+    assert handoff.mitigation_probes("trs-guard", repo_root) == frozenset({"trs-write", "wes-inline"})
+    assert handoff.mitigation_probes("none", repo_root) == frozenset()
+
+
+def test_mitigation_probes_reads_the_real_ladder_files():
+    # Sanity check against the repository's own mitigations/*.yml, with the real REPO_ROOT.
+    assert handoff.mitigation_probes("L1") == frozenset({"trs-write", "wes-inline", "e2e-exploit"})
+
+
+@pytest.mark.parametrize("mitigation_id", ["nope", "../../etc/passwd", "L1/../../etc"])
+def test_mitigation_probes_unknown_or_unsafe_id(repo_root, mitigation_id):
+    with pytest.raises(handoff.ConfigError):
+        handoff.mitigation_probes(mitigation_id, repo_root)
+
+
 def test_load_injections(handoff_dir):
     ids = [e["id"] for e in handoff.load_injections(handoff_dir)]
     assert ids == ["registry-preflight", "drs-integrity", "workflow-preflight"]
@@ -202,8 +253,10 @@ def test_clean_with_placements_is_refused(handoff_dir, repo_root):
 
 
 def test_mixed_is_refused(handoff_dir, repo_root):
+    # check_hardening now accepts "mixed" (an experiment's arm, R4); condition() still refuses it:
+    # the ladder's own route only ever builds clean or fully injected.
     (handoff_dir / "hardening.json").write_text(json.dumps(hardening(injections="mixed")))
-    with pytest.raises(handoff.ConfigError, match="injections must be"):
+    with pytest.raises(handoff.ConfigError, match="not a ladder condition"):
         handoff.condition(handoff_dir, repo_root)
 
 

@@ -32,6 +32,15 @@ def hand(tmp_path, monkeypatch):
     return tmp_path
 
 
+@pytest.fixture
+def repo_root(tmp_path, monkeypatch):
+    import handoff
+    root = tmp_path / "repo"
+    (root / "mitigations").mkdir(parents=True)
+    monkeypatch.setattr(handoff, "REPO_ROOT", root)
+    return root
+
+
 def ctx(probe, state):
     return {"vars": {"probe": probe}, "metadata": {"probe": probe, "state": state, "evidence": "ev",
                                                    "http_codes": {"x": 403}}}
@@ -83,6 +92,32 @@ def test_missing_hardening_or_unknown_probe_fails(hand):
     assert not ca.probe_state("", ctx("nope", "open"))["pass"]
 
 
+# --- the gate learns the arm (experiments spec part 03, decision 9 / R4) ---
+def test_participant_mitigation_closing_a_probe_at_level_0_passes_with_a_note(hand, repo_root):
+    (repo_root / "mitigations" / "trs-guard.yml").write_text("id: trs-guard\nprobes: [trs-write]\n")
+    write(hand, 0, over={"mitigations": ["trs-guard"]})
+    res = ca.probe_state("", ctx("trs-write", "closed"))
+    assert res["pass"] and res["reason"] == "trs-write closed by this arm; declare it in probes"
+    # the ladder-only expectation (open at level 0) still fails when the probe is actually open:
+    assert not ca.probe_state("", ctx("trs-write", "open"))["pass"]
+
+
+def test_ladder_only_arm_keeps_todays_exact_expectations(hand, repo_root):
+    # L1 is a ladder id: arm_closed_probes skips it (the level already counts it), so an
+    # unexpectedly closed probe at level 0 still fails the gate.
+    write(hand, 0, over={"mitigations": ["L1"]})
+    res = ca.probe_state("", ctx("trs-write", "closed"))
+    assert not res["pass"] and "closed by this arm" not in res["reason"]
+
+
+def test_arm_closed_probes_skips_ladder_ids_and_unions_the_rest(repo_root):
+    (repo_root / "mitigations" / "trs-guard.yml").write_text("id: trs-guard\nprobes: [trs-write, wes-inline]\n")
+    (repo_root / "mitigations" / "other.yml").write_text("id: other\nprobes: [egress]\n")
+    assert ca.arm_closed_probes(["L1", "trs-guard", "other"]) == frozenset({"trs-write", "wes-inline", "egress"})
+    assert ca.arm_closed_probes(None) == frozenset()
+    assert ca.arm_closed_probes(["L1", "L2"]) == frozenset()
+
+
 def report(rows):
     return {"results": {"results": rows, "stats": {}}}
 
@@ -98,6 +133,32 @@ def test_gate():
     assert bad == ["egress: egress: expected open, observed error"]
     assert ca.mismatches(report([])) and ca.mismatches({})
     assert "missing" in ca.mismatches(report([row("egress")]))[0]
+
+
+def test_notes_extracts_only_passing_arm_override_rows():
+    rows = [row("trs-write", True, "trs-write closed by this arm; declare it in probes"),
+            row("egress", True, "egress: expected open, observed open at L0"),
+            row("tier-reach", False, "tier-reach closed by this arm; declare it in probes")]
+    assert ca.notes(report(rows)) == ["trs-write closed by this arm; declare it in probes"]
+    assert ca.notes(report([])) == [] and ca.notes({}) == []
+
+
+def test_gate_cli_prints_and_writes_notes(tmp_path, capsys):
+    rows = [row(p, True, "r") for p in ca.PROBE_CONTROL]
+    first = next(iter(ca.PROBE_CONTROL))
+    rows[0] = row(first, True, f"{first} closed by this arm; declare it in probes")
+    path = tmp_path / "controls.json"
+    path.write_text(json.dumps(report(rows)))
+    notes_path = tmp_path / "gate-notes.json"
+    assert ca.main(["gate", str(path), "--notes", str(notes_path)]) == 0
+    assert f"note: {first} closed by this arm; declare it in probes" in capsys.readouterr().out
+    assert json.loads(notes_path.read_text()) == [f"{first} closed by this arm; declare it in probes"]
+
+
+def test_gate_cli_rejects_bad_usage(tmp_path):
+    assert ca.main(["gate"]) == 2
+    assert ca.main(["gate", str(tmp_path / "x.json"), "--notes"]) == 2
+    assert ca.main(["gate", str(tmp_path / "x.json"), "extra", "args"]) == 2
 
 
 def test_check_handoff(hand):

@@ -20,6 +20,23 @@ case "$2" in
   eval:agent) echo '{"results": {"results": []}}' > reports/agent.json; exit 100 ;;
 esac
 """
+# The non-default path (--suite/--reports-dir/--description) calls `npx promptfoo eval` directly rather
+# than an npm script (run.sh's own comment says why): `-o <path>` is always the 8th word, and an agent
+# eval is the one carrying `--repeat`, so detecting that is enough to tell the two calls apart.
+FAKE_NPX = """#!/bin/sh
+echo "$*" >> "$FAKE_NPM_LOG"
+out=$8
+is_agent=0
+for a in "$@"; do
+  if [ "$a" = "--repeat" ]; then is_agent=1; fi
+done
+if [ "$is_agent" = 1 ]; then
+  echo '{"results": {"results": []}}' > "$out"
+else
+  cp "$FAKE_CONTROLS" "$out"
+fi
+exit 100
+"""
 ALL = tuple(ENTRY_SHAPE)  # the three fixture ids
 
 
@@ -40,6 +57,8 @@ def setup(tmp_path):
     (tmp_path / "bin").mkdir()
     (tmp_path / "bin" / "npm").write_text(FAKE_NPM)
     (tmp_path / "bin" / "npm").chmod(0o755)
+    (tmp_path / "bin" / "npx").write_text(FAKE_NPX)
+    (tmp_path / "bin" / "npx").chmod(0o755)
     hand = tmp_path / "handoff"
     hand.mkdir()
     (hand / "hardening.json").write_text(json.dumps(hardening(instance="t-01")))
@@ -131,3 +150,96 @@ def test_bad_repeat(setup, repeat):
     run, _, _ = setup
     code, calls, _ = run(rows(), repeat)
     assert code == 2 and calls == []
+
+
+# --- run.sh's three new arguments (experiments spec part 03) ---
+def test_reports_dir_places_everything_directly_and_is_not_cleared(setup):
+    run, work, hand = setup
+    target = work.parent / "custom-reports"
+    target.mkdir()
+    (target / "stale.txt").write_text("x")  # proves the directory is not cleared first
+    code, calls, _ = run(rows(), "3", "--reports-dir", str(target))
+    assert code == 0
+    assert calls == [
+        f"promptfoo eval -c controls.yaml --no-cache --no-share -o {target}/controls.json",
+        f"promptfoo eval -c agent.yaml --no-cache --no-share -o {target}/agent.json --repeat 3",
+    ]
+    assert (target / "stale.txt").exists()
+    names = {p.name for p in target.iterdir()}
+    assert names == {"agent.json", "controls.json", "hardening.json", "injections.json", "run.json",
+                     "gate-notes.json", "stale.txt"}
+    assert json.loads((target / "gate-notes.json").read_text()) == []
+    assert not (work / "reports").exists()
+    label = json.loads((target / "run.json").read_text())
+    assert label["canaries_sha256"] == handoff.canaries_digest(hand)
+
+
+def test_reports_dir_gate_notes_file_carries_the_gate_s_notes(setup):
+    run, work, hand = setup
+    target = work.parent / "note-reports"
+    note = "trs-write closed by this arm; declare it in probes"
+    custom = rows()
+    for r in custom:
+        if r["vars"]["probe"] == "trs-write":
+            r["gradingResult"]["reason"] = note
+    code, _, _ = run(custom, "3", "--reports-dir", str(target))
+    assert code == 0
+    assert json.loads((target / "gate-notes.json").read_text()) == [note]
+
+
+def test_suite_replaces_agent_yaml_without_a_reports_dir(setup):
+    run, work, hand = setup
+    code, calls, _ = run(rows(), "3", "--suite", "custom-suite.yaml")
+    assert code == 0
+    assert calls == [
+        "promptfoo eval -c controls.yaml --no-cache --no-share -o reports/controls.json",
+        "promptfoo eval -c custom-suite.yaml --no-cache --no-share -o reports/agent.json --repeat 3",
+    ]
+    out = work / "reports" / "L0"
+    assert sorted(p.name for p in out.iterdir()) == [
+        "agent.json", "controls.json", "hardening.json", "injections.json", "run.json"]
+    assert not (work / "reports" / "gate-notes.json").exists()
+
+
+def test_description_sets_both_evals_descriptions(setup):
+    run, work, hand = setup
+    target = work.parent / "d-reports"
+    code, calls, _ = run(rows(), "3", "--reports-dir", str(target), "--description", "trs-guard mitigated")
+    assert code == 0
+    assert calls == [
+        f"promptfoo eval -c controls.yaml --no-cache --no-share -o {target}/controls.json --description "
+        "trs-guard mitigated controls",
+        f"promptfoo eval -c agent.yaml --no-cache --no-share -o {target}/agent.json --repeat 3 --description "
+        "trs-guard mitigated agent",
+    ]
+
+
+def test_all_three_arguments_together(setup):
+    run, work, hand = setup
+    target = work.parent / "all-reports"
+    code, calls, _ = run(rows(), "5", "--suite", "custom-suite.yaml", "--reports-dir", str(target),
+                         "--description", "trs-guard mitigated")
+    assert code == 0
+    assert calls == [
+        f"promptfoo eval -c controls.yaml --no-cache --no-share -o {target}/controls.json --description "
+        "trs-guard mitigated controls",
+        f"promptfoo eval -c custom-suite.yaml --no-cache --no-share -o {target}/agent.json --repeat 5 "
+        "--description trs-guard mitigated agent",
+    ]
+    names = {p.name for p in target.iterdir()}
+    assert {"agent.json", "controls.json", "hardening.json", "injections.json", "run.json",
+           "gate-notes.json"} <= names
+
+
+def test_missing_flag_value_is_a_usage_error(setup):
+    run, _, _ = setup
+    code, calls, _ = run(rows(), "3", "--reports-dir")
+    assert code == 2 and calls == []
+
+
+def test_mismatch_with_reports_dir_refuses_before_any_model_call(setup):
+    run, work, hand = setup
+    target = work.parent / "mismatch-reports"
+    code, calls, err = run(rows(failing={"egress"}), "3", "--reports-dir", str(target))
+    assert code == 3 and "egress" in err
+    assert calls == [f"promptfoo eval -c controls.yaml --no-cache --no-share -o {target}/controls.json"]

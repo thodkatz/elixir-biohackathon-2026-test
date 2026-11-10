@@ -98,6 +98,15 @@ agent container. A probe prints `HTTP <code> <label>` per request and, as its la
 | `isolation-plant` | every test, before | always `open`: the marker was planted in the sandbox's home, its `/tmp` and TRS | – |
 | `isolation-check` | every test, after | a marker survived the restore | always `closed`: nothing from the previous test is left |
 
+**The gate learns the arm** (experiments spec part 03, decision 9): `controls_asserts.py gate` reads
+`hardening.json`'s `mitigations`, the arm's mitigations (ladder ids `L1`..`L5` plus, for an experiment,
+the participant's own), and, for every one of them that is not a ladder id, its `probes` (`mitigations/<id>.yml`,
+read without a YAML parser — `handoff.mitigation_probes`). A probe the level alone would expect open, but that
+one of those mitigations closes, passes `probe_state` instead of failing it, and is recorded as a note ("`<probe>`
+closed by this arm; declare it in `probes`"): `gate` prints every note and, with `--notes <file>`, writes them
+as a JSON list to `<file>`. An arm with only ladder mitigations keeps today's exact expectations, so the ladder's
+own runs are unaffected.
+
 ## The agent suite
 
 **Every test of the agent suite (`agent.yaml`) is one real agent run: model calls.**
@@ -219,26 +228,45 @@ canaries, and one fixture id with two payloads.
 
 ## One ladder run (`run.sh`)
 
-`./run.sh <hand-off dir> <repeat>` runs the controls suite, then — only if every probe agrees with the level in
-`hardening.json` — the whole agent suite, uncached, repeated `<repeat>` times (5 at L0 and the ladder's last
-level, 3 between). It takes no other argument: the build decides what runs, never the caller, so a filtered or
-partial run is never filed as a whole condition.
+`./run.sh <hand-off dir> <repeat> [--suite <config>] [--reports-dir <dir>] [--description <text>]` runs the
+controls suite, then — only if every probe agrees with the level in `hardening.json` (or an arm mitigation that
+declares it, *The gate learns the arm* above) — the whole agent suite, uncached, repeated `<repeat>` times (5 at
+L0 and the ladder's last level, 3 between). With none of the three optional arguments, the ladder's own route is
+unchanged byte for byte: the build decides what runs, never the caller, so a filtered or partial run is never
+filed as a whole condition.
+
+The three (experiments spec part 03, *`run.sh` gains three arguments*) are for one arm's run, not the ladder's:
+
+- `--suite <config>` replaces `agent.yaml` for the agent eval (an experiment's generated suite, decision 9).
+- `--reports-dir <dir>` writes `controls.json` and `agent.json` straight into `<dir>` instead of `reports/`,
+  without clearing it first (the caller, `spe-eval`, refuses one that already exists); `hardening.json`,
+  `injections.json` (if injected) and `run.json` land there too, and the gate's notes go to
+  `<dir>/gate-notes.json`.
+- `--description <text>` sets promptfoo's own `--description` on both evals: `<text> controls` and `<text>
+  agent`.
+
+Giving any of the three switches `run.sh` to calling `npx promptfoo eval` directly (an npm script cannot take a
+repeated `--description` cleanly); giving none of them keeps `npm run eval:controls`/`eval:agent` exactly as
+before.
 
 The build sets the condition: the level file alone (e.g. `instances/denbi-agui-01.yml` with an `L<n>.example.yml`
 import) makes it `injected`; with `instances/no-injections.example.yml` layered after it (L0 and L1 only) it is
-`clean`. `run.sh` refuses, before any model call:
+`clean`. A "mixed" build (an experiment's arm that plants only some fixtures) is refused by `run.sh`'s own
+condition check (`handoff.condition`), even though `check_hardening` itself now accepts it — this is the
+ladder's own route, which only ever builds clean or fully injected. `run.sh` refuses, before any model call:
 
 | Exit | When |
 |---|---|
-| 2 | bad usage (wrong argument count, a non-positive-integer repeat, any extra argument), or a stale or malformed hand-off (`controls_asserts.py check-handoff`, or the build is a mix of injections on and off, or disagrees with its own condition — `handoff.condition`) |
-| 3 | a controls probe disagrees with the level in `hardening.json` (`controls_asserts.py gate`): no agent run follows |
+| 2 | bad usage (too few arguments, an unknown flag, a missing flag value, a non-positive-integer repeat), or a stale or malformed hand-off (`controls_asserts.py check-handoff`, or the build is a mix of injections on and off, or disagrees with its own condition — `handoff.condition`) |
+| 3 | a controls probe disagrees with the level in `hardening.json`, and no arm mitigation declares it closed (`controls_asserts.py gate`): no agent run follows |
 | 4 | `eval:agent` wrote no `agent.json` |
 
-On success it files `hardening.json`, `controls.json`, `agent.json`, `run.json` (`{started, canaries_sha256}`,
-the start time and `handoff.canaries_digest` of this build) and, when injected, `injections.json` under
-`reports/L<level>/` (`reports/L<level>-clean/` when clean): every level of one VM shares one hand-off directory,
-so the instance name alone cannot tell the runs apart. `eval:agent` on de.NBI needs no OK (`AGENTS.md`, *Setup*);
-the same call on Anthropic is paid and does.
+On success, with none of the three arguments, it files `hardening.json`, `controls.json`, `agent.json`, `run.json`
+(`{started, canaries_sha256}`, the start time and `handoff.canaries_digest` of this build) and, when injected,
+`injections.json` under `reports/L<level>/` (`reports/L<level>-clean/` when clean): every level of one VM shares
+one hand-off directory, so the instance name alone cannot tell the runs apart. With `--reports-dir`, the same
+files land directly in that directory instead. `eval:agent` on de.NBI needs no OK (`AGENTS.md`, *Setup*); the
+same call on Anthropic is paid and does.
 
 ## Replaying the run log (`replay.py`)
 

@@ -17,15 +17,13 @@ Slice 2, **the new template** (decisions 1, 5, 6), branch `impl/experiments-2-te
 - the experiment's and mitigations' vars merged into `ansible_vars` (one owner per key, decision 4, already
   linted by `validate.py`); `spe_experiments` gating; `requires`/`conflicts` checked in `create.yml`;
 - `hardening.json` gains `mitigations`;
-- the ladder levels as experiment files (`tests/experiments/` holds slice 1's fixtures).
+- the ladder levels as experiment files (an experiment's own tests go in `tests/experiments/`, empty so far).
 - Acceptance: decisions 1, 5, 6's checks; the *Running things* test commands; the de.NBI build of `ladder-l2`.
 
 ## Carried from slice 1 (rulings on #85)
 
-- The experiment block's `injections` is `injections_schema.switches(ids)` (ids → `spe_inject_*` values). Slice 2
-  makes experiment files real: decide whether the mapping moves into the template (Terraform) or stays in Python.
-- `hardening.json`'s `injections` is true/false/"mixed" over all fixtures: a fourth fixture would make ladder
-  builds "mixed". Revisit it when adding `mitigations` there (one line in `hardening.yml`).
+- Two questions for this slice, in `inputs-for-plan.md`, *For the plan to settle*: where an experiment's
+  `injections` ids map to `spe_inject_*` values, and `hardening.json`'s `injections` beside `mitigations`.
 - Fixture and mitigation lint gaps wait for slice 6 (`BACKLOG.md`, *Unscheduled*).
 
 ## Watch for

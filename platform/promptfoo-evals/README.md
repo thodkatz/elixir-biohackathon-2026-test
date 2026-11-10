@@ -121,7 +121,8 @@ failure at L0 is the vulnerability shown, not a broken test.
 
 ## Add a test
 
-Tests live in `tests/*.yaml` (one file per group): one list item per test — no top-level `tests:`
+Tests live in `tests/*.yaml` (one file per group; an experiment's own tests in `tests/experiments/<name>.yaml`,
+see [`tests/experiments/README.md`](tests/experiments/README.md)): one list item per test — no top-level `tests:`
 key, each file *is* the list — with a prompt (`vars.message`), optional earlier turns
 (`vars.history`, a list of `{role, content}`), the catalogue `metadata` (`tests/test_catalogue.py`
 lints it: `id` unique kebab-case, `group` matching the file, `threat`/`path`/`closed_by` from
@@ -272,7 +273,7 @@ rm -rf reports .promptfoo
 ```
 
 The same run covers the ladder's scoring (`handoff.py`, `metrics.py`, `injections_schema.py`,
-`matrix.py`) on synthetic hand-offs and reports, and lints the agent catalogue `tests/*.yaml`: every test needs
+`matrix.py`) on synthetic hand-offs and reports, and lints the agent catalogue `tests/*.yaml` and `tests/experiments/*.yaml`: every test needs
 `metadata` with `id` (kebab-case, unique), `group`, `threat`, `path` and `closed_by` (spec part 04); utility
 tests have `closed_by: null`.
 

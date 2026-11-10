@@ -12,7 +12,6 @@ import os
 import shutil
 import subprocess
 import tarfile
-import time
 from pathlib import Path
 
 import pytest
@@ -40,11 +39,14 @@ WRITE_PLAY = """- hosts: localhost
 """
 
 
-def run_play(tmp_path: Path, play: str, name: str, extra: dict) -> subprocess.CompletedProcess:
+def run_play(tmp_path: Path, play: str, name: str, extra: dict,
+             path_prefix: Path | None = None) -> subprocess.CompletedProcess:
     play_path = tmp_path / name
     play_path.write_text(play)
     env = {**os.environ, "ANSIBLE_ROLES_PATH": str(ANSIBLE / "roles"), "ANSIBLE_NOCOLOR": "1",
            "ANSIBLE_LOCALHOST_WARNING": "False"}
+    if path_prefix:
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env.get('PATH', '')}"
     return subprocess.run(
         ["ansible-playbook", str(play_path), "-e", json.dumps(extra)],
         cwd=ANSIBLE, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
@@ -109,37 +111,24 @@ def test_export_tolerates_a_file_changing_while_it_tars(tmp_path):
     # task 5 review, Minor: a detached run still writing progress.jsonl or the promptfoo sqlite
     # database while a workspace stop packs the archive makes tar exit 1 ("file changed as we
     # read it"), not a real error; export_spe_eval.yml must not fail the archive over it.
-    #
-    # Reproduced reliably by writing to the file continuously for as long as the pack step runs
-    # (a one-off write race, timed against tar's own read speed, is not reliable), stopped once
-    # the playbook call returns.
-    import threading
-
+    # A tar on PATH that does the real work, then exits 1 as GNU tar does in that case: a live
+    # writer racing tar's read speed is neither reliable nor cheap (re-review).
     spe_eval_dir = tmp_path / "spe-eval"
     spe_eval_dir.mkdir()
     make_spe_eval_dir(spe_eval_dir, with_windows_jsonl=False)
-    big = spe_eval_dir / "promptfoo" / "promptfoo.db"
-    big.write_bytes(b"0" * 300_000_000)  # large enough that tar is still reading it as the writer runs
     out = tmp_path / "out"
     out.mkdir()
-
-    stop = threading.Event()
-
-    def keep_growing():
-        while not stop.is_set():
-            with big.open("ab") as f:
-                f.write(b"x")
-            time.sleep(0.005)
-
-    t = threading.Thread(target=keep_growing)
-    t.start()
-    try:
-        proc = run_play(tmp_path, EXPORT_PLAY, "export.yml",
-                        {"spe_eval_dir": str(spe_eval_dir), "spe_output_dir": str(out)})
-    finally:
-        stop.set()
-        t.join(timeout=10)
+    shim = tmp_path / "bin"
+    shim.mkdir()
+    (shim / "tar").write_text(f"#!/bin/sh\n{shutil.which('tar')} \"$@\" || exit $?\n"
+                              f"touch {tmp_path / 'shim-exited-1'}\n"
+                              "echo 'tar: promptfoo.db: file changed as we read it' >&2\nexit 1\n")
+    (shim / "tar").chmod(0o755)
+    proc = run_play(tmp_path, EXPORT_PLAY, "export.yml",
+                    {"spe_eval_dir": str(spe_eval_dir), "spe_output_dir": str(out)},
+                    path_prefix=shim)
     assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (tmp_path / "shim-exited-1").exists(), "the task did not run the exit-1 tar"
     assert (out / "archive-bundle-spe-eval.tar.gz").is_file()
 
 

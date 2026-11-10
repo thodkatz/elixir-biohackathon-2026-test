@@ -291,7 +291,7 @@ redacts nothing. Neither imports the other; where the airlock exists, a test ass
    `runs.jsonl` and found it false: Open WebUI calls the model and the sandbox directly
    (`roles/openwebui/templates/webui.env.j2`), and on the portal's archive (50 runs, 2026-11-10) its 18 chats carry
    their tool calls in each assistant message's `output`, with none in `agent-runs.jsonl`. The user asked for Open
-   WebUI sessions to be covered (relayed by another session, 2026-11-10). *Amends:* decisions 3, 5, 6; *Sources*,
+   WebUI sessions to be covered (relayed by the session `elixir-biohackathon-2026-test-b6`, 2026-11-10; the user's own words were not passed on). *Amends:* decisions 3, 5, 6; *Sources*,
    *Watcher* (*On stop*), *Hits*, *Participant page*, *Admin page*, Glossary. *Status:* folded.
 
 ## Inputs for the plan

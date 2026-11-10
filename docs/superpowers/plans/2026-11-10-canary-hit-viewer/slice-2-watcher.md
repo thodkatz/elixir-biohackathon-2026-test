@@ -29,8 +29,8 @@ Decisions 1, 3; ruling 1.
   Files open with `open(path, "rb")` only.
 - Consumes: nothing from the other modules: the reader is self-contained (it is sent alone).
 
-- [ ] **Step 0: Check the unverified claims** on our de.NBI instance (`denbi-agui-01`, if it is up; else note it
-  in the PR body and rely on the fixture): `docker volume ls --format '{{.Name}}' | grep spe-frontend_`, `sudo -n
+- [ ] **Step 0: Check the unverified claims** on our de.NBI instance (`denbi-agui-01`, if it is up; else rely on the fixture
+  and write the open check into slice 3's Task 9 text, which the PR body points to): `docker volume ls --format '{{.Name}}' | grep spe-frontend_`, `sudo -n
   true`, `python3 -c 'import sqlite3'`, and the `chat` table's columns
   (`sudo python3 -c "import sqlite3; c=sqlite3.connect('file:<mount>/webui.db?mode=ro', uri=True);
   print([r[1] for r in c.execute('pragma table_info(chat)')])"`). A difference is a ruling in `progress.md` and

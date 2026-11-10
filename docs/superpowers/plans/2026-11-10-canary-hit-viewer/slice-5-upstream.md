@@ -22,9 +22,8 @@ which has its own upstream port (`BACKLOG.md` *Next*). So the hit viewer goes up
 
 **On the fork (this slice's PR):** the plan's slices table (slice 5 done), `AGENTS.md` *Current work* (the
 track's line removed; the upstream PR's line is added once it has a number, guide step 6), the `BACKLOG.md`
-*Next* line for the ladder's upstream port (it now says `metrics.py` imports `platform/report/canarymatch.py`,
-so that port needs this one merged first, or carries `canarymatch.py` and `canary_record.py` itself), the
-handoff.
+*Next* line for the ladder's upstream port (slice 1 rewrote it; adjust it only if the dependency changed, e.g.
+this port merged first), the handoff.
 
 - [ ] **Step 1: The worktree** from `upstream/main` (guide step 2), `git merge-base --is-ancestor upstream/main
   origin/main` (else merge upstream into our `main` first, its own unit), then take the files above with

@@ -13,7 +13,9 @@ Decision 2.
 - Modify: `platform/promptfoo-evals/metrics.py` (drop `_unescape`, `_texts`, `_word`, `_found`,
   `URL`, `_hosts`, `_received`; import them), `platform/promptfoo-evals/handoff.py` (`METADATA_TYPES`,
   `is_file_canary` imported from `canarymatch`; `ConfigError`, `_scalar`, `read_hosts`, `load_canaries` from
-  `canary_record`)
+  `canary_record`), `BACKLOG.md` (the *Next* line for the ladder's upstream port: that port now needs
+  `platform/report/canarymatch.py` and `canary_record.py`, from this track's upstream port or carried itself),
+  `docs/specs/2026-11-10-canary-hit-viewer.md` (Glossary: *File canary* points at `canarymatch.py`)
 - Test: `platform/promptfoo-evals/tests/test_metrics.py` (add one test),
   `platform/agui/pydantic-ai-agent/tests/test_airlock.py` (add one test)
 

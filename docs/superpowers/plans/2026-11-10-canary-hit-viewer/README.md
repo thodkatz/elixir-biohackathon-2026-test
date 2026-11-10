@@ -47,7 +47,7 @@ Each is *decision, why, cost if wrong*; a slice that departs from this plan adds
    `hosts.yml` readers, and upstream has `platform/report/` but neither `handoff.py` nor `metrics.py` (checked
    2026-11-10, slice 5): an import of `handoff` would break the port. One rule keeps one copy (decision 2).
    *Cost if wrong:* none expected; the ladder's upstream port then needs `canary_record.py` and `canarymatch.py`
-   upstream first (slice 5 says so in `BACKLOG.md`).
+   upstream first (slice 1 says so in `BACKLOG.md`).
 3. **Agent run log hits are `frontend: "agui"`.** Only the AG-UI chat drives the agent (Open WebUI calls the model
    itself, clarification 1). *Cost if wrong:* another frontend added on the agent gets mislabelled until the run
    log names its caller.

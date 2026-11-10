@@ -142,6 +142,19 @@ spe_injection_fixtures: "{{ (lookup('ansible.builtin.file', spe_catalog_dir ~ '/
 spe_experiments: false
 spe_experiment: ""
 spe_mitigations: []
+# Everything spe-eval keeps on the VM (experiments spec part 03, *The hand-off on the VM*):
+# the VM-local hand-off, reports and the promptfoo config dir. Mirrors spe_eval.spe_eval_home()'s
+# default (platform/instance/spe_eval.py: Path.home() / "spe-eval") so the Ansible and Python sides
+# agree without a shared variable; both assume the workspace user's home is /home/<spe_ssh_user>,
+# as spe_frontend_dir and spe_repo_dir already do.
+spe_eval_dir: "/home/{{ spe_ssh_user }}/spe-eval"
+# Toolchain for spe-eval, installed on the host (not in a container) under spe_experiments: Node (a
+# version promptfoo 0.125.1 supports) from nodejs.org, checksum-verified against its own published
+# SHASUMS256.txt, and uv (Astral's release binary), checksum-verified against its own .sha256 file.
+# Bump either version freely; a wrong one fails loudly at download time (role spe_eval), caught by
+# the real check on de.NBI (task 7), never silently.
+spe_eval_node_version: "22.11.0"
+spe_eval_uv_version: "0.5.11"
 
 # --- test receiver (spec part 04, *The test receiver*; on in every instances/L<n>.example.yml) --
 # An evaluation fixture standing for a host outside the SPE (role eval_sink): logs every

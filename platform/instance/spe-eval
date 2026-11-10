@@ -20,7 +20,9 @@ path under the experiment's own repository clone, like `suite_config`'s `agent.y
       `checks.yml` probes): `arm`/`run` poll it directly after applying (bounded;
       `SPE_EVAL_HEALTH_TIMEOUT`/`SPE_EVAL_HEALTH_INTERVAL` override the default 120s/3s, for tests;
       `SPE_EVAL_HEALTH_URL` replaces the whole URL, for tests that have no real agent to probe).
-    - `<repo_root>/platform/promptfoo-evals/run.sh`: one arm's controls-then-agent run (03, step 3).
+    - `<repo_root>/platform/promptfoo-evals/run.sh`: one arm's controls-then-agent run (03, step 3),
+      with `spe_eval.promptfoo_env`'s environment (`SPE_AGENT_URL`, the key file paths, promptfoo's
+      telemetry/sharing/update disabled, `/usr/local/bin` on `PATH`; task 5 review item 1).
     - `systemd-run` (`--detach`, R5): a transient `--user` unit named `spe-eval-<run id>`, running
       this same script's `run` command again (without `--detach`), the run id forced via
       `SPE_EVAL_RUN_ID` so the detached child uses the id already printed to the caller. `--detach`
@@ -181,7 +183,7 @@ def cmd_arm(ns: argparse.Namespace) -> int:
     local_vars = spe_eval.load_local_vars(repo_root)
     experiment_name = name or spe_eval.default_experiment_name(local_vars)
     experiment = spe_eval.load_experiment(experiment_name, repo_root)
-    spe_eval.check_build_matches(experiment, local_vars)
+    spe_eval.check_build_matches(experiment, local_vars, repo_root)
     spe_eval.arm_mitigations(experiment, arm)  # validates `arm` against this experiment's own arms
 
     token = spe_eval.run_id()
@@ -234,8 +236,7 @@ def _run_one_arm(state: _StopState, repo_root: Path, home: Path, token: str, mod
         handoff_dir = spe_eval.spe_eval_home(home) / "handoff"
         progress_path = out_dir / "progress.jsonl"
         run_sh = str(Path(repo_root) / "platform" / "promptfoo-evals" / "run.sh")
-        run_env = {**os.environ, "PROMPTFOO_CONFIG_DIR": str(spe_eval.spe_eval_home(home) / "promptfoo"),
-                   "SPE_EVAL_PROGRESS": str(progress_path)}
+        run_env = spe_eval.promptfoo_env(handoff_dir, spe_eval.spe_eval_home(home) / "promptfoo", progress_path)
         argv = [run_sh, str(handoff_dir), str(ns.repeat), "--suite", str(plan["suite_path"]),
                 "--reports-dir", str(out_dir), "--description", description]
         run_rc = _run_tracked(state, argv, run_env)
@@ -257,7 +258,7 @@ def cmd_run(ns: argparse.Namespace) -> int:
     local_vars = spe_eval.load_local_vars(repo_root)
     experiment_name = ns.name or spe_eval.default_experiment_name(local_vars)
     experiment = spe_eval.load_experiment(experiment_name, repo_root)
-    spe_eval.check_build_matches(experiment, local_vars)
+    spe_eval.check_build_matches(experiment, local_vars, repo_root)
     arms = spe_eval.experiment_arms(experiment)
 
     # The run id is fixed right as the lock is taken (03, *Every run is kept*); SPE_EVAL_RUN_ID
@@ -346,7 +347,7 @@ def cmd_run_detached(ns: argparse.Namespace) -> int:
     local_vars = spe_eval.load_local_vars(repo_root)
     experiment_name = ns.name or spe_eval.default_experiment_name(local_vars)
     experiment = spe_eval.load_experiment(experiment_name, repo_root)
-    spe_eval.check_build_matches(experiment, local_vars)
+    spe_eval.check_build_matches(experiment, local_vars, repo_root)
     spe_eval.experiment_arms(experiment)
     lock = spe_eval.Lock(spe_eval.spe_eval_home(home) / "lock")
     holder = lock.holder()

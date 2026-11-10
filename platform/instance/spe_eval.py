@@ -16,6 +16,8 @@ bash, mirroring `Lock`'s file format):
       of its own, else a generated `suite.yaml` with absolute paths.
     - `run_id`, `iso_now`, `spe_eval_home`, `reports_dir`: decision 7's run id, the `run.json`/
       `windows.jsonl` timestamp format, and the reports layout.
+    - `promptfoo_env`: the environment `run.sh`'s promptfoo calls need, from the VM-local
+      hand-off (task 5 review item 1).
     - `Lock`, `LockHeld`: decision 11, `~/spe-eval/lock`.
     - `append_jsonl`, `discover_runs`, `run_entry`, `read_progress`: `spe-eval status`/`wait`/
       `runs`'s own reading of `~/spe-eval/reports/`, `windows.jsonl` and the progress file R3
@@ -106,7 +108,7 @@ _SKIP_CREATION_TIME_PARAMETERS = frozenset({"experiment", "mitigations"})
 _ORDER_INSENSITIVE_PARAMETERS = frozenset({"samples", "tiers", "workflows"})
 
 
-def check_creation_time(experiment: dict, local_vars: dict) -> list[str]:
+def check_creation_time(experiment: dict, local_vars: dict, repo_root: Path | None = None) -> list[str]:
     """The Ansible keys where `experiment`'s `parameters` or `vars` differ from the build's own
     (`local_vars`, from `instances/local.yml`), decision 7. Uses
     `validate.EXPERIMENT_PARAMETER_ANSIBLE_NAMES`, the mapping `experiments-template/main.tf` uses
@@ -117,6 +119,14 @@ def check_creation_time(experiment: dict, local_vars: dict) -> list[str]:
     creation) is skipped, since `local_vars` never holds anything to compare it to. `samples`,
     `tiers` and `workflows` are compared as sets, not sequences, so a build whose form held the
     same list in a different order is not a false mismatch.
+
+    `experiment["experiment"]["injections"]` (not a `parameters` key, so the loop above never
+    reaches it) is checked the same way as `canaries`: every catalogue switch this experiment names
+    must be `true` in `local_vars` and every other one `false` (task 5 review item 2) -- the build's
+    own `spe_inject_*` switches (`roles/repo/tasks/main.yml`'s `spe_local_vars_fixture_switches`,
+    persisted for every fixture whether an experiment names it or not), compared against
+    `injections_schema.switches` for this experiment's own list. A switch missing from `local_vars`
+    (a build from before this comparison existed) is treated as `false`, its Ansible default.
     """
     params = experiment.get("parameters") or {}
     mismatches: list[str] = []
@@ -143,13 +153,18 @@ def check_creation_time(experiment: dict, local_vars: dict) -> list[str]:
     for key, value in (experiment.get("vars") or {}).items():
         if local_vars.get(key) != value:
             mismatches.append(key)
+    injection_ids = (experiment.get("experiment") or {}).get("injections") or []
+    expected_switches = injections_schema.switches(injection_ids, repo_root or repo_dir())
+    for switch, expected in expected_switches.items():
+        if bool(local_vars.get(switch, False)) != expected:
+            mismatches.append(switch)
     return sorted(set(mismatches))
 
 
-def check_build_matches(experiment: dict, local_vars: dict) -> None:
+def check_build_matches(experiment: dict, local_vars: dict, repo_root: Path | None = None) -> None:
     """Raises `ConfigError` naming every key `check_creation_time` finds differing, saying to
     build fresh from the branch template (decision 7); returns normally when they all match."""
-    mismatches = check_creation_time(experiment, local_vars)
+    mismatches = check_creation_time(experiment, local_vars, repo_root)
     if mismatches:
         raise ConfigError(
             "this build does not match the experiment's creation-time settings: "
@@ -310,6 +325,42 @@ def spe_eval_home(home: Path | None = None) -> Path:
 def reports_dir(experiment_name: str, run_id_: str, arm: str, home: Path | None = None) -> Path:
     """`~/spe-eval/reports/<experiment>/<run id>/<arm>/` (03, *Every run is kept*)."""
     return spe_eval_home(home) / "reports" / experiment_name / run_id_ / arm
+
+
+# --- run.sh's environment (03, *The hand-off on the VM*; task 5 review item 1) ----------------
+
+def promptfoo_env(handoff_dir: Path, config_dir: Path, progress_path: Path, base_env: dict | None = None) -> dict:
+    """The environment `run.sh`'s promptfoo calls need, built from the VM-local hand-off
+    (`handoff_dir`, never the controller's `SPE_HANDOFF_DIR` tunnel path): `PROMPTFOO_CONFIG_DIR`
+    and `SPE_EVAL_PROGRESS` (R3), `SPE_AGENT_URL` (`handoff_dir`'s own `hosts.yml`, its `agent_url`
+    key, left unset when that build has no `agui` frontend and hosts.yml has none), and
+    `SPE_AGENT_API_KEY_FILE`/`SPE_LLM_API_KEY_FILE` as paths into `handoff_dir` -- this function
+    never opens either key file, so no key value is ever read here, let alone printed. Also
+    disables promptfoo's own telemetry, sharing and update check, as
+    `platform/promptfoo-evals/README.md`'s run steps set them by hand, and puts `/usr/local/bin`
+    (node, npx, uv: the `spe_eval` role's own symlinks) at the front of `PATH`, so `run.sh` finds
+    them whatever the caller's own PATH already has (e.g. a `systemd --user` unit's own minimal
+    one, R5).
+    """
+    handoff_dir = Path(handoff_dir)
+    env = dict(base_env if base_env is not None else os.environ)
+    hosts_path = handoff_dir / "hosts.yml"
+    if hosts_path.is_file():
+        hosts = yaml.safe_load(hosts_path.read_text()) or {}
+        agent_url = hosts.get("agent_url")
+        if agent_url:
+            env["SPE_AGENT_URL"] = agent_url
+    env["SPE_AGENT_API_KEY_FILE"] = str(handoff_dir / "agent_api_key")
+    env["SPE_LLM_API_KEY_FILE"] = str(handoff_dir / "llm_api_key")
+    env["PROMPTFOO_DISABLE_TELEMETRY"] = "1"
+    env["PROMPTFOO_DISABLE_SHARING"] = "1"
+    env["PROMPTFOO_DISABLE_UPDATE"] = "1"
+    env["PROMPTFOO_CONFIG_DIR"] = str(config_dir)
+    env["SPE_EVAL_PROGRESS"] = str(progress_path)
+    path_parts = env.get("PATH", "").split(os.pathsep) if env.get("PATH") else []
+    if "/usr/local/bin" not in path_parts:
+        env["PATH"] = os.pathsep.join(["/usr/local/bin", *path_parts]) if path_parts else "/usr/local/bin"
+    return env
 
 
 # --- the lock (decision 11) -----------------------------------------------------------------

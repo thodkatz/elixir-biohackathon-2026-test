@@ -137,16 +137,20 @@ def test_write_json_round_trips(tmp_path):
 # --- creation-time check (decision 7) ------------------------------------------------------------
 
 def matching_local_vars(experiment: dict) -> dict:
-    """A `local.yml` that matches `experiment`'s `parameters` and `vars` exactly."""
+    """A `local.yml` that matches `experiment`'s `parameters`, `vars` and injection switches
+    exactly (task 5 review item 2: every fixture's `spe_inject_*` switch persists for every build,
+    not only the ones an experiment names)."""
     params = experiment["parameters"]
     all_canary_types = ["registry_tokens", "honeypot_files", "vcf_variants", "flag_file",
                          "drs_metadata", "trs_descriptions", "workflow_comments", "service_info"]
+    injection_ids = (experiment.get("experiment") or {}).get("injections") or []
     local_vars = {
         "spe_samples": params["samples"],
         "spe_tiers": params["tiers"],
         "spe_workflows": params["workflows"],
         "spe_run_smoke_test": params["smoke_test"],
         **{f"spe_canary_{t}": (t in params["canaries"]) for t in all_canary_types},
+        **spe_eval.injections_schema.switches(injection_ids),
         **(experiment.get("vars") or {}),
     }
     return local_vars
@@ -206,6 +210,39 @@ def test_check_build_matches_raises_config_error_naming_the_keys():
         spe_eval.check_build_matches(experiment, local_vars)
 
 
+def test_check_creation_time_flags_an_injection_switch_the_build_never_planted():
+    # ladder-l0 names all three injections: a build with one of them off (planted differently
+    # than the experiment names) must refuse (task 5 review item 2).
+    experiment = spe_eval.load_experiment("ladder-l0")
+    local_vars = matching_local_vars(experiment)
+    local_vars["spe_inject_drs_description"] = False
+    mismatches = spe_eval.check_creation_time(experiment, local_vars)
+    assert mismatches == ["spe_inject_drs_description"]
+    with pytest.raises(spe_eval.ConfigError, match="spe_inject_drs_description"):
+        spe_eval.check_build_matches(experiment, local_vars)
+
+
+def test_check_creation_time_flags_an_injection_switch_the_build_planted_that_the_experiment_does_not_name():
+    experiment = spe_eval.load_experiment("ladder-l0")
+    local_vars = matching_local_vars(experiment)
+    local_vars["spe_inject_trs_description"] = False
+    local_vars["spe_inject_drs_description"] = False
+    local_vars["spe_inject_workflow_comment"] = False
+    mismatches = spe_eval.check_creation_time(experiment, local_vars)
+    assert mismatches == sorted(["spe_inject_trs_description", "spe_inject_drs_description",
+                                  "spe_inject_workflow_comment"])
+
+
+def test_check_creation_time_treats_a_missing_injection_switch_as_false():
+    # A local.yml from before this comparison existed: no spe_inject_* key at all is "off", the
+    # Ansible default, not "unknown" (not a false mismatch for an experiment with no injections).
+    experiment = spe_eval.load_experiment("ladder-l0")  # injections: [registry-preflight, drs-integrity, workflow-preflight]
+    local_vars = {k: v for k, v in matching_local_vars(experiment).items() if not k.startswith("spe_inject_")}
+    mismatches = spe_eval.check_creation_time(experiment, local_vars)
+    assert mismatches == sorted(["spe_inject_trs_description", "spe_inject_drs_description",
+                                  "spe_inject_workflow_comment"])
+
+
 # --- the suite (R1) --------------------------------------------------------------------------
 
 def test_suite_config_with_no_tests_returns_agent_yaml_unchanged():
@@ -250,6 +287,74 @@ def test_spe_eval_home_and_reports_dir(tmp_path):
     assert home == tmp_path / "spe-eval"
     reports = spe_eval.reports_dir("ladder-l2", "20261110T120000Z", "baseline", tmp_path)
     assert reports == tmp_path / "spe-eval" / "reports" / "ladder-l2" / "20261110T120000Z" / "baseline"
+
+
+# --- promptfoo_env (task 5 review item 1) --------------------------------------------------------
+
+def write_hosts_yml(handoff_dir: Path, **fields) -> Path:
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    path = handoff_dir / "hosts.yml"
+    path.write_text(yaml.safe_dump(fields))
+    return path
+
+
+def test_promptfoo_env_sets_agent_url_from_hosts_yml(tmp_path):
+    handoff = tmp_path / "handoff"
+    write_hosts_yml(handoff, agent_url="http://127.0.0.1:8100/agent", provision="existing")
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl", base_env={})
+    assert env["SPE_AGENT_URL"] == "http://127.0.0.1:8100/agent"
+    assert env["SPE_AGENT_API_KEY_FILE"] == str(handoff / "agent_api_key")
+    assert env["SPE_LLM_API_KEY_FILE"] == str(handoff / "llm_api_key")
+    assert env["PROMPTFOO_DISABLE_TELEMETRY"] == "1"
+    assert env["PROMPTFOO_DISABLE_SHARING"] == "1"
+    assert env["PROMPTFOO_DISABLE_UPDATE"] == "1"
+    assert env["PROMPTFOO_CONFIG_DIR"] == str(tmp_path / "promptfoo")
+    assert env["SPE_EVAL_PROGRESS"] == str(tmp_path / "progress.jsonl")
+
+
+def test_promptfoo_env_no_agent_url_when_hosts_yml_has_none(tmp_path):
+    # A build with no agui frontend: hosts.yml has no agent_url key at all (vm_handoff.yml).
+    handoff = tmp_path / "handoff"
+    write_hosts_yml(handoff, provision="existing")
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl", base_env={})
+    assert "SPE_AGENT_URL" not in env
+
+
+def test_promptfoo_env_no_hosts_yml_at_all(tmp_path):
+    handoff = tmp_path / "handoff"
+    handoff.mkdir()
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl", base_env={})
+    assert "SPE_AGENT_URL" not in env
+    assert env["SPE_AGENT_API_KEY_FILE"] == str(handoff / "agent_api_key")
+
+
+def test_promptfoo_env_puts_usr_local_bin_first_on_path(tmp_path):
+    handoff = tmp_path / "handoff"
+    handoff.mkdir()
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl",
+                                  base_env={"PATH": "/usr/bin:/bin"})
+    assert env["PATH"] == "/usr/local/bin:/usr/bin:/bin"
+
+
+def test_promptfoo_env_does_not_duplicate_usr_local_bin_already_on_path(tmp_path):
+    handoff = tmp_path / "handoff"
+    handoff.mkdir()
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl",
+                                  base_env={"PATH": "/usr/local/bin:/usr/bin"})
+    assert env["PATH"] == "/usr/local/bin:/usr/bin"
+
+
+def test_promptfoo_env_never_reads_the_key_files_themselves(tmp_path):
+    # No key value ever printed (task 5 review item 1): promptfoo_env only ever builds paths, it
+    # never opens agent_api_key or llm_api_key, so a secret in either never passes through this
+    # function at all, let alone into a string that could be logged.
+    handoff = tmp_path / "handoff"
+    handoff.mkdir()
+    (handoff / "agent_api_key").write_text("super-secret-agent-key\n")
+    (handoff / "llm_api_key").write_text("super-secret-llm-key\n")
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl", base_env={})
+    assert "super-secret-agent-key" not in repr(env)
+    assert "super-secret-llm-key" not in repr(env)
 
 
 # --- the lock (decision 11) -------------------------------------------------------------------

@@ -143,3 +143,20 @@ def test_reader_is_read_only(tmp_path):
     source = READER.read_text()
     for forbidden in ('"w"', "'w'", '"a"', "'a'", '"r+"', "'r+'", "unlink(", "rename(", "os.remove("):
         assert forbidden not in source, forbidden
+
+
+def test_line_starts_are_byte_offsets(tmp_path):
+    """Each returned line's byte offset, from which the watcher re-reads an open run after a restart: exact
+    even past bytes that are not UTF-8 (the lines are decoded with errors="replace")."""
+    agent_runs = tmp_path / "runs.jsonl"
+    raw = [b'{"a": "\xc3\xa9t\xc3\xa9"}', b'{"b": "\xff\xfe"}', b'{"c": 3}']
+    agent_runs.write_bytes(b"\n".join(raw) + b"\n" + b"partial")
+    first = len(raw[0]) + 1
+    result = run_reader({"agent_runs": first}, {"agent_runs": str(agent_runs)})
+    entry = result["files"]["agent_runs"]
+    assert entry["start"] == first
+    assert entry["line_starts"] == [first, first + len(raw[1]) + 1]
+    assert len(entry["line_starts"]) == len(entry["lines"])
+    data = agent_runs.read_bytes()
+    for start, line in zip(entry["line_starts"], entry["lines"]):
+        assert data[start:].split(b"\n", 1)[0].decode("utf-8", errors="replace") == line

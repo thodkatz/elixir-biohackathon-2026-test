@@ -6,7 +6,7 @@ connection, source on stdin, and run as root on the instance:
 Offsets: `{"journals": {"<session uuid>": <int>}, "agent_runs": <int>, "receiver": <int>,
 "openwebui": <number>}` (a missing key is 0). Prints one JSON object to stdout:
 
-    {"files": {"journal:<uuid>" | "agent_runs" | "receiver": {"size", "start", "end", "lines"}},
+    {"files": {"journal:<uuid>" | "agent_runs" | "receiver": {"size", "start", "end", "lines", "line_starts"}},
      "openwebui": {"rows": [{"id", "title", "updated_at", "chat"}], "max": <number>} | null,
      "missing": [str], "errors": [str]}
 
@@ -25,7 +25,10 @@ read failure that is not "it does not exist", as `"<name>: <exception class>"` (
 
 `start` is where reading began for a file source: 0 when the file is shorter than the given offset
 (it was replaced), else the offset given. `end` is the offset just past the last complete line
-returned; a partial last line (no trailing newline yet) is left for the next poll. The three file
+returned; a partial last line (no trailing newline yet) is left for the next poll. `line_starts`
+gives the byte offset in the file of each returned line (the lines are decoded with
+errors="replace", so the caller cannot recompute it from them): the watcher re-reads an open run
+from its `run_start` line's offset after a restart. The three file
 sources share one 1 MiB budget per call: past it, a source with nothing read yet still gets its
 first complete line (so one oversized line cannot stall every source behind it), but nothing
 budgets it less than guaranteed. Open WebUI has its own 1 MiB budget on `chat` text, with the same
@@ -95,8 +98,8 @@ def _paths() -> dict[str, str | None]:
     }
 
 
-def _read_file(path: str, offset: int, remaining: int) -> tuple[int, int, int, list[str], int]:
-    """(size, start, end, decoded complete lines past start, bytes consumed). Reads at most
+def _read_file(path: str, offset: int, remaining: int) -> tuple[int, int, int, list[str], list[int], int]:
+    """(size, start, end, decoded complete lines past start, each line's byte offset, bytes consumed). Reads at most
     `remaining` bytes, except it always reads on to the first complete line, even past that budget
     (so a source given no budget left still returns its first line rather than nothing). `start` is
     0 when the file is shorter than `offset` (it was replaced). Read-only: `open(path, "rb")` only."""
@@ -112,9 +115,12 @@ def _read_file(path: str, offset: int, remaining: int) -> tuple[int, int, int, l
             data += chunk
     parts = data.split(b"\n")
     complete = parts[:-1]  # the last part is a partial line (or empty, when data ends with "\n")
-    consumed = sum(len(p) + 1 for p in complete)
+    starts, at = [], start
+    for p in complete:
+        starts.append(at)
+        at += len(p) + 1
     lines = [p.decode("utf-8", errors="replace") for p in complete]
-    return size, start, start + consumed, lines, consumed
+    return size, start, at, lines, starts, at - start
 
 
 def _collect_files(paths: dict, offsets: dict, missing: list[str], errors: list[str]) -> dict[str, dict]:
@@ -130,11 +136,11 @@ def _collect_files(paths: dict, offsets: dict, missing: list[str], errors: list[
             uuid = journal.stem
             offset = journal_offsets.get(uuid, 0) if isinstance(journal_offsets, dict) else 0
             try:
-                size, start, end, lines, consumed = _read_file(str(journal), offset, remaining)
+                size, start, end, lines, starts, consumed = _read_file(str(journal), offset, remaining)
             except OSError as e:
                 errors.append(f"journal:{uuid}: {type(e).__name__}")
                 continue
-            files[f"journal:{uuid}"] = {"size": size, "start": start, "end": end, "lines": lines}
+            files[f"journal:{uuid}"] = {"size": size, "start": start, "end": end, "lines": lines, "line_starts": starts}
             remaining -= consumed
 
     for name in FILE_SOURCES:
@@ -144,14 +150,14 @@ def _collect_files(paths: dict, offsets: dict, missing: list[str], errors: list[
             continue
         offset = offsets.get(name, 0)
         try:
-            size, start, end, lines, consumed = _read_file(path, offset, remaining)
+            size, start, end, lines, starts, consumed = _read_file(path, offset, remaining)
         except FileNotFoundError:
             missing.append(name)
             continue
         except OSError as e:
             errors.append(f"{name}: {type(e).__name__}")
             continue
-        files[name] = {"size": size, "start": start, "end": end, "lines": lines}
+        files[name] = {"size": size, "start": start, "end": end, "lines": lines, "line_starts": starts}
         remaining -= consumed
     return files
 

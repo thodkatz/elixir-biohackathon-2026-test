@@ -31,6 +31,18 @@
 | One `coder_parameter` per mitigation | explicit, but every contribution edits `main.tf` | rejected |
 | A `level` parameter L0–L3 | simple for the ladder; no place for a participant's mitigation, and a level bundles controls a participant cannot pick apart | rejected: levels become experiments |
 
+## How a contribution's kind is known
+
+| | Trade-off | |
+|---|---|---|
+| **Read from the files**: `check_experiment.py` compares the branch with its base and names the kind | nothing to declare, so nothing to declare wrongly; the participant, reviewer and a later CI get the same answer; needs a current base (`git fetch` in `new` and `pr-body`) | **chosen** (the user, 2026-11-10) |
+| Declared, `kind:` in the experiment file, checked against the files | explicit; but it restates what the files say, and a mismatch is one more error for a newcomer | rejected |
+| One PR template with optional sections, no kinds in the checker | least to build; the participant works out which sections apply, and a red PR that showed no harm looks like an unfinished one | rejected |
+
+A one-sided PR carries a measured result (an attack shows the harm on a named base; a mitigation is measured
+against existing attacks) rather than structure checks alone, so every merged attack or mitigation is shown to
+work (the user, 2026-11-10: "things should be justified via our automatic evaluation pipeline").
+
 ## Existing tools searched
 
 Needs, in the user's terms: a participant proposes a mitigation, measures it against the agent on a real SPE build,

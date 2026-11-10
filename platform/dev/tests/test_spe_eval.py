@@ -168,6 +168,18 @@ def test_check_creation_time_names_every_differing_key():
     assert mismatches == sorted(["spe_tiers", "spe_canary_flag_file", "spe_eval_sink"])
 
 
+def test_check_creation_time_list_params_are_order_insensitive():
+    # task 3 review, minor 1: spe_samples/spe_tiers/spe_workflows differing only in order (a build
+    # whose form held the experiment's own set in a different order) is not a false mismatch.
+    experiment = spe_eval.load_experiment("ladder-l0")
+    local_vars = matching_local_vars(experiment)
+    local_vars["spe_tiers"] = list(reversed(local_vars["spe_tiers"]))
+    local_vars["spe_workflows"] = list(reversed(local_vars["spe_workflows"]))
+    assert local_vars["spe_tiers"] != experiment["parameters"]["tiers"]  # reordered, not equal
+    assert spe_eval.check_creation_time(experiment, local_vars) == []
+    spe_eval.check_build_matches(experiment, local_vars)  # does not raise
+
+
 def test_check_creation_time_skips_flavor_which_local_yml_never_holds():
     # spe_flavor is VM sizing, done once at creation: it is not in spe_local_vars, so a local.yml
     # with no such key at all must not be reported as a mismatch.

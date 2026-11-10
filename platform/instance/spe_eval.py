@@ -4,8 +4,8 @@ VM has `python3-yaml`); the only repository imports are `validate` (repo root) a
 `injections_schema` (`platform/promptfoo-evals/`), both read-only siblings of the same clone, not
 new dependencies.
 
-Used by the `spe-eval` CLI (a later task) and, for the lock, by `spe-apply` (in bash, mirroring
-`Lock`'s file format):
+Used by the `spe-eval` CLI (`platform/instance/spe-eval`) and, for the lock, by `spe-apply` (in
+bash, mirroring `Lock`'s file format):
 
     - `load_experiment`, `default_experiment_name`, `load_local_vars`, `check_build_matches`:
       decision 7, which experiment a bare `spe-eval` command means and whether it still matches
@@ -14,8 +14,12 @@ Used by the `spe-eval` CLI (a later task) and, for the lock, by `spe-apply` (in 
       for one arm, as the JSON file `spe-apply ... -e @<path>` passes.
     - `suite_config`: spec part 03's R1, `agent.yaml` unchanged for an experiment with no tests
       of its own, else a generated `suite.yaml` with absolute paths.
-    - `run_id`, `spe_eval_home`, `reports_dir`: decision 7's run id and the reports layout.
+    - `run_id`, `iso_now`, `spe_eval_home`, `reports_dir`: decision 7's run id, the `run.json`/
+      `windows.jsonl` timestamp format, and the reports layout.
     - `Lock`, `LockHeld`: decision 11, `~/spe-eval/lock`.
+    - `append_jsonl`, `discover_runs`, `run_entry`, `read_progress`: `spe-eval status`/`wait`/
+      `runs`'s own reading of `~/spe-eval/reports/`, `windows.jsonl` and the progress file R3
+      writes.
 """
 from __future__ import annotations
 
@@ -97,6 +101,10 @@ def default_experiment_name(local_vars: dict) -> str:
 # validate.EXPERIMENT_PARAMETER_ANSIBLE_NAMES, so it needs no entry here).
 _SKIP_CREATION_TIME_PARAMETERS = frozenset({"experiment", "mitigations"})
 
+# These three hold the creation form's own list order, which a hand-edited build need not match
+# (task 3 review, minor 1): compared as sets, not sequences.
+_ORDER_INSENSITIVE_PARAMETERS = frozenset({"samples", "tiers", "workflows"})
+
 
 def check_creation_time(experiment: dict, local_vars: dict) -> list[str]:
     """The Ansible keys where `experiment`'s `parameters` or `vars` differ from the build's own
@@ -106,7 +114,9 @@ def check_creation_time(experiment: dict, local_vars: dict) -> list[str]:
     `canaries` has no single Ansible name: it expands to one `spe_canary_<type>` key per type the
     build actually has (read from `local_vars`'s own keys, so every type the build supports is
     checked). A parameter with no persisted Ansible name at all (`flavor`: VM sizing, done once at
-    creation) is skipped, since `local_vars` never holds anything to compare it to.
+    creation) is skipped, since `local_vars` never holds anything to compare it to. `samples`,
+    `tiers` and `workflows` are compared as sets, not sequences, so a build whose form held the
+    same list in a different order is not a false mismatch.
     """
     params = experiment.get("parameters") or {}
     mismatches: list[str] = []
@@ -123,6 +133,10 @@ def check_creation_time(experiment: dict, local_vars: dict) -> list[str]:
                     mismatches.append(local_key)
             continue
         if ansible_name is None or ansible_name not in local_vars:
+            continue
+        if key in _ORDER_INSENSITIVE_PARAMETERS:
+            if sorted(local_vars[ansible_name] or []) != sorted(params[key] or []):
+                mismatches.append(ansible_name)
             continue
         if local_vars[ansible_name] != params[key]:
             mismatches.append(ansible_name)
@@ -281,6 +295,12 @@ def run_id() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
+def iso_now() -> str:
+    """UTC timestamp in `run.sh`'s own format (`date -u +%Y-%m-%dT%H:%M:%SZ`), for `run.json`'s
+    `started`/`ended` and `windows.jsonl`."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def spe_eval_home(home: Path | None = None) -> Path:
     """`~/spe-eval` (03, *The hand-off on the VM*; decision 11, the lock): everything `spe-eval`
     keeps on the VM. `home` overrides `Path.home()`, for tests."""
@@ -347,3 +367,66 @@ class Lock:
         fcntl.flock(self._fd, fcntl.LOCK_UN)
         os.close(self._fd)
         self._fd = None
+
+
+# --- runs: kept reports, status and the progress file (07, `status`/`wait`/`runs`) -----------
+
+def append_jsonl(path: Path, record: dict) -> None:
+    """Append one JSON line to `path` (03, `windows.jsonl`): `{run, experiment, start, end}`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+def discover_runs(home: Path | None = None) -> list[dict]:
+    """Every run under `~/spe-eval/reports/<experiment>/<run id>/<arm>/run.json`, newest first
+    (07, `spe-eval runs`): `{"run": <id>, "experiment": <name>, "arms": {<arm>: <run.json>}}`. A
+    run with no readable `run.json` in any of its arms is left out (nothing to report)."""
+    reports_root = spe_eval_home(home) / "reports"
+    runs: dict[str, dict] = {}
+    if reports_root.is_dir():
+        for experiment_dir in sorted(p for p in reports_root.iterdir() if p.is_dir()):
+            for run_dir in sorted(p for p in experiment_dir.iterdir() if p.is_dir()):
+                arms: dict[str, dict] = {}
+                for arm_dir in sorted(p for p in run_dir.iterdir() if p.is_dir()):
+                    run_json = arm_dir / "run.json"
+                    if not run_json.is_file():
+                        continue
+                    try:
+                        arms[arm_dir.name] = json.loads(run_json.read_text())
+                    except ValueError:
+                        continue
+                if arms:
+                    runs[run_dir.name] = {"run": run_dir.name, "experiment": experiment_dir.name, "arms": arms}
+    return sorted(runs.values(), key=lambda entry: entry["run"], reverse=True)
+
+
+def run_entry(home: Path | None, run_id_: str) -> dict | None:
+    """The one entry of `discover_runs` whose run id is `run_id_`, or `None`."""
+    for entry in discover_runs(home):
+        if entry["run"] == run_id_:
+            return entry
+    return None
+
+
+def read_progress(path: Path, repeat: int = 1) -> dict:
+    """The progress file's numbers (R3, `isolation.py`'s hook): `total` (the suite's test count
+    times `repeat`, `None` before the first line), `done` (0 before the first `afterEach`) and
+    `last_error` (the most recent test's error, kept rather than cleared by a later passing test,
+    so `spe-eval status` still shows why an earlier test failed)."""
+    total = None
+    done = 0
+    last_error = None
+    if path.is_file():
+        for raw in path.read_text().splitlines():
+            try:
+                record = json.loads(raw)
+            except ValueError:
+                continue
+            if "total" in record:
+                total = record["total"]
+            elif "done" in record:
+                done = record["done"]
+                if record.get("error"):
+                    last_error = record["error"]
+    return {"total": (total * repeat) if total is not None else None, "done": done, "last_error": last_error}

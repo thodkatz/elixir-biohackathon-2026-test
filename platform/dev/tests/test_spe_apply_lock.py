@@ -121,6 +121,26 @@ def test_a_wrong_token_still_refuses(setup):
         os.close(fd)
 
 
+def test_help_proceeds_while_locked(setup):
+    # task 3 review, minor 4: status, logs and --help/-h/help are read-only and let through even
+    # while another run holds the lock (spe-eval status's own wait calls spe-apply status).
+    run, home = setup
+    lock_path = home / "spe-eval" / "lock"
+    lock_path.parent.mkdir(parents=True)
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    os.write(fd, b"20261110T120000Z")
+    try:
+        rc, out, err, calls = run("--help")
+        assert rc == 0, err
+        assert "spe-apply" in out
+        assert "holds the lock" not in err
+        assert calls == []  # never reaches ansible-playbook
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
 def test_a_lock_file_present_but_not_actually_held_is_not_held(setup):
     # A stale file left by a crashed holder (no fd open any more): flock -n succeeds, so a plain
     # spe-apply still runs (only an active flock -- not just the file's existence -- blocks it).

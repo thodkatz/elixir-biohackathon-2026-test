@@ -39,10 +39,12 @@
 # default) names the Compose overlays a ladder level adds, platform/instance/compose.<name>.yml
 # in the clone, each passed with -f after the compose file. Secrets never appear in the output.
 #
-# On a spe-experiments build, every command here refuses (exit 2) while an `spe-eval run` or
-# `arm` holds ~/spe-eval/lock (decision 11; a spe build never has that file, so a plain build
-# is unaffected), unless SPE_EVAL_LOCK in the environment equals the token the holder wrote into
-# it -- spe-eval sets it only for its own calls.
+# On a spe-experiments build, every command here except the read-only status, logs and
+# --help/-h/help refuses (exit 2) while an `spe-eval run` or `arm` holds ~/spe-eval/lock
+# (decision 11; a spe build never has that file, so a plain build is unaffected), unless
+# SPE_EVAL_LOCK in the environment equals the token the holder wrote into it -- spe-eval sets
+# it only for its own calls. status and logs stay available during a run (spe-eval status's own
+# "wait until the stack answers" calls spe-apply status), and --help never touches the stack.
 set -euo pipefail
 
 dir=${SPE_FRONTEND_DIR:-/home/ubuntu/spe-frontend}
@@ -164,8 +166,11 @@ check_lock() {
   exit 2
 }
 
-check_lock
 cmd=${1:-}; shift || true
+case $cmd in
+  status|logs|-h|--help|help) ;;  # read-only: let through even while the lock is held
+  *)       check_lock ;;
+esac
 case $cmd in
   "")      build; up ;;
   build)   build "$@" ;;
@@ -175,6 +180,6 @@ case $cmd in
   stack)   run_ansible --tags stack,drs,trs "$@" ;;
   all)     run_ansible --tags stack,drs,trs,frontend "$@" ;;
   ansible) run_ansible "$@" ;;
-  -h|--help|help) sed -n '2,45p' "$0" ;;
+  -h|--help|help) sed -n '2,47p' "$0" ;;
   *) echo "spe-apply: unknown command '$cmd' (build, up, status, logs, stack, all, ansible)" >&2; exit 2 ;;
 esac

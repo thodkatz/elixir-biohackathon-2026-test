@@ -106,9 +106,11 @@ def probe_state(output: str, context: dict) -> dict:
     except (ConfigError, OSError, ValueError, KeyError) as e:
         return _result(False, f"{probe}: configuration error: {e}")
     observed = meta.get("state") or "error"
-    if observed == "closed" and ladder_expected == "open" and has_participant_mitigation and probe not in closed:
+    if (observed == "closed" and ladder_expected == "open" and has_participant_mitigation and probe not in closed
+            and PROBE_CONTROL[probe] is not None):
         # Closed by the arm as a whole, but none of its mitigations declare it (out-of-scope.md,
-        # "A probe for every participant mitigation"): pass anyway, with a note.
+        # "A probe for every participant mitigation"): pass anyway, with a note. Only a level-controlled
+        # probe: a closed api-reach or isolation-plant is a broken stack, never a mitigation's effect.
         return _result(True, f"{probe} {NOTE_SUFFIX}")
     return _result(observed == expected, f"{probe}: expected {expected}, observed {observed} at L{level}; "
                                          f"evidence: {meta.get('evidence', '')}; http: {meta.get('http_codes', {})}")

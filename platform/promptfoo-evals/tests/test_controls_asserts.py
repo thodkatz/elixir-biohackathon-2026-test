@@ -119,6 +119,15 @@ def test_undeclared_mitigation_probe_closed_passes_with_a_note(hand, repo_root):
     assert not ca.probe_state("", ctx("trs-write", "error"))["pass"]
 
 
+@pytest.mark.parametrize("probe", ["api-reach", "isolation-plant"])
+def test_closed_stack_health_probe_fails_even_in_a_participant_arm(hand, repo_root, probe):
+    # api-reach and isolation-plant are fixed open (no level controls them): closed means the stack is
+    # broken, so the note's leniency must not cover them (re-review N1).
+    (repo_root / "mitigations" / "trs-guard.yml").write_text("id: trs-guard\nprobes: []\n")
+    write(hand, 0, over={"mitigations": ["trs-guard"]})
+    assert not ca.probe_state("", ctx(probe, "closed"))["pass"]
+
+
 def test_ladder_only_arm_keeps_todays_exact_expectations(hand, repo_root):
     # L1 is a ladder id: arm_closed_probes skips it (the level already counts it), so an
     # unexpectedly closed probe at level 0 still fails the gate.

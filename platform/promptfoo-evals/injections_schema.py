@@ -220,7 +220,10 @@ def validate(manifest: dict, repo_root: Path) -> list[str]:
     try:
         catalogue = build_catalogue(root)
         locations = _surfaces(root)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        # KeyError/TypeError: a broken fixtures.json entry (e.g. missing 'payload'), the shape
+        # check_fixtures lints; caught here too so a caller that skips check_fixtures (handoff.
+        # load_injections) gets a ManifestError, not a traceback.
         return [f"{PAYLOAD_DIR}: {e}"]
     detectors = _detectors()
     errors = []
@@ -257,7 +260,12 @@ def main(argv: list[str]) -> int:
         print(f"{argv[0]}: {e}", file=sys.stderr)
         return 1
     repo_root = Path(argv[1])
-    errors = validate(manifest, repo_root) + check_fixtures(repo_root)
+    # check_fixtures first: a broken fixtures.json (e.g. a fixture missing 'payload') would
+    # otherwise reach validate's build_catalogue first and raise before check_fixtures ever
+    # names it.
+    errors = check_fixtures(repo_root)
+    if not errors:
+        errors = validate(manifest, repo_root)
     for error in errors:
         print(error, file=sys.stderr)
     return 1 if errors else 0

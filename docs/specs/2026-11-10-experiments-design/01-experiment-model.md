@@ -61,6 +61,9 @@ probes: [tier-reach]         # optional: the controls-suite probes it closes whe
   boolean switch could not express (L2 is a list).
 - A participant's mitigation adds its own variable, default off, named `spe_mitigate_<id with _>`, and guards
   its Ansible change with it.
+  Like an injection on a new surface (*Attacks*), its change carries the `stack`, `drs`, `trs` or `frontend` tag so
+  `spe-apply all` applies it, and both arms of `spe-eval run`, on a running workspace; a change that acts only at
+  creation is tried by building fresh from the branch template (05, step 5).
 - **Each Ansible key belongs to one mitigation.** No two mitigation files set the same key in `on`, so selecting
   any set of them merges without one value silently replacing another (both `spe-eval`'s `-e` values on the VM and
   Terraform's `merge` at a build keep the last);

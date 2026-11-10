@@ -1,7 +1,7 @@
 """The canary hit viewer's reader (spec *Watcher*, *How it pulls*). Sent alone on the watcher's SSH
 connection, source on stdin, and run as root on the instance:
 
-    sudo python3 - '<offsets JSON>'
+    sudo -n python3 - '<offsets JSON>'
 
 Offsets: `{"journals": {"<session uuid>": <int>}, "agent_runs": <int>, "receiver": <int>,
 "openwebui": <number>}` (a missing key is 0). Prints one JSON object to stdout:
@@ -163,6 +163,13 @@ def _collect_files(paths: dict, offsets: dict, missing: list[str], errors: list[
 
 
 def _read_openwebui(path: str | None, offset: object, missing: list[str], errors: list[str]) -> dict | None:
+    """Open WebUI's chats with `updated_at >= offset`, ordered by it, up to the 1 MiB budget on `chat`
+    text (the module docstring says how).
+
+    Paging is by `updated_at` alone, in whole seconds: should more than 1 MiB of chat text share one
+    `updated_at` second, every poll returns the same first rows of that second and `max` never moves
+    past it, so paging stalls there. Unlikely (it takes that much chat saved within one second); if it
+    ever happens, page by `(updated_at, id)` instead."""
     if not isinstance(offset, (int, float)) or isinstance(offset, bool):
         offset = 0
     if path is None or not os.path.exists(path):

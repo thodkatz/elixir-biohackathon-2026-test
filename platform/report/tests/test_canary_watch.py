@@ -599,7 +599,7 @@ def test_new_generation_resets_offsets(tmp_path):
     os.utime(hosts, (later, later))
     fake.write_journal(JOURNAL, mode="w")
     _chat_db(fake.db, 500)
-    watcher.tick(1003.0)
+    watcher.tick(1000.0 + canary_watch.DISCOVER_EVERY)  # the rebuild is seen at the next discovery
     assert fake.state()["generation"] != generation
     hits = fake.hits()
     assert len(hits) == 2 * len(first)
@@ -818,6 +818,101 @@ def test_unreadable_source_skipped(tmp_path, caplog):
     assert WORKSPACE in caplog.text and "agent-runs.jsonl" in caplog.text
 
 
+# Lines that parse but whose fields have the wrong type, or that nest too deep to parse: each once made the
+# whole poll (or the archive scan) raise, so one such line blinded the workspace for its whole life.
+POISON_RUNS = ['{"run_id": "x", "thread_id": [1], "input": "hi"}', '{"run_id": "y", "tool_calls": 5}',
+               "[" * 200000]
+POISON_JOURNAL = ['{"type": "run_start", "run_id": [1]}', "[" * 200000]
+GOOD_RUN = {"run_id": "g1", "thread_id": "t", "answer": "FCANARY-TEST01"}
+
+
+def test_poisoned_lines_never_blind_polling(tmp_path):
+    fake = Fake(tmp_path)
+    fake.agent_runs.write_text("".join(line + "\n" for line in POISON_RUNS) + json.dumps(GOOD_RUN) + "\n")
+    fake.write_journal([line + "\n" for line in POISON_JOURNAL] + JOURNAL[:5])
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    assert fake.status()["state"] == "running"
+    offsets = fake.state()["offsets"]
+    assert offsets["agent_runs"] == fake.agent_runs.stat().st_size
+    assert offsets["journals"][SESSION] == fake.journal.stat().st_size
+    assert [h["run"] for h in fake.hits() if h["source"] == "agent-runs"] == ["g1"]
+    # Later valid lines still come in on the next poll, after the poisoned ones.
+    with open(fake.agent_runs, "a") as f:
+        f.write(json.dumps(GOOD_RUN | {"run_id": "g2"}) + "\n")
+    fake.write_journal(JOURNAL[5:])
+    watcher.tick(1003.0)
+    assert fake.status()["state"] == "running"
+    hits = fake.hits()
+    assert [h["run"] for h in hits if h["source"] == "agent-runs"] == ["g1", "g2"]
+    assert _keys(hits) == R1_KEYS
+    assert fake.state()["offsets"]["agent_runs"] == fake.agent_runs.stat().st_size
+
+
+def test_poisoned_archive_scanned_once(tmp_path, caplog):
+    caplog.set_level(logging.INFO)
+    fake = Fake(tmp_path)
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    run = fake.archive([line + "\n" for line in POISON_JOURNAL] + JOURNAL)
+    (run / "agui" / "agent-runs.jsonl").write_text(
+        "".join(line + "\n" for line in POISON_RUNS) + json.dumps(GOOD_RUN) + "\n")
+    for now in (1003.0, 1004.0, 1005.0):
+        watcher.tick(now)
+    assert fake.state()["archived"] == [run.name]
+    hits = fake.hits()
+    assert _keys(hits) == R1_KEYS
+    assert [h["run"] for h in hits if h["source"] == "agent-runs"] == ["g1"]
+    assert fake.status()["state"] == "stopped"
+    assert sum("from archived run" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_archive_scan_that_raises_is_marked_scanned(tmp_path, caplog, monkeypatch):
+    """Whatever still makes a scan raise marks the run scanned all the same: logged once, by the workspace
+    id and the exception class only, never rescanned every tick."""
+    caplog.set_level(logging.INFO)
+    fake = Fake(tmp_path)
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    run = fake.archive(JOURNAL)
+    calls = []
+
+    def boom(*args, **kwargs):
+        calls.append(args)
+        raise TypeError("FCANARY-TEST01")
+
+    monkeypatch.setattr(canary_watch, "scan_archive", boom)
+    for now in (1003.0, 1004.0, 1005.0):
+        watcher.tick(now)
+    assert len(calls) == 1
+    assert fake.state()["archived"] == [run.name]
+    failures = [r.getMessage() for r in caplog.records if "scan failed" in r.getMessage()]
+    assert failures == [f"{WORKSPACE}: archived run scan failed (TypeError)"]
+    assert "CANARY" not in caplog.text
+
+
+def test_discovery_throttled_stop_still_seen(tmp_path, monkeypatch):
+    """discover (sidecars, hosts.yml, canaries.json over NFS) runs at most every DISCOVER_EVERY seconds, and
+    again when the clock goes back; a stop is still seen on the tick its run directory appears."""
+    fake = Fake(tmp_path)
+    fake.write_journal(JOURNAL[:5])
+    real, runs = canary_watch.discover, []
+    monkeypatch.setattr(canary_watch, "discover", lambda *a: runs.append(a) or real(*a))
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    watcher.tick(1003.0)
+    assert len(runs) == 1 and len(fake.transport.calls) == 2
+    fake.archive(JOURNAL)
+    watcher.tick(1006.0)
+    assert len(runs) == 1
+    assert fake.status()["state"] == "stopped" and len(fake.transport.calls) == 2
+    assert _keys(fake.hits()) == R1_KEYS
+    watcher.tick(1000.0 + canary_watch.DISCOVER_EVERY)
+    assert len(runs) == 2 and fake.status()["state"] == "stopped"
+    watcher.tick(900.0)  # the clock went back: discover again rather than wait
+    assert len(runs) == 3
+
+
 # --- the transports ---
 
 def _remote_ws(tmp_path: Path, target: str = "10.0.0.5") -> "canary_watch.Workspace":
@@ -846,8 +941,8 @@ def test_offsets_quoted_and_checked(tmp_path):
     assert argv[5:13] == ["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/cm-%C", "-o", "ControlPersist=60",
                           "-o", "BatchMode=yes"]
     assert argv[13] == "ubuntu@10.0.0.5" and len(argv) == 15
-    assert shlex.split(argv[14])[:3] == ["sudo", "python3", "-"]
-    assert json.loads(shlex.split(argv[14])[3]) == offsets
+    assert shlex.split(argv[14])[:4] == ["sudo", "-n", "python3", "-"]
+    assert json.loads(shlex.split(argv[14])[4]) == offsets
     assert data == (HERE.parent / "canary_reader.py").read_bytes()
     assert timeout == 30 and cap == 32 << 20
     for bad in ({"journals": {"x'; rm -rf /; '": 0}}, {"journals": {SESSION: "1; rm"}}, {"journals": {SESSION: True}},
@@ -862,7 +957,7 @@ def test_local_target_runs_sudo_without_ssh(tmp_path):
     seen = []
     transport = canary_watch.SshTransport(runner=lambda argv, *rest: seen.append(argv) or b'{"files": {}}')
     transport.read(_remote_ws(tmp_path, target="localhost"), {"agent_runs": 4})
-    assert seen == [["sudo", "python3", "-", json.dumps({"agent_runs": 4}, separators=(",", ":"))]]
+    assert seen == [["sudo", "-n", "python3", "-", json.dumps({"agent_runs": 4}, separators=(",", ":"))]]
 
 
 def test_run_capped(tmp_path):
@@ -918,6 +1013,26 @@ def test_once_encrypted_record_not_polled(tmp_path, capsys):
     assert rc == 1
     assert not out.exists()
     assert "encrypted" in capsys.readouterr().out
+
+
+def test_once_prints_only_known_names(tmp_path, capsys):
+    """--once prints of the reply only known source names, journal keys that are session ids and errors of
+    the reader's own form; anything else the participant controls is counted, never printed."""
+    fake = Fake(tmp_path)
+    reply = _reply({f"journal:{SESSION}": _file(JOURNAL_LINES), "journal:FCANARY-TEST01": _file([])})
+    reply["missing"] = ["receiver", "FCANARY-TEST01"]
+    reply["errors"] = ["openwebui: OperationalError", f"journal:{SESSION}: PermissionError",
+                       "agent_runs: FCANARY-TEST01 leaked", "FCANARY-TEST01: x", 5]
+    rc = canary_watch.once(str(fake.out), str(tmp_path / "hits.jsonl"), transport=Counting(replies=[reply]))
+    assert rc == 0
+    out = capsys.readouterr().out
+    for token in TOKENS:
+        assert token not in out
+    assert "CANARY" not in out
+    assert f"sources ['journal:{SESSION}', '1 other']" in out
+    assert "missing ['receiver', '1 other']" in out
+    assert (f"errors ['journal:{SESSION}: PermissionError', 'openwebui: OperationalError', '3 other']"
+            in out)
 
 
 def test_once_no_record_fails_without_a_token(tmp_path, capsys):

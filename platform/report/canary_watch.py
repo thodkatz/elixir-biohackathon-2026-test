@@ -12,8 +12,8 @@ The first form is the daemon (Watcher.run_forever). Per workspace id it keeps, i
 journal's open run's start, the dedup keys, the run directories scanned, the run log's titles) and
 `<id>.status.json` (0640: `state` running|stopped|unreachable|encrypted|capped, `since`, `last_poll`,
 `hits` per kind, `note`), which the pages read. What the reader returns is the participant's (root on
-their instance): a line that does not parse is dropped, a reply of the wrong shape is a failed poll, at
-most 200 hits are kept per poll and 10 MB per hits file.
+their instance): a line that does not parse or is malformed is dropped, a reply of the wrong shape is a
+failed poll, at most 200 hits are kept per poll and 10 MB per hits file.
 
 The second form scans one archived run directory (/data-share/runs/<time>_<instance>/, as the
 run_archive role writes it) into a hits file.
@@ -81,7 +81,8 @@ def _now() -> str:
 
 
 def _jsonl(path: Path, who: str | None = None):
-    """The parsed lines of a JSON Lines file; lines that do not parse are dropped (untrusted input). A file
+    """The parsed lines of a JSON Lines file; lines that do not parse (or nest too deep to) are dropped
+    (untrusted input). A file
     that cannot be read (a PermissionError, a directory in its place) is skipped and logged under `who`
     (the workspace id), by its name only: one bad source never ends a scan or the daemon."""
     try:
@@ -89,7 +90,7 @@ def _jsonl(path: Path, who: str | None = None):
             for line in f:
                 try:
                     yield json.loads(line)
-                except ValueError:
+                except (ValueError, RecursionError):
                     continue
     except FileNotFoundError:
         return
@@ -98,19 +99,29 @@ def _jsonl(path: Path, who: str | None = None):
 
 
 def _archive_places(run_dir: Path, who: str | None = None) -> list[Place]:
+    """Every place of the archived run. A line, record or chat of the wrong shape (the participant's, or
+    the agent's: untrusted) that still makes a source's parser raise is skipped, so the rest still count."""
     places: list[Place] = []
+    dropped = 0
     for journal in sorted((run_dir / "agui" / "agui-journals").glob("*.jsonl")):
         reader = JournalReader(journal.stem)
         for line in _jsonl(journal, who):
-            places += reader.feed(line)
+            try:
+                places += reader.feed(line)
+            except Exception:
+                dropped += 1
     records = list(_jsonl(run_dir / "agui" / "agent-runs.jsonl", who))
-    titles = {r.get("thread_id"): r.get("title") for r in records
-              if isinstance(r, dict) and r.get("type") == "title" and isinstance(r.get("title"), str)}
+    titles = {r["thread_id"]: r["title"] for r in records
+              if isinstance(r, dict) and r.get("type") == "title" and isinstance(r.get("thread_id"), str)
+              and isinstance(r.get("title"), str)}
     for record in records:
-        places += agent_run_places(record, titles)
+        try:
+            places += agent_run_places(record, titles)
+        except Exception:
+            dropped += 1
     try:
         export = json.loads((run_dir / "openwebui-export.json").read_text(encoding="utf-8"))
-    except (FileNotFoundError, ValueError):
+    except (FileNotFoundError, ValueError, RecursionError):
         export = None
     except OSError as e:
         logger.warning("%s: cannot read openwebui-export.json (%s), skipping it", who, type(e).__name__)
@@ -118,7 +129,12 @@ def _archive_places(run_dir: Path, who: str | None = None) -> list[Place]:
     chats = export.get("chats") if isinstance(export, dict) else None
     for chat in chats if isinstance(chats, list) else []:
         if isinstance(chat, dict):
-            places += openwebui_places(chat, "archive")
+            try:
+                places += openwebui_places(chat, "archive")
+            except Exception:
+                dropped += 1
+    if dropped:
+        logger.info("%s: %d malformed records dropped from an archived run", who, dropped)
     return places
 
 
@@ -130,7 +146,11 @@ def scan_archive(run_dir: str, hits: HitsFile, seen: set[str], meta: dict, api_h
     canaries = load_canaries(directory)
     count = 0
     for place in _archive_places(directory, meta.get("workspace") or meta.get("instance")):
-        for hit in hits_for(place, canaries, api_host):
+        try:
+            found = hits_for(place, canaries, api_host)
+        except Exception:  # a value of the wrong shape (or nested too deep) in one place: the rest still count
+            continue
+        for hit in found:
             hit = {"id": None, "detected": _now(), "workspace": meta.get("workspace"),
                    "instance": meta.get("instance"), "owner": meta.get("owner"), **hit}
             key = dedup_key(hit, generation)
@@ -167,7 +187,7 @@ def archive_meta(run_dir: str) -> dict:
     directory = Path(run_dir)
     try:
         report = json.loads((directory / "report.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         report = None
     if isinstance(report, dict) and isinstance(report.get("workspace_id"), str):
         return {"workspace": report["workspace_id"], "instance": report.get("instance"), "owner": report.get("owner")}
@@ -263,7 +283,7 @@ def _newest_sidecars(reports_dir: Path) -> dict[str, tuple[str, dict]]:
             continue
         try:
             sidecar = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             logger.warning("%s: unreadable report sidecar, skipping", path.stem)
             continue
         instance = sidecar.get("instance") if isinstance(sidecar, dict) else None
@@ -391,6 +411,7 @@ def once_workspace(output_dir: str) -> Workspace:
 # The daemon (spec *Watcher*, *How it pulls*, *Reader output is untrusted*, *On stop*)
 
 POLL_EVERY = 3.0  # seconds between polls of a running workspace
+DISCOVER_EVERY = 15.0  # seconds between discoveries (sidecars, hosts.yml, canaries.json, all over NFS)
 BACKOFF = 60.0  # seconds after a failed poll
 POLL_TIMEOUT = 30  # seconds for one reader call
 REPLY_MAX = 32 << 20  # bytes of reader reply read; past it the poll fails
@@ -511,7 +532,8 @@ class Transport:
 class SshTransport(Transport):
     """The reader over SSH, as the archive playbook connects (canary_record.vm_argv: hosts.yml's user,
     target, key and arguments), with SSH_OPTIONS before the target; on a local controller (vm_argv is
-    []) `sudo python3 -` runs here. The reader's source goes on stdin, the offsets as its argument."""
+    []) `sudo -n python3 -` runs here (-n: a sudo that would prompt fails the poll instead of hanging it).
+    The reader's source goes on stdin, the offsets as its argument."""
 
     def __init__(self, runner=run_capped):
         self.runner = runner
@@ -520,9 +542,9 @@ class SshTransport(Transport):
         payload = json.dumps(check_offsets(offsets), separators=(",", ":"))
         prefix = vm_argv(ws.output_dir)
         if prefix:
-            argv = prefix[:-1] + SSH_OPTIONS + [prefix[-1], "sudo python3 - " + shlex.quote(payload)]
+            argv = prefix[:-1] + SSH_OPTIONS + [prefix[-1], "sudo -n python3 - " + shlex.quote(payload)]
         else:
-            argv = ["sudo", "python3", "-", payload]
+            argv = ["sudo", "-n", "python3", "-", payload]
         return _parse_reply(self.runner(argv, READER.read_bytes(), POLL_TIMEOUT, REPLY_MAX))
 
 
@@ -660,11 +682,14 @@ def _apply(w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: floa
                 w.kinds[hit["kind"]] += 1
                 tally["added"] += 1
 
-    def parsed(entry: dict):
+    def each(entry: dict, handle) -> None:
+        """handle(parsed line, its start) per line. A line is the participant's or the agent's: one that does
+        not parse, nests too deep, or has a field of the wrong type is dropped, never the poll (which would
+        then fail on it every time, its offsets never advancing past it)."""
         for line, start in zip(entry["lines"], entry["line_starts"]):
             try:
-                yield json.loads(line), start
-            except ValueError:
+                handle(json.loads(line), start)
+            except Exception:
                 tally["dropped"] += 1
 
     files = reply["files"]
@@ -679,33 +704,45 @@ def _apply(w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: floa
                 run_starts.pop(session, None)
             reader = w.readers[session] = JournalReader(session)
             reader.title = state["journal_titles"].get(session)
-        for line, start in parsed(entry):
+
+        def journal_line(line: object, start: int, session: str = session, reader: JournalReader = reader) -> None:
             places = reader.feed(line)
             kind = line.get("type") if isinstance(line, dict) else None
-            if kind == "run_start" and session not in run_starts and line.get("run_id") in reader.runs:
+            run_id = line.get("run_id") if isinstance(line, dict) else None
+            if (kind == "run_start" and isinstance(run_id, str) and session not in run_starts
+                    and run_id in reader.runs):
                 run_starts[session] = start  # the earliest open run: re-read from here after a restart
             elif kind == "run_end" and not reader.runs:
                 run_starts.pop(session, None)
             record(places)
+
+        each(entry, journal_line)
         if reader.title is not None and state["journal_titles"].get(session) != reader.title:
             _bounded(state["journal_titles"], session, reader.title)
         offsets["journals"][session] = entry["end"]
+    def run_log_line(line: object, _start: int) -> None:
+        if isinstance(line, dict) and line.get("type") == "title":
+            if isinstance(line.get("thread_id"), str) and isinstance(line.get("title"), str):
+                _bounded(state["titles"], line["thread_id"], line["title"])
+            return
+        record(agent_run_places(line, state["titles"]))
+
+    def receiver_line(line: object, _start: int) -> None:
+        if isinstance(line, dict):
+            record(receiver_places(line))
+
     if "agent_runs" in files:
-        for line, _ in parsed(files["agent_runs"]):
-            if isinstance(line, dict) and line.get("type") == "title":
-                if isinstance(line.get("thread_id"), str) and isinstance(line.get("title"), str):
-                    _bounded(state["titles"], line["thread_id"], line["title"])
-                continue
-            record(agent_run_places(line, state["titles"]))
+        each(files["agent_runs"], run_log_line)
         offsets["agent_runs"] = files["agent_runs"]["end"]
     if "receiver" in files:
-        for line, _ in parsed(files["receiver"]):
-            if isinstance(line, dict):
-                record(receiver_places(line))
+        each(files["receiver"], receiver_line)
         offsets["receiver"] = files["receiver"]["end"]
     if reply["openwebui"] is not None:
         for row in reply["openwebui"]["rows"]:
-            record(openwebui_places(row, "openwebui-db"))  # `chat` is the row's JSON text, parsed there
+            try:
+                record(openwebui_places(row, "openwebui-db"))  # `chat` is the row's JSON text, parsed there
+            except Exception:  # a row of the wrong shape, like a line: dropped, never the poll
+                tally["dropped"] += 1
         offsets["openwebui"] = reply["openwebui"]["max"]
     if tally["added"] or any(w.state[k] != v for k, v in state.items()):
         w.state.update(state)
@@ -731,14 +768,19 @@ class _Watched:
 
 
 class Watcher:
-    """The daemon's loop body: `tick(now)` discovers the workspaces, polls each running one whose poll
-    is due, scans each new archived run of a workspace once, and writes the state and status files."""
+    """The daemon's loop body: `tick(now)` discovers the workspaces (at most every `discover_every`
+    seconds; in between it keeps the last list), polls each running one whose poll is due, scans each new
+    archived run of a workspace once, and writes the state and status files. A stop is still seen on the
+    tick its run directory appears: the scan of runs_dir, every tick, marks the workspace stopped."""
 
     def __init__(self, hits_dir: str, reports_dir: str, runs_dir: str, output_root: str, transport: Transport,
-                 hits_max: int = HITS_FILE_MAX):
+                 hits_max: int = HITS_FILE_MAX, discover_every: float = DISCOVER_EVERY):
         self.hits_dir, self.runs_dir = Path(hits_dir), Path(runs_dir)
         self.reports_dir, self.output_root = reports_dir, output_root
         self.transport, self.hits_max = transport, hits_max
+        self.discover_every = discover_every
+        self.workspaces: list[Workspace] = []
+        self.discovered: float | None = None  # when discover last ran
         self.watched: dict[str, _Watched] = {}
         self.hits_dir.mkdir(parents=True, exist_ok=True)
 
@@ -752,8 +794,12 @@ class Watcher:
             time.sleep(max(0.0, 1.0 - (time.monotonic() - started)))
 
     def tick(self, now: float) -> None:
+        # Again when due, and whenever the clock went back (never stuck on a stale list).
+        if self.discovered is None or not 0 <= now - self.discovered < self.discover_every:
+            self.workspaces = discover(self.reports_dir, self.output_root, str(self.runs_dir))
+            self.discovered = now
         current: dict[str, _Watched] = {}
-        for ws in discover(self.reports_dir, self.output_root, str(self.runs_dir)):
+        for ws in self.workspaces:
             w = self.watched.get(ws.id) or self._load(ws)
             w.ws = ws
             current[ws.id] = w
@@ -835,7 +881,9 @@ class Watcher:
     def _scan_runs(self, w: _Watched, now: float) -> bool:
         """Scan each archived run of this workspace not yet scanned, once its index.md (written last)
         exists, over the whole directory with this workspace's dedup keys: what polling already found is
-        not written again. True while this stop's run directory is still being written."""
+        not written again. True while this stop's run directory is still being written. A new run
+        directory of this workspace newer than hosts.yml is its stop: `w.ws.running` turns false here,
+        without waiting for the next discovery (which says the same)."""
         ws, suffix = w.ws, f"_{w.ws.instance}"
         try:
             hosts_mtime = (Path(ws.output_dir) / "hosts.yml").stat().st_mtime
@@ -848,13 +896,20 @@ class Watcher:
                 continue
             if not (entry / "index.md").exists():
                 try:
-                    pending = pending or entry.stat().st_mtime >= hosts_mtime
+                    if entry.stat().st_mtime >= hosts_mtime:
+                        pending = True
+                        ws.running = False
                 except OSError:
                     pass
                 continue
             if archive_meta(str(entry)).get("workspace") != ws.id:
                 w.foreign.add(entry.name)  # the same instance name, another workspace
                 continue
+            try:
+                if entry.stat().st_mtime >= hosts_mtime:
+                    ws.running = False
+            except OSError:
+                pass
             before = w.hits.count
             meta = {"workspace": ws.id, "instance": ws.instance, "owner": ws.owner}
             try:
@@ -862,6 +917,9 @@ class Watcher:
             except RecordError as e:
                 logger.warning("%s: archived run %s not scanned: %s", ws.id, entry.name, e)
                 count = 0
+            except Exception as e:  # untrusted content: marked scanned all the same, never rescanned every tick
+                logger.warning("%s: archived run scan failed (%s)", ws.id, type(e).__name__)
+                count = w.hits.count - before
             w.kinds.update(h["kind"] for h in w.hits.read(after=before) if isinstance(h.get("kind"), str))
             w.state["archived"].append(entry.name)
             w.dirty = True
@@ -897,13 +955,34 @@ class Watcher:
         if added:
             logger.info("%s: %d new hits", w.ws.id, added)
         if dropped:
-            logger.info("%s: %d lines that do not parse dropped", w.ws.id, dropped)
+            logger.info("%s: %d lines or rows that do not parse or are malformed dropped", w.ws.id, dropped)
         if over:
             logger.warning("%s: %d hits past %d in one poll dropped", w.ws.id, over, HITS_PER_POLL)
         errors = len(reply["errors"])
         if errors != w.errors_seen:
             logger.warning("%s: the reader reports %d source errors", w.ws.id, errors)
             w.errors_seen = errors
+
+
+READER_SOURCES = ("sessions", "agent_runs", "receiver", "openwebui")  # the names `missing` and `errors` use
+READER_ERROR = re.compile(r"(?:agent_runs|receiver|openwebui|journal:" + SESSION_ID.pattern + r"): [A-Za-z]+")
+
+
+def _shown_reply(reply: dict) -> tuple[list[str], list[str], list[str]]:
+    """What --once may print of a reply (the participant's): known source names, journal keys that are
+    session ids, errors of the reader's own form (`<source>: <exception class>`). Anything else is only
+    counted, as `<n> other`."""
+    def shown(items, keep) -> list[str]:
+        kept = sorted(i for i in items if isinstance(i, str) and keep(i))
+        other = sum(1 for i in items if not (isinstance(i, str) and keep(i)))
+        return kept + ([f"{other} other"] if other else [])
+
+    def source(name: str) -> bool:
+        return name in READER_SOURCES or (name.startswith("journal:")
+                                          and SESSION_ID.fullmatch(name.removeprefix("journal:")) is not None)
+
+    return (shown(list(reply["files"]), source), shown(reply["missing"], lambda n: n in READER_SOURCES),
+            shown(reply["errors"], lambda e: READER_ERROR.fullmatch(e) is not None))
 
 
 def once(output_dir: str, out: str, transport: Transport | None = None) -> int:
@@ -936,8 +1015,8 @@ def once(output_dir: str, out: str, transport: Transport | None = None) -> int:
         reason = str(e) if isinstance(e, (PollError, RecordError, OffsetsError)) else type(e).__name__
         print(f"canary_watch: poll failed ({reason})", file=sys.stderr)
         return 1
-    print(f"canary_watch: sources {sorted(reply['files'])}, missing {sorted(reply['missing'])},"
-         f" errors {reply['errors']}")
+    sources, missing, errors = _shown_reply(reply)
+    print(f"canary_watch: sources {sources}, missing {missing}, errors {errors}")
     note = f" (dropped {dropped}, over the per-poll cap {over})" if dropped or over else ""
     print(f"canary_watch: {added} new hits into {out}{note}; hits by kind: {dict(sorted(w.kinds.items()))}")
     return 0

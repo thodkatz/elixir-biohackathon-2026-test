@@ -186,15 +186,18 @@ class JournalReader:
 
 def agent_run_places(record: dict, titles: dict[str, str]) -> list[Place]:
     """One record of the agent's run log. Title records ({"type": "title", ...}) give no places:
-    the caller collects them into `titles`, by thread id."""
+    the caller collects them into `titles`, by thread id. The record is untrusted: a thread id that is
+    not a string is no session id (never a dict key), and `tool_calls` that is not a list is absent."""
     if not isinstance(record, dict) or record.get("type") == "title" or not isinstance(record.get("run_id"), str):
         return []
-    thread = record.get("thread_id")
+    thread = record.get("thread_id") if isinstance(record.get("thread_id"), str) else None
     prompt = record.get("input") if isinstance(record.get("input"), str) else None
-    common = dict(frontend="agui", source="agent-runs", session={"id": thread, "title": titles.get(thread)},
+    common = dict(frontend="agui", source="agent-runs",
+                  session={"id": thread, "title": titles.get(thread) if thread is not None else None},
                   run=record["run_id"], at=_iso(record.get("started")), prompt=prompt)
     out = [Place(**common, place="prompt", tool=None, value=prompt)] if prompt else []
-    for call in record.get("tool_calls") or []:
+    calls = record.get("tool_calls")
+    for call in calls if isinstance(calls, list) else []:
         if not isinstance(call, dict):
             continue
         tool = {"name": call.get("name"), "call_id": call.get("id"), "args": call.get("args"),
@@ -244,7 +247,7 @@ def openwebui_places(chat: dict, source: str) -> list[Place]:
     if isinstance(body, str):
         try:
             body = json.loads(body)
-        except ValueError:
+        except (ValueError, RecursionError):
             return []
     if not isinstance(body, dict):
         return []

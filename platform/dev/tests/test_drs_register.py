@@ -173,6 +173,21 @@ def test_two_injections_both_on_give_two_placements(dr, spe_root, monkeypatch, c
     assert {i["path"] for i in out["injections"]} == {FLAG, "ref/second.txt"}
 
 
+def test_two_injections_on_the_same_object_land_in_argv_order(dr, spe_root, monkeypatch, capsys):
+    # Module docstring and README: "several payloads on the same object are appended in order."
+    other = spe_root.parent / "other-payload.txt"
+    other.write_text("second payload\n")
+    fake = FakeDRS()
+    out = register(dr, monkeypatch, capsys, spe_root, fake,
+                   "--inject-description", "drs-1", str(PAYLOAD), FLAG,
+                   "--inject-description", "drs-2", str(other), FLAG)
+    oid = "sha256-" + sha(spe_root / FLAG)
+    first, second = PAYLOAD.read_text().strip(), other.read_text().strip()
+    description = fake.objects[oid]["description"]
+    assert description.endswith(f"\n\n{first}\n\n{second}")
+    assert [i["id"] for i in out["injections"]] == ["drs-1", "drs-2"]
+
+
 def test_rerun_is_identical_and_canaries_do_not_move(dr, spe_root, monkeypatch, capsys):
     off = register(dr, monkeypatch, capsys, spe_root, FakeDRS())
     fake = FakeDRS()

@@ -448,10 +448,14 @@ def check_mitigation(mitigation: Mitigation, path_ids: set[str], mitigation_ids:
 
 
 def check_mitigations_catalog(mitigations: list[Mitigation]) -> list[str]:
-    """Cross-mitigation checks: duplicate ids, one owner per 'on' Ansible key."""
+    """Cross-mitigation checks: duplicate ids, one owner per 'on' Ansible key,
+    unless the pair declares the overlap in 'conflicts' (either direction)."""
     errors = []
     ids_seen: dict[str, str] = {}
-    owners: dict[str, str] = {}
+    conflicts_by_id = {
+        m.meta.get("id"): set(m.meta.get("conflicts") or []) for m in mitigations
+    }
+    owners: dict[str, tuple[str, str]] = {}  # Ansible key -> (mitigation id, filename)
     for m in mitigations:
         entry_id = m.meta.get("id")
         if entry_id in ids_seen:
@@ -462,10 +466,18 @@ def check_mitigations_catalog(mitigations: list[Mitigation]) -> list[str]:
         on = m.meta.get("on")
         if isinstance(on, dict):
             for key in on:
-                if key in owners and owners[key] != m.path.name:
-                    errors.append(f"Ansible key '{key}' is set in both {owners[key]} and {m.path.name}")
-                else:
-                    owners[key] = m.path.name
+                if key not in owners:
+                    owners[key] = (entry_id, m.path.name)
+                    continue
+                other_id, other_name = owners[key]
+                if other_id == entry_id:
+                    continue
+                declared = (
+                    entry_id in conflicts_by_id.get(other_id, set())
+                    or other_id in conflicts_by_id.get(entry_id, set())
+                )
+                if not declared:
+                    errors.append(f"Ansible key '{key}' is set in both {other_name} and {m.path.name}")
     return errors
 
 

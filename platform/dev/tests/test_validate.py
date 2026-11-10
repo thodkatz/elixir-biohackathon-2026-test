@@ -112,6 +112,25 @@ def test_two_mitigations_setting_the_same_on_key_fail_naming_both_files(tmp_path
     assert overlap, problems
 
 
+def test_two_mitigations_setting_the_same_on_key_pass_when_conflicts_declares_the_pair(tmp_path):
+    mitigations_dir = tmp_path / "mitigations"
+    shutil.copytree(REPO / "mitigations", mitigations_dir)
+    (mitigations_dir / "trs-guard.yml").write_text(
+        "id: trs-guard\n"
+        "name: TRS guard (duplicate of L1's switch, for the test)\n"
+        "description: Sets the same Ansible key as L1, but declares the conflict.\n"
+        "closes: []\n"
+        "conflicts: [L1]\n"
+        '"on": {spe_harden_trs_readonly: true}\n'
+        '"off": {spe_harden_trs_readonly: false}\n'
+    )
+    _, problems = validate.validate_mitigations_catalog(
+        mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
+    )
+    overlap = [p for p in problems if "spe_harden_trs_readonly" in p and "catalog:" in p]
+    assert not overlap, problems
+
+
 def test_mitigation_closing_an_unknown_path_fails(tmp_path):
     mitigations_dir = tmp_path / "mitigations"
     shutil.copytree(REPO / "mitigations", mitigations_dir)

@@ -56,9 +56,10 @@ another one, `beforeAll` and `isolation.py snapshot` refuse: rebuild from a clea
 The snapshot lives on the VM in `/var/lib/spe-snapshots/<instance>/<key>/`, keyed to `canaries.json`'s
 `generated_at` plus the arm's mitigation set, sorted (`hardening.json`'s `mitigations`, decision 9): `<stamp>`
 for an empty set (today's single-arm builds, and older hand-offs with no `mitigations` field), `<stamp>+<id1>
-+<id2>` otherwise. Snapshotting one key replaces only that key's own directory, so a re-provisioned instance
-(every level of the de.NBI VM shares `output/denbi-agui-01/`) deletes only its own build's old snapshot and two
-arms of the same build keep their own, each restoring from only its own (`isolation.snapshot_key`). Restore times
++<id2>` otherwise. Snapshotting one key replaces that key's own directory and removes every older build's
+(another `<stamp>`), so a re-provisioned instance (every level of the de.NBI VM shares `output/denbi-agui-01/`)
+keeps no earlier build's snapshots, while two arms of the same build keep their own, each restoring from only its
+own (`isolation.snapshot_key`). Restore times
 are kept in `<hand-off>/restore_times.json`; their median goes into `hardening.json` as `restore_seconds`. The
 image used for tar is `alpine:3.20` (`SPE_SNAPSHOT_IMAGE` overrides it, e.g. with `redis:6.2.6-alpine`, already on
 the VM, if the VM cannot pull).

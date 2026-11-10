@@ -673,7 +673,7 @@ def test_before_all_refuses_a_snapshot_over_an_earlier_builds_dirty_stack(hooked
         isolation.extension_hook("beforeAll", {"suite": {}})
     # task 5 review, Minor: "destroy.yml, then create.yml" is a controller remedy a workspace has
     # no destroy.yml for; the message must also name a workspace one.
-    assert "spe-apply all" in str(exc.value) and "destroy.yml" in str(exc.value)
+    assert "a new workspace" in str(exc.value) and "destroy.yml" in str(exc.value)
     assert hooked["snapshot"] == 0
     hooked["exists"] = True  # a snapshot of this build: the marker is not consulted
     isolation.extension_hook("beforeAll", {"suite": {}})

@@ -61,13 +61,15 @@ locals {
   # A preset's description is the experiment's own followed by what it measures. The coder
   # provider caps it at 128 bytes (not characters: "·" and "—" count 2 and 3), so the experiment's
   # text is cut to the longest prefix that fits, ending in "…"; the measures line is kept whole.
-  # Bytes are counted from the unpadded base64 length (3 bytes per 4 characters).
+  # Bytes are counted from the unpadded base64 length (3 bytes per 4 characters). Cut
+  # candidates start at 128 characters (no longer one fits): range() refuses over 1024 values.
   experiment_summaries = { for stem, e in local.experiments : stem => trimspace(try(e.description, "")) }
   preset_description_candidates = {
-    for stem, d in local.experiment_summaries : stem => [
-      for n in range(length(d), 0, -1) :
-      "${n == length(d) ? d : "${trimspace(substr(d, 0, n))}…"} — ${local.experiment_measures[stem]}"
-    ]
+    for stem, d in local.experiment_summaries : stem => concat(
+      d == "" ? [] : ["${d} — ${local.experiment_measures[stem]}"],
+      [for n in range(min(length(d), 128), 0, -1) :
+      "${trimspace(substr(d, 0, n))}… — ${local.experiment_measures[stem]}"]
+    )
   }
   preset_descriptions = {
     for stem, cands in local.preset_description_candidates : stem => try([

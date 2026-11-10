@@ -214,3 +214,17 @@ def test_new_files_appear_with_no_main_tf_change(template_copy):
     # Only the experiment's own injections are switched on; the others are not set at all.
     assert v["spe_inject_drs_description"] is True
     assert "spe_inject_trs_description" not in v and "spe_inject_workflow_comment" not in v
+
+
+@needs_tofu
+def test_a_description_past_tofus_range_limit_is_still_cut_to_fit(template_copy):
+    # range() refuses more than 1024 elements, so the candidates must not be one per character.
+    y = load_yaml(template_copy / "experiments/ladder-l0.yml")
+    y.update(name="Test experiment Long", description="word " * 400, default=False)
+    y["parameters"]["experiment"] = "long"
+    (template_copy / "experiments/long.yml").write_text(yaml.safe_dump(y, sort_keys=False))
+
+    result = plan(template_copy)
+    preset = next(p for p in data_sources(result, "coder_workspace_preset") if p["name"] == "Test experiment Long")
+    assert preset["description"].startswith("word word") and "… — TM-001" in preset["description"]
+    assert len(preset["description"].encode()) <= 128

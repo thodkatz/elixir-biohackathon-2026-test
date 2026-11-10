@@ -203,8 +203,8 @@ Each unit's PR updates its track's line; the last slice removes it. An open upst
 is open (`docs/guides/contributing-upstream.md`, step 6).
 
 - **Experiments** (spec `docs/specs/2026-11-10-experiments-design/`, merged; no plan, slices from its
-  `inputs-for-plan.md`): next slice 1/7, the catalogue as files; handoff
-  `docs/handoffs/2026-11-10T1117Z-experiments-slice-1.md`.
+  `inputs-for-plan.md`): slice 1/7 (the catalogue as files) in #85; next slice 2/7, the new template; handoff
+  `docs/handoffs/2026-11-10T1309Z-experiments-slice-2.md`.
 - **Upstream PR kraatz #28** (`contrib/agui-archive-markdown`): archive Markdown wording, autolinks, refusal
   reason, bad timestamps; waits on upstream's review.
 - **Upstream PR kraatz #29** (`contrib/agui-chat-ui-polish`): reopened sessions land on their end, menu focus;

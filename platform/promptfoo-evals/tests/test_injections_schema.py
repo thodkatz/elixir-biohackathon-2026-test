@@ -132,6 +132,36 @@ def test_cli(tmp_path, repo_root):
     assert "invalid action" in result.stderr
 
 
+def drop_fixture_field(repo_root, field="payload"):
+    """Break the catalogue itself (not a manifest), the way a bad fixtures.json edit would:
+    a fixture missing a required field, which used to make build_catalogue raise KeyError."""
+    path = repo_root / "platform/ansible/catalog/injections/fixtures.json"
+    data = json.loads(path.read_text())
+    del data["fixtures"][0][field]
+    path.write_text(json.dumps(data))
+
+
+def test_cli_reports_a_broken_catalogue_via_check_fixtures_not_a_traceback(tmp_path, repo_root):
+    # check_fixtures runs before validate (task 4 fix round 2): it names the missing field
+    # instead of validate's build_catalogue raising KeyError first.
+    drop_fixture_field(repo_root)
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(manifest(*ALL)))
+    result = subprocess.run([sys.executable, str(HERE / "injections_schema.py"), str(good), str(repo_root)],
+                            capture_output=True, text=True)
+    assert result.returncode == 1
+    assert "missing" in result.stderr and "payload" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_validate_catches_a_broken_catalogue_instead_of_raising(repo_root):
+    # Carried from task 4 fix round 2: a caller of validate() directly (handoff.load_injections
+    # skips check_fixtures) must get an error list, not a KeyError/TypeError escaping build_catalogue.
+    drop_fixture_field(repo_root)
+    errors = injections_schema.validate(manifest(*ALL), repo_root)
+    assert any("payload" in e for e in errors), errors
+
+
 # --- the catalogue is read from fixtures.json/surfaces.json/metrics.DETECTORS, not listed here ---
 def test_a_fourth_entry_on_an_existing_surface_validates_with_no_code_change(repo_root):
     fixture = add_fixture(repo_root, "drs-second", "spe_inject_drs_second", "drs-description",
@@ -175,14 +205,16 @@ def test_a_monkeypatched_detector_makes_the_action_valid(repo_root, monkeypatch)
     assert injections_schema.validate(m, repo_root) == []
 
 
-def test_switches_matches_the_ladder_example_instance_files(repo_root):
+def test_switches_matches_the_ladder_example_instance_files():
+    # Against the real catalogue (not conftest's synthetic one), so this really checks the
+    # repo's own fixtures.json against the ladder's example instance files.
     root = injections_schema.REPO_ROOT
     l1 = yaml.safe_load((root / "platform/ansible/instances/L1.example.yml").read_text())
     on = {k: v for k, v in l1.items() if k.startswith("spe_inject_")}
-    assert injections_schema.switches(list(ALL), repo_root) == on
+    assert injections_schema.switches(list(ALL), root) == on
     no_injections = yaml.safe_load((root / "platform/ansible/instances/no-injections.example.yml").read_text())
     off = {k: v for k, v in no_injections.items() if k.startswith("spe_inject_")}
-    assert injections_schema.switches([], repo_root) == off
+    assert injections_schema.switches([], root) == off
 
 
 def test_switches_rejects_an_unknown_id(repo_root):
@@ -193,6 +225,14 @@ def test_switches_rejects_an_unknown_id(repo_root):
 def test_load_injections_validates(handoff_dir):
     (handoff_dir / "injections.json").write_text(json.dumps(broken(lambda m: m["injections"][0].update(action="x"))))
     with pytest.raises(handoff.ManifestError, match="invalid action"):
+        handoff.load_injections(handoff_dir)
+
+
+def test_load_injections_reports_a_broken_catalogue_as_manifest_error_not_a_traceback(handoff_dir, repo_root):
+    # handoff.load_injections calls injections_schema.validate directly, skipping check_fixtures:
+    # it must still get a ManifestError naming the problem, not a KeyError escaping build_catalogue.
+    drop_fixture_field(repo_root)
+    with pytest.raises(handoff.ManifestError, match="payload"):
         handoff.load_injections(handoff_dir)
 
 

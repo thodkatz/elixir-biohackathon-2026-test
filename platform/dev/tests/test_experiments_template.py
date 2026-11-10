@@ -3,9 +3,8 @@
 The coder provider plans with no Coder server: a parameter's value comes from the environment
 (`CODER_PARAMETER_<sha256 hex of its name>`, a list as a JSON string), and the plan's JSON gives the
 `build_vars` output (ansible_vars without the Coder identity, token and init script, which are unknown
-at plan time) and, in `prior_state`, the parameters' options and the presets
-(docs/knowledge/opentofu-coder-template-test.md). Skipped unless `SPE_TOFU` names a tofu/terraform
-binary or one is on PATH; `TF_PLUGIN_CACHE_DIR` is passed through when set.
+at plan time) and, in `prior_state`, the parameters' options and the presets. Skipped unless `SPE_TOFU`
+names a tofu/terraform binary or one is on PATH; `TF_PLUGIN_CACHE_DIR` is passed through when set.
 """
 import hashlib
 import json

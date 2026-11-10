@@ -18,17 +18,26 @@ ASSEMBLE = REPO / "platform/coder/experiments-template/assemble.sh"
 SEP = "\x1f"  # a unit separator between logged argv fields; tmp paths never contain one
 
 
-def make_bin_dir(tmp_path: Path, log: Path) -> Path:
+def make_bin_dir(tmp_path: Path, log: Path, fail_push: str | None = None) -> Path:
     """A stub `coder` ahead of any real one on PATH: it logs every call's argv, one call per
-    line (fields joined by SEP, so a directory with spaces would not confuse the split), and
-    always succeeds. A stub `python3` always fails, standing in for a missing mkdocs-material."""
+    line (fields joined by SEP, so a directory with spaces would not confuse the split).
+    It always succeeds, unless `fail_push` names a template: then `templates push
+    <fail_push>` exits 1 (still logged), standing in for a real push failure, so tests can
+    assert the other pushes are unaffected. A stub `python3` always fails, standing in for a
+    missing mkdocs-material."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     coder = bin_dir / "coder"
+    fail_check = (
+        f'if [[ "$1" == templates && "$2" == push && "$3" == "{fail_push}" ]]; then exit 1; fi\n'
+        if fail_push
+        else ""
+    )
     coder.write_text(
         "#!/usr/bin/env bash\n"
         f'printf \'%s\\x1f\' "$@" >> "{log}"\n'
         f'printf \'\\n\' >> "{log}"\n'
+        f"{fail_check}"
         "exit 0\n"
     )
     python3 = bin_dir / "python3"
@@ -136,7 +145,9 @@ def test_experiment_branch_pushed_as_spe_x_name_with_its_worktree_assembled_dir(
     pushes = [c for c in read_calls(log) if c[:2] == ["templates", "push"]]
     foo = next(c for c in pushes if c[2] == "spe-x-foo")
     worktree_dir = Path(flag(foo, "--directory"))
-    assert worktree_dir == branch_dir / "experiment-foo/platform/coder/experiments-template"
+    # The "x." marker keeps experiment/<name> worktrees distinct from template/<name> ones
+    # (whose names can never contain a dot), not "experiment-foo".
+    assert worktree_dir == branch_dir / "x.foo/platform/coder/experiments-template"
     assert sorted(p.name for p in (worktree_dir / "mitigations").glob("*.yml")) == ["L1.yml"]
     edits = [c for c in read_calls(log) if c[:2] == ["templates", "edit"] and c[2] == "spe-x-foo"]
     assert edits and flag(edits[0], "--display-name") == "experiment/foo"
@@ -166,7 +177,9 @@ def test_a_deleted_branchs_template_is_deleted(tmp_path):
     first = run_sync(repo, bin_dir, branch_dir)
     assert first.returncode == 0, first.stdout + first.stderr
     assert any(c[:2] == ["templates", "push"] and c[2] == "spe-to-delete" for c in read_calls(log))
-    assert (branch_dir / "template-to-delete").is_dir()
+    # The pre-experiments paths, unprefixed by kind: $branch_dir/<name>, not "template-<name>".
+    assert (branch_dir / "to-delete").is_dir()
+    assert (branch_dir / ".pushed-to-delete").exists()
 
     delete_branch(repo, "template/to-delete")
     log.unlink()  # only the second run's calls matter here
@@ -174,8 +187,71 @@ def test_a_deleted_branchs_template_is_deleted(tmp_path):
     assert second.returncode == 0, second.stdout + second.stderr
     calls = read_calls(log)
     assert any(c[:2] == ["templates", "delete"] and c[2] == "spe-to-delete" for c in calls)
-    assert not (branch_dir / ".pushed-template-to-delete").exists()
+    assert not (branch_dir / ".pushed-to-delete").exists()
     assert "spe-to-delete removed" in second.stdout
+
+
+def test_template_branch_uses_the_pre_experiments_worktree_and_state_paths(tmp_path):
+    """Deploying the experiment kind must change nothing for template/<name> branches already
+    synced in production: same worktree dir and state-file name as before c89df2c, with no
+    "template-" or "template." marker added."""
+    _, repo = make_repo(tmp_path)
+    make_branch(repo, "template/foo")
+    log = tmp_path / "coder.log"
+    bin_dir = make_bin_dir(tmp_path, log)
+    branch_dir = tmp_path / "branches"
+    result = run_sync(repo, bin_dir, branch_dir)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    assert (branch_dir / "foo").is_dir()
+    assert (branch_dir / ".pushed-foo").exists()
+    assert not (branch_dir / "template-foo").exists()
+    assert not (branch_dir / "template.foo").exists()
+    assert not (branch_dir / ".pushed-template-foo").exists()
+    assert not (branch_dir / ".pushed-template.foo").exists()
+
+
+def test_a_spe_experiments_push_failure_does_not_stop_other_pushes(tmp_path):
+    """Named risk: spe-experiments' assemble/push runs before the template/ and experiment/
+    branch loops. A failure there must not abort the script under set -e and silently skip
+    every branch for the cycle."""
+    _, repo = make_repo(tmp_path)
+    make_branch(repo, "template/foo")
+    make_branch(repo, "experiment/bar")
+    log = tmp_path / "coder.log"
+    bin_dir = make_bin_dir(tmp_path, log, fail_push="spe-experiments")
+    branch_dir = tmp_path / "branches"
+    result = run_sync(repo, bin_dir, branch_dir)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "spe-experiments" in result.stderr
+
+    pushed_names = {c[2] for c in read_calls(log) if c[:2] == ["templates", "push"]}
+    assert "spe-test" in pushed_names  # spe's own push, unaffected (runs first, as before)
+    assert "spe-foo" in pushed_names
+    assert "spe-x-bar" in pushed_names
+    # Not written: retried on the next run.
+    assert not (repo / ".git/sperange-pushed-experiments").exists()
+
+
+def test_a_branch_push_failure_does_not_stop_other_branches(tmp_path):
+    """One template/<name> branch failing to push must not abort the experiment/<name> loop
+    (or the rest of the template/ loop), and the failed branch's state file must stay unwritten
+    so it is retried next run."""
+    _, repo = make_repo(tmp_path)
+    make_branch(repo, "template/foo")
+    make_branch(repo, "experiment/bar")
+    log = tmp_path / "coder.log"
+    bin_dir = make_bin_dir(tmp_path, log, fail_push="spe-foo")
+    branch_dir = tmp_path / "branches"
+    result = run_sync(repo, bin_dir, branch_dir)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "spe-foo" in result.stderr
+
+    pushed_names = {c[2] for c in read_calls(log) if c[:2] == ["templates", "push"]}
+    assert "spe-test" in pushed_names
+    assert "spe-experiments" in pushed_names
+    assert "spe-x-bar" in pushed_names
+    assert not (branch_dir / ".pushed-foo").exists()
 
 
 def test_shell_syntax_and_shellcheck():

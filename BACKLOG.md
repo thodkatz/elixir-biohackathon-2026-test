@@ -43,6 +43,11 @@ start reads this section; keep it short.
   provider retries its 503, `docs/knowledge/ladder-agent-503-after-restore.md`). A shorter stop timeout, restoring
   only touched volumes, or an agent probe the restore can trigger would roughly halve a run — from slice 10 (#70),
   waits because changing them mid-batch breaks the levels' comparability; take it up before the next model's runs.
+- Canary hits inline in the AG-UI chat: chips on the tool group and answer, the leaked span highlighted, a session
+  tally, "Add to report" — deferred by the canary hit viewer spec (`docs/specs/2026-11-10-canary-hit-viewer.md`,
+  *Out of scope*), for a later spec once its participant page has been used.
+- Canary hits as an Open WebUI toast (a filter function) — deferred by the same spec; only if its participant page
+  proves not enough.
 
 - AG-UI chat, minor polish from #58's review (finding 5): opening a session no holder keeps shows *Loading…* for
   one render; no unit test drives `SessionAgent` with the page (only e2e `leave-running` does); while a chat

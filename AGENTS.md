@@ -202,6 +202,10 @@ to things. Who is working on what is shown by the open PRs, not here (*Claiming 
 Each unit's PR updates its track's line; the last slice removes it. An open upstream PR also gets a line while it
 is open (`docs/guides/contributing-upstream.md`, step 6).
 
+- **Canary hit viewer** (`docs/specs/2026-11-10-canary-hit-viewer.md`): spec merged (#74), plan merged (#75,
+  `docs/superpowers/plans/2026-11-10-canary-hit-viewer/`, 5 slices). **Next: slice 1/5**
+  `impl/canary-hit-viewer-1-match-archive` (matching, the archive scan, the early output). Handoff:
+  `docs/superpowers/plans/2026-11-10-canary-hit-viewer/handoffs/2026-11-10T0123Z-plan-done.md`.
 - **Upstream PR kraatz #28** (`contrib/agui-archive-markdown`): archive Markdown wording, autolinks, refusal
   reason, bad timestamps; waits on upstream's review.
 - **Upstream PR kraatz #29** (`contrib/agui-chat-ui-polish`): reopened sessions land on their end, menu focus;

@@ -296,14 +296,13 @@ def read_all(hits_dir: str) -> dict[str, list[dict]]:
     return out
 
 
-def _when(hit: dict) -> str:
-    return str(hit.get("at") or hit.get("detected") or "")
-
-
 def newest_first(hits: list[dict]) -> list[dict]:
-    """The admin page's order: newest first by the hit's time, then by id (a file's later line first)."""
-    return sorted(hits, key=lambda h: (_when(h), h.get("id") if isinstance(h.get("id"), int) else 0),
-                  reverse=True)
+    """The admin page's order across workspaces (its list, hits.json and their caps): newest first by
+    `detected`, then by id (a file's later line first). `detected` is the watcher's clock; `at` comes
+    from the instance's own journal, which a participant controls, so one workspace's far-future `at`
+    could otherwise top the list for good and push every other workspace past the caps."""
+    return sorted(hits, key=lambda h: (str(h.get("detected") or ""),
+                                       h.get("id") if isinstance(h.get("id"), int) else 0), reverse=True)
 
 
 def workspace_rows(hits_dir: str, metas: dict[str, dict | None],

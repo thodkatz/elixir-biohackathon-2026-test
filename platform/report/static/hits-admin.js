@@ -133,9 +133,33 @@
     addHit(data);
   });
   es.addEventListener("error", function () { lost = true; });
+  // At most one reload a minute: a stream that keeps ending at once would otherwise reload the page
+  // (every hits file reread, a Coder lookup per workspace) every few seconds.
+  var RELOAD_GAP_MS = 60000;
+  var reloadPending = false;
+
+  function lastReload() {
+    try {
+      return parseInt(sessionStorage.getItem("hits-admin-reloaded"), 10) || 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  function reload() {
+    try {
+      sessionStorage.setItem("hits-admin-reloaded", String(Date.now()));
+    } catch (e) {
+      // no storage: the reload still happens, only unthrottled across pages
+    }
+    location.reload();
+  }
+
   es.addEventListener("open", function () {
     // A reconnect: the stream starts at each file's end again, so what came in meanwhile is only
     // in a fresh page.
-    if (lost) location.reload();
+    if (!lost || reloadPending) return;
+    reloadPending = true;
+    setTimeout(reload, Math.max(0, lastReload() + RELOAD_GAP_MS - Date.now()));
   });
 })();

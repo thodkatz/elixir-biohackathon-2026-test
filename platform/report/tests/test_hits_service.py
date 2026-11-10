@@ -906,3 +906,34 @@ def test_coder_state_failure_renders(service):
     status, _, body = call(base, "/reports/hits", token="tok-root")
     assert status == 200
     assert '<td class="state"></td>' in _row_html(body.decode(), STATE_FAILS)
+
+
+def test_admin_stream_survives_unreadable_file(service, streams, capfd):
+    """One hits file the stream cannot read (here a directory named like one) is dropped, logged once,
+    and the other workspaces' feed goes on: ending the stream would make the page reload into it again."""
+    base, hits_dir = service
+    (hits_dir / f"{NOSIDECAR}.jsonl").mkdir()
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
+    s = streams(base, None, token="tok-root")
+    assert s.status == 200
+    assert not s.ended(1.5)
+    append(hits_dir, WID, _record(WID, _openwebui_hit()))
+    event = s.next(2.0)
+    assert event is not None and event["id"] == f"{WID}:2"
+    out, _ = capfd.readouterr()
+    assert out.count(f"hits stream {NOSIDECAR}: IsADirectoryError, dropped from the admin stream\n") == 1
+    assert str(hits_dir) not in out
+
+
+def test_admin_order_by_detected_not_at(service):
+    """The cross-workspace order and its caps follow `detected` (the watcher's clock), not `at` (the
+    instance's journal, which a participant controls)."""
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()) | {"at": "2099-01-01T00:00:00Z",
+                                                            "detected": "2026-11-10T10:00:00Z"}])
+    write_hits(hits_dir, OTHER, [_record(OTHER, _agui_hit()) | {"detected": "2026-11-10T12:00:00Z"}])
+    data = json.loads(call(base, "/reports/hits.json", token="tok-root")[2])
+    assert [h["workspace"] for h in data["hits"]] == [OTHER, WID]
+    text = call(base, "/reports/hits", token="tok-root")[2].decode()
+    first = re.search(r'<div class="admin-hit" [^>]*data-workspace="([^"]+)"', text).group(1)
+    assert first == OTHER

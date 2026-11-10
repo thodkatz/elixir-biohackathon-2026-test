@@ -373,6 +373,13 @@ def message_page(title: str, text: str, user: dict | None = None) -> bytes:
 
 # --- the server ---------------------------------------------------------------
 
+def log_stream_error(wid: str, error: OSError, what: str) -> None:
+    """One log line for a hits file a stream cannot read: the workspace id and the error's class
+    only (no path, no content)."""
+    sys.stdout.write(f"hits stream {wid}: {type(error).__name__}, {what}\n")
+    sys.stdout.flush()
+
+
 class Tail:
     """One hits file followed by an event stream, read in bounded looks: `poll` returns the complete
     lines past `start` (as line number, raw bytes) added since the last look. Line numbers are the
@@ -388,10 +395,10 @@ class Tail:
         self.caught_up = False  # `start` reached, or clamped to the file's end once the end was read
         self.in_long_line = False  # inside a line longer than one read, skipped (it still counts as a line)
 
-    def poll(self, read_size: int, wid: str) -> list[tuple[int, bytes]] | None:
+    def poll(self, read_size: int) -> list[tuple[int, bytes]] | None:
         """The new lines, or None when the stream should end: the file was replaced, cut or removed
-        after it was read, or could not be read (logged with the workspace id and the error's class
-        only: no path, no content)."""
+        after it was read (a reconnect is clamped to the new end, so it cannot loop). A file that
+        cannot be read at all raises its OSError: the caller decides what that ends."""
         data = b""
         try:
             with open(self.path, "rb") as f:
@@ -405,10 +412,6 @@ class Tail:
             if self.inode is not None:
                 return None  # removed after it was read
             self.caught_up = True  # no hits yet: nothing to skip, the first hit is id 1
-        except OSError as e:
-            sys.stdout.write(f"hits stream {wid}: {type(e).__name__}, ended\n")
-            sys.stdout.flush()
-            return None
         at_end = len(data) < read_size
         if self.in_long_line:
             nl = data.find(b"\n")
@@ -676,7 +679,11 @@ class Handler(BaseHTTPRequestHandler):
             nonlocal status_seen, status_sent
             out = []
             if tail:
-                lines = tail.poll(srv.stream_read, wid)
+                try:
+                    lines = tail.poll(srv.stream_read)
+                except OSError as e:
+                    log_stream_error(wid, e, "ended")
+                    return None
                 if lines is None:
                     return None
                 out.extend(e for e in (self._hit_event(n, raw) for n, raw in lines) if e)
@@ -701,18 +708,28 @@ class Handler(BaseHTTPRequestHandler):
         """The admin stream (spec *Admin page*): every workspace's hits file, rescanned on each look so
         a new workspace's file joins. A file there when the stream opened is followed from its end (no
         resume: the page reloads on reconnect); one that appears later, from its first line. Event ids
-        are `<workspace id>:<line number>`; no status events (the page's status column is rendered)."""
+        are `<workspace id>:<line number>`; no status events (the page's status column is rendered).
+        A file that cannot be read is dropped for the rest of this stream (logged once) and the others
+        go on: ending the stream would only make the page reload into the same unreadable file."""
         srv = self.server
         tails: dict[str, Tail] = {}
+        dropped: set[str] = set()
         first = True
 
         def look():
             nonlocal first
             out = []
             for wid in workspace_ids(self.hits_dir):
+                if wid in dropped:
+                    continue
                 if wid not in tails:
                     tails[wid] = Tail(self._hits_path(wid), start=Tail.END if first else 0)
-                lines = tails[wid].poll(srv.stream_read, wid)
+                try:
+                    lines = tails[wid].poll(srv.stream_read)
+                except OSError as e:
+                    log_stream_error(wid, e, "dropped from the admin stream")
+                    dropped.add(wid)
+                    continue
                 if lines is None:
                     return None  # one file replaced or cut: the page reconnects, and reloads
                 out.extend(e for e in (self._hit_event(n, raw, wid) for n, raw in lines) if e)

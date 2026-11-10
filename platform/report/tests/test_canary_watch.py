@@ -354,3 +354,463 @@ def test_bad_or_unmatched_sidecars_are_skipped(tmp_path):
     fourth.write_text(json.dumps({"instance": "no-such-instance", "owner": "eve"}))
     [w] = canary_watch.discover(str(reports), str(output_root), str(runs))
     assert w.instance == "ws1"
+
+
+# --- the daemon: polling a fake instance, state, status, the scan on stop (decisions 1, 3, 10) ---
+
+import logging  # noqa: E402
+import shlex  # noqa: E402
+import sqlite3  # noqa: E402
+
+import pytest  # noqa: E402
+
+FIXTURES = HERE / "fixtures" / "canary"
+SESSION = "aaaaaaaa-1111-4222-8333-444444444444"
+JOURNAL = (FIXTURES / "agui-journals" / "s1.jsonl").read_text().splitlines(keepends=True)
+JOURNAL_LINES = [line.rstrip("\n") for line in JOURNAL]
+CHAT = json.loads((FIXTURES / "openwebui-export.json").read_text())["chats"][0]
+R1_KEYS = sorted([
+    ("prompt", None, "FCANARY-TEST011"),
+    ("tool_args", "call1", "FCANARY-TEST01"),
+    ("tool_result", "call2", "FCANARY-TEST01"),
+    ("tool_args", "call3", "FCANARY-TEST01"),
+    ("answer", None, "FCANARY-TEST01"),
+], key=str)
+
+
+def _index(event_type: str, call_id: str | None = None) -> int:
+    """The index in JOURNAL of the first line carrying this event (and tool call)."""
+    for n, line in enumerate(JOURNAL):
+        event = json.loads(line).get("event") or {}
+        if event.get("type") == event_type and (call_id is None or event.get("toolCallId") == call_id):
+            return n
+    raise LookupError(event_type)
+
+
+def _keys(hits: list[dict], run: str = "r1") -> list[tuple]:
+    return sorted([(h["place"], (h["tool"] or {}).get("call_id"), h["canary"]["token"])
+                   for h in hits if h["run"] == run], key=str)
+
+
+def _chat_db(path: Path, updated_at: int) -> None:
+    if path.exists():
+        path.unlink()
+    conn = sqlite3.connect(str(path))
+    conn.execute("CREATE TABLE chat (id TEXT, title TEXT, updated_at INTEGER, chat TEXT)")
+    conn.execute("INSERT INTO chat VALUES (?, ?, ?, ?)", (CHAT["id"], CHAT["title"], updated_at, json.dumps(CHAT["chat"])))
+    conn.commit()
+    conn.close()
+
+
+class Counting(canary_watch.Transport):
+    """Wraps a transport, counting its calls; `fail` makes it raise instead."""
+
+    def __init__(self, inner=None, replies=None, fail=False):
+        self.inner, self.replies, self.fail, self.calls = inner, list(replies or []), fail, []
+
+    def read(self, ws, offsets):
+        self.calls.append(json.loads(json.dumps(offsets)))
+        if self.fail:
+            raise RuntimeError("connection refused")
+        if self.replies:
+            return self.replies.pop(0)
+        return self.inner.read(ws, offsets)
+
+
+class Fake:
+    """A fake instance on tmp_path (its four sources, read by LocalTransport) and the portal's directories."""
+
+    def __init__(self, tmp_path: Path, encrypted: bool = False):
+        self.reports, self.output_root, self.runs = _layout(tmp_path)
+        self.out = self.output_root / "fixture"
+        self.out.mkdir(parents=True)
+        shutil.copy(FIXTURES / "hosts.yml", self.out / "hosts.yml")
+        if encrypted:
+            (self.out / "canaries.json.age").write_text("age-encrypted-stub")
+        else:
+            shutil.copy(FIXTURES / "canaries.json", self.out / "canaries.json")
+        _sidecar(self.reports, WORKSPACE, "fixture")
+        self.instance = tmp_path / "instance"
+        (self.instance / "sessions").mkdir(parents=True)
+        self.journal = self.instance / "sessions" / f"{SESSION}.jsonl"
+        self.agent_runs = self.instance / "runs.jsonl"
+        self.receiver = self.instance / "requests.jsonl"
+        self.db = self.instance / "webui.db"
+        self.hits_dir = tmp_path / "hits"
+        self.paths = {"sessions": str(self.instance / "sessions"), "agent_runs": str(self.agent_runs),
+                      "receiver": str(self.receiver), "webui_db": str(self.db)}
+        self.transport = Counting(canary_watch.LocalTransport(self.paths))
+
+    def watcher(self, transport=None, **kwargs) -> "canary_watch.Watcher":
+        return canary_watch.Watcher(str(self.hits_dir), str(self.reports), str(self.runs), str(self.output_root),
+                                    transport or self.transport, **kwargs)
+
+    def write_journal(self, lines: list[str], mode: str = "a") -> None:
+        with open(self.journal, mode) as f:
+            f.writelines(lines)
+
+    def hits(self) -> list[dict]:
+        return HitsFile(str(self.hits_dir / f"{WORKSPACE}.jsonl")).read()
+
+    def status(self) -> dict:
+        return json.loads((self.hits_dir / f"{WORKSPACE}.status.json").read_text())
+
+    def state(self) -> dict:
+        return json.loads((self.hits_dir / f"{WORKSPACE}.state.json").read_text())
+
+    def archive(self, journal_lines: list[str], index: bool = True, workspace: str = WORKSPACE) -> Path:
+        """A run directory as run_archive writes it on stop, newer than hosts.yml (so: not running)."""
+        run = self.runs / f"20261110T150000Z_{self.out.name}"
+        (run / "agui" / "agui-journals").mkdir(parents=True)
+        (run / "agui" / "agui-journals" / f"{SESSION}.jsonl").write_text("".join(journal_lines))
+        shutil.copy(FIXTURES / "canaries.json", run / "canaries.json")
+        report = json.loads((RUN / "report.json").read_text()) | {"workspace_id": workspace}
+        (run / "report.json").write_text(json.dumps(report))
+        if index:
+            (run / "index.md").write_text("# run\n")
+        later = time.time() + 100
+        os.utime(run, (later, later))
+        return run
+
+
+def _ndjson(records: list[dict]) -> list[str]:
+    return [json.dumps(r) + "\n" for r in records]
+
+
+def test_poll_appends_hits_from_each_source(tmp_path):
+    fake = Fake(tmp_path)
+    fake.write_journal(JOURNAL)
+    shutil.copy(RUN / "agui" / "agent-runs.jsonl", fake.agent_runs)
+    request = json.loads((FIXTURES / "requests.jsonl").read_text())
+    fake.receiver.write_text("".join(_ndjson([request, request | {"path": "/again"}])))
+    _chat_db(fake.db, 1000)
+    fake.watcher().tick(1000.0)
+    hits = fake.hits()
+    assert {h["source"] for h in hits} == {"agui-journal", "agent-runs", "openwebui-db", "receiver"}
+    assert _keys(hits) == R1_KEYS and {h["source"] for h in hits if h["run"] == "r1"} == {"agui-journal"}
+    assert [(h["source"], h["kind"]) for h in hits if h["run"] == "r9"] == [("agent-runs", "answer")]
+    delivered = [h for h in hits if h["source"] == "receiver"]
+    assert [h["kind"] for h in delivered] == ["delivered"]  # one per canary per generation, not per request
+    assert delivered[0]["at"] == delivered[0]["detected"]  # the receiver has no time: when it was read
+    assert [(h["session"]["id"], h["run"], h["kind"]) for h in hits if h["source"] == "openwebui-db"] == [
+        ("owc1", "a1", "touched")]
+    assert all(h["session"]["title"] == "Find the flag" for h in hits if h["source"] == "agui-journal")
+    assert [h["id"] for h in hits] == list(range(1, len(hits) + 1))
+    assert {k: hits[0][k] for k in META} == META
+    status = fake.status()
+    assert status["state"] == "running" and status["note"] is None
+    assert status["last_poll"] == status["since"] == "1970-01-01T00:16:40Z"
+    assert sum(status["hits"].values()) == len(hits) and status["hits"]["delivered"] == 1
+    state = fake.state()
+    assert state["offsets"]["journals"][SESSION] == fake.journal.stat().st_size
+    assert state["offsets"]["agent_runs"] == fake.agent_runs.stat().st_size
+    assert state["offsets"]["openwebui"] == 1000
+    assert state["run_starts"] == {}  # every run read has ended
+    # Nothing new: the next poll appends nothing, a re-saved chat included.
+    fake.watcher().tick(1003.0)
+    assert len(fake.hits()) == len(hits)
+
+
+def test_split_token_across_polls(tmp_path):
+    fake = Fake(tmp_path)
+    first_args = _index("TOOL_CALL_ARGS", "call1")
+    watcher = fake.watcher()
+    fake.write_journal(JOURNAL[:first_args + 1])  # the first piece of "FCANA" + "RY-TEST01"
+    watcher.tick(1000.0)
+    assert [h["place"] for h in fake.hits()] == ["prompt"]
+    assert fake.state()["run_starts"][SESSION] == len("".join(JOURNAL[:2]).encode())
+    fake.write_journal(JOURNAL[first_args + 1:])
+    watcher.tick(1001.0)  # not due yet: 3 s
+    assert len(fake.transport.calls) == 1
+    watcher.tick(1003.0)
+    assert _keys(fake.hits()) == R1_KEYS
+    assert [h for h in fake.hits() if (h["tool"] or {}).get("call_id") == "call1"][0]["kind"] == "args"
+
+
+def test_restart_mid_run_no_loss_no_repeat(tmp_path):
+    fake = Fake(tmp_path)
+    first_args = _index("TOOL_CALL_ARGS", "call1")
+    fake.write_journal(JOURNAL[:first_args + 1])
+    fake.watcher().tick(1000.0)
+    assert len(fake.hits()) == 1
+    fake.write_journal(JOURNAL[first_args + 1:])
+    restarted = fake.watcher()  # a new process: no reader in memory, only the state file
+    restarted.tick(1000.5)
+    assert _keys(fake.hits()) == R1_KEYS  # the split call1 found, the prompt not repeated
+    assert all(h["session"]["title"] == "Find the flag" for h in fake.hits())  # the title kept over the restart
+    run_start = len("".join(JOURNAL[:2]).encode())
+    assert fake.transport.calls[-1]["journals"][SESSION] == run_start
+    assert fake.state()["run_starts"] == {}
+
+
+def test_new_generation_resets_offsets(tmp_path):
+    fake = Fake(tmp_path)
+    fake.write_journal(JOURNAL)
+    _chat_db(fake.db, 1000)
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    first = fake.hits()
+    generation = fake.state()["generation"]
+    assert {h["source"] for h in first} == {"agui-journal", "openwebui-db"}
+    # A rebuild: hosts.yml rewritten, the journal truncated and written again (the same length, so the old
+    # offset would read nothing), Open WebUI's database made anew with an older updated_at.
+    hosts = fake.out / "hosts.yml"
+    hosts.write_text(hosts.read_text())
+    later = time.time() + 50
+    os.utime(hosts, (later, later))
+    fake.write_journal(JOURNAL, mode="w")
+    _chat_db(fake.db, 500)
+    watcher.tick(1003.0)
+    assert fake.state()["generation"] != generation
+    hits = fake.hits()
+    assert len(hits) == 2 * len(first)
+    assert _keys(hits[len(first):]) == R1_KEYS
+    assert [h["source"] for h in hits[len(first):] if h["frontend"] == "openwebui"] == ["openwebui-db"]
+    assert fake.state()["offsets"]["openwebui"] == 500
+
+
+def _reply(files: dict | None = None, openwebui: dict | None = None) -> dict:
+    return {"files": files or {}, "openwebui": openwebui, "missing": [], "errors": []}
+
+
+def _file(lines: list[str]) -> dict:
+    starts, at = [], 0
+    for line in lines:
+        starts.append(at)
+        at += len(line.encode()) + 1
+    return {"size": at, "start": 0, "end": at, "lines": lines, "line_starts": starts}
+
+
+def test_reader_output_untrusted(tmp_path):
+    fake = Fake(tmp_path)
+    records = [{"run_id": f"x{n}", "thread_id": "t", "answer": "FCANARY-TEST01"} for n in range(300)]
+    lines = ["not json", "{", "[1, 2", "\"FCANARY-TEST01\""] + [json.dumps(r) for r in records]
+    transport = Counting(replies=[
+        _reply({"agent_runs": _file(lines)}),
+        {"files": [], "openwebui": None, "missing": [], "errors": []},  # not the expected shape
+        _reply({"agent_runs": _file(["{}"]) | {"line_starts": [0, 5]}}),  # starts not one per line
+        _reply(openwebui={"rows": [], "max": "1000"}),
+    ])
+    watcher = fake.watcher(transport)
+    watcher.tick(1000.0)
+    hits = fake.hits()
+    assert len(hits) == 200 and {h["kind"] for h in hits} == {"answer"}
+    assert fake.status()["state"] == "running"
+    assert fake.state()["offsets"]["agent_runs"] == _file(lines)["end"]
+    for n, now in enumerate((1003.0, 1063.0, 1123.0)):
+        watcher.tick(now)
+        assert len(transport.calls) == n + 2
+        assert fake.status()["state"] == "unreachable"
+    assert fake.state()["offsets"]["agent_runs"] == _file(lines)["end"]  # a failed poll moves nothing
+    assert len(fake.hits()) == 200
+
+
+def test_journal_not_a_session_id_skipped(tmp_path):
+    """The chat app reads only <uuid>.jsonl as a journal (lib/export.ts): any other file is skipped, not a
+    failed poll, and never becomes an offset key."""
+    fake = Fake(tmp_path)
+    good = _file(JOURNAL_LINES)
+    transport = Counting(replies=[_reply({"journal:../../etc/passwd": _file(JOURNAL_LINES),
+                                          f"journal:{SESSION}": good})])
+    fake.watcher(transport).tick(1000.0)
+    assert fake.status()["state"] == "running"
+    assert _keys(fake.hits()) == R1_KEYS
+    assert fake.state()["offsets"]["journals"] == {SESSION: good["end"]}
+
+
+def test_failed_poll_backs_off(tmp_path):
+    fake = Fake(tmp_path)
+    transport = Counting(fail=True)
+    watcher = fake.watcher(transport)
+    watcher.tick(1000.0)
+    status = fake.status()
+    assert status["state"] == "unreachable" and status["since"] == "1970-01-01T00:16:40Z"
+    assert status["last_poll"] is None
+    for now in (1003.0, 1030.0, 1059.0):
+        watcher.tick(now)
+    assert len(transport.calls) == 1
+    watcher.tick(1060.0)
+    assert len(transport.calls) == 2
+    assert fake.status()["since"] == "1970-01-01T00:16:40Z"  # still unreachable since the first failure
+    transport.fail = False
+    transport.inner = canary_watch.LocalTransport(fake.paths)
+    watcher.tick(1120.0)
+    assert len(transport.calls) == 3
+    status = fake.status()
+    assert status["state"] == "running" and status["last_poll"] == "1970-01-01T00:18:40Z"
+    watcher.tick(1123.0)
+    assert len(transport.calls) == 4  # back to every 3 s
+
+
+def test_scan_waits_for_index_md(tmp_path):
+    fake = Fake(tmp_path)
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    run = fake.archive(JOURNAL, index=False)
+    watcher.tick(1003.0)
+    assert fake.hits() == [] and fake.state()["archived"] == []
+    assert fake.status()["state"] != "stopped"
+    (run / "index.md").write_text("# run\n")
+    watcher.tick(1004.0)
+    assert _keys(fake.hits()) == R1_KEYS
+    assert fake.state()["archived"] == [run.name]
+    assert fake.status()["state"] == "stopped"
+
+
+def test_on_stop_scans_archive_once(tmp_path):
+    fake = Fake(tmp_path)
+    watcher = fake.watcher()
+    end_call1 = _index("TOOL_CALL_END", "call1")
+    fake.write_journal(JOURNAL[:end_call1 + 1])
+    watcher.tick(1000.0)
+    live = fake.hits()
+    assert sorted(h["place"] for h in live) == ["prompt", "tool_args"]
+    fake.archive(JOURNAL)  # the stop: the lines past the last poll are only in the archive now
+    fake.write_journal(JOURNAL[end_call1 + 1:])
+    polls = len(fake.transport.calls)
+    watcher.tick(1003.0)
+    assert len(fake.transport.calls) == polls  # stopped: not polled
+    hits = fake.hits()
+    assert _keys(hits) == R1_KEYS  # the later hits, and the earlier ones not again
+    assert hits[:len(live)] == live
+    assert fake.status()["state"] == "stopped"
+    for now in (1006.0, 1009.0):
+        watcher.tick(now)
+    fake.watcher().tick(1012.0)  # a restart scans it no more either
+    assert fake.hits() == hits
+
+
+def test_archive_of_another_workspace_not_scanned(tmp_path):
+    fake = Fake(tmp_path)
+    fake.archive(JOURNAL, workspace="99999999-9999-9999-9999-999999999999")
+    fake.watcher().tick(1000.0)
+    assert fake.hits() == []
+    assert fake.state()["archived"] == []
+
+
+def test_encrypted_never_polled(tmp_path):
+    fake = Fake(tmp_path, encrypted=True)
+    fake.write_journal(JOURNAL)
+    fake.watcher().tick(1000.0)
+    assert fake.transport.calls == []
+    status = fake.status()
+    assert status["state"] == "encrypted" and status["note"] == "canary record is encrypted"
+
+
+def test_hits_file_full_is_capped(tmp_path):
+    fake = Fake(tmp_path)
+    fake.write_journal(JOURNAL)
+    watcher = fake.watcher(hits_max=1500)
+    watcher.tick(1000.0)
+    status = fake.status()
+    assert status["state"] == "capped" and status["note"] == "hits file full"
+    assert 0 < os.path.getsize(fake.hits_dir / f"{WORKSPACE}.jsonl") <= 1500
+    watcher.tick(1003.0)
+    assert len(fake.transport.calls) == 1  # nothing more is written, so nothing more is read
+
+
+def test_logs_carry_no_token(tmp_path, caplog):
+    caplog.set_level(logging.DEBUG)
+    fake = Fake(tmp_path)
+    fake.write_journal(JOURNAL[:5])
+    shutil.copy(RUN / "agui" / "agent-runs.jsonl", fake.agent_runs)
+    shutil.copy(FIXTURES / "requests.jsonl", fake.receiver)
+    _chat_db(fake.db, 1000)
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    fake.archive(JOURNAL)
+    watcher.tick(1003.0)
+    (tmp_path / "other").mkdir()
+    bad = Fake(tmp_path / "other")
+    bad.watcher(Counting(replies=[_reply({"agent_runs": {"lines": ["FCANARY-TEST01"]}}) | {
+        "errors": ["FCANARY-TEST01: x"]}])).tick(1000.0)
+    assert fake.hits() and caplog.records
+    assert WORKSPACE in caplog.text
+    for token in TOKENS:
+        assert token not in caplog.text
+    assert "sensitive/" not in caplog.text and "CANARY" not in caplog.text
+
+
+def test_state_file_modes(tmp_path):
+    fake = Fake(tmp_path)
+    fake.write_journal(JOURNAL)
+    old = os.umask(0o022)
+    try:
+        fake.watcher().tick(1000.0)
+    finally:
+        os.umask(old)
+    modes = {p.name.removeprefix(WORKSPACE): stat.S_IMODE(p.stat().st_mode) for p in fake.hits_dir.iterdir()}
+    assert modes == {".state.json": 0o600, ".status.json": 0o640, ".jsonl": 0o640}
+
+
+def test_unreadable_source_skipped(tmp_path, caplog):
+    """A source the scan cannot read (here a directory where a file should be: an OSError even as root) is
+    skipped and logged with the workspace id; the rest of the run is still scanned."""
+    caplog.set_level(logging.WARNING)
+    run = tmp_path / "run"
+    shutil.copytree(RUN, run)
+    (run / "agui" / "agent-runs.jsonl").unlink()
+    (run / "agui" / "agent-runs.jsonl").mkdir()
+    (run / "agui" / "agui-journals" / "broken.jsonl").mkdir()
+    hits, count = scan(tmp_path, run=run)
+    assert count > 0 and _keys(hits.read()) == R1_KEYS
+    assert WORKSPACE in caplog.text and "agent-runs.jsonl" in caplog.text
+
+
+# --- the transports ---
+
+def _remote_ws(tmp_path: Path, target: str = "10.0.0.5") -> "canary_watch.Workspace":
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "hosts.yml").write_text(f"ssh_user: ubuntu\nprovision: existing\nssh_target: {target}\n"
+                                   "ssh_key: /keys/id\nssh_args: -p 2222\n")
+    return canary_watch.Workspace(id=WORKSPACE, owner=None, instance="x", output_dir=str(out), api_host=None,
+                                  ssh=canary_watch.Ssh(None, None, None), generation="g", running=True,
+                                  encrypted=False)
+
+
+def test_offsets_quoted_and_checked(tmp_path):
+    seen = []
+
+    def runner(argv, data, timeout, cap):
+        seen.append((argv, data, timeout, cap))
+        return json.dumps(_reply()).encode()
+
+    transport = canary_watch.SshTransport(runner=runner)
+    ws = _remote_ws(tmp_path)
+    offsets = {"journals": {SESSION: 12}, "agent_runs": 3, "receiver": 0, "openwebui": 1000.5}
+    assert transport.read(ws, offsets) == _reply()
+    [(argv, data, timeout, cap)] = seen
+    assert argv[:5] == ["ssh", "-i", "/keys/id", "-p", "2222"]
+    assert argv[5:13] == ["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/cm-%C", "-o", "ControlPersist=60",
+                          "-o", "BatchMode=yes"]
+    assert argv[13] == "ubuntu@10.0.0.5" and len(argv) == 15
+    assert shlex.split(argv[14])[:3] == ["sudo", "python3", "-"]
+    assert json.loads(shlex.split(argv[14])[3]) == offsets
+    assert data == (HERE.parent / "canary_reader.py").read_bytes()
+    assert timeout == 30 and cap == 32 << 20
+    for bad in ({"journals": {"x'; rm -rf /; '": 0}}, {"journals": {SESSION: "1; rm"}}, {"journals": {SESSION: True}},
+                {"journals": {SESSION: -1}}, {"journals": []}, {"agent_runs": "0"}, {"receiver": 1.5},
+                {"openwebui": float("nan")}, {"openwebui": True}, {"other": 1}):
+        with pytest.raises(ValueError):
+            transport.read(ws, bad)
+    assert len(seen) == 1
+
+
+def test_local_target_runs_sudo_without_ssh(tmp_path):
+    seen = []
+    transport = canary_watch.SshTransport(runner=lambda argv, *rest: seen.append(argv) or b'{"files": {}}')
+    transport.read(_remote_ws(tmp_path, target="localhost"), {"agent_runs": 4})
+    assert seen == [["sudo", "python3", "-", json.dumps({"agent_runs": 4}, separators=(",", ":"))]]
+
+
+def test_run_capped(tmp_path):
+    echo = [sys.executable, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"]
+    big = b"x" * 300_000  # past a pipe's buffer, both ways
+    assert canary_watch.run_capped(echo, big, 30, 1 << 20) == big
+    with pytest.raises(canary_watch.PollError, match="larger than"):
+        canary_watch.run_capped(echo, big, 30, 1000)
+    with pytest.raises(canary_watch.PollError, match="exit status 3"):
+        canary_watch.run_capped([sys.executable, "-c", "raise SystemExit(3)"], b"", 30, 1000)
+    with pytest.raises(canary_watch.PollError, match="timed out"):
+        canary_watch.run_capped([sys.executable, "-c", "import time; time.sleep(5)"], b"", 0.5, 1000)

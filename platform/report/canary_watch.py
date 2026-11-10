@@ -1,8 +1,21 @@
 #!/usr/bin/env python3
-"""The canary hit viewer's watcher (spec *Watcher*). This slice: the scan of one archived run
-directory (/data-share/runs/<time>_<instance>/, as the run_archive role writes it) into a hits file.
+"""The canary hit viewer's watcher (spec *Watcher*): a daemon on the portal VM that polls every running
+Coder workspace's instance through the reader (canary_reader.py, sent over SSH) and scans each stopped
+run's archive once, writing each workspace's hits, state and status to the hits directory.
 
+    canary_watch.py [--reports-dir DIR] [--runs-dir DIR] [--hits-dir DIR] [--output-root DIR]
     canary_watch.py --archive RUN_DIR --out HITS.jsonl [--html PAGE.html] [--api-host HOST]
+
+The first form is the daemon (Watcher.run_forever). Per workspace id it keeps, in the hits directory,
+`<id>.jsonl` (the hits, 0640), `<id>.state.json` (0600: the generation, the reader's offsets, each
+journal's open run's start, the dedup keys, the run directories scanned, the run log's titles) and
+`<id>.status.json` (0640: `state` running|stopped|unreachable|encrypted|capped, `since`, `last_poll`,
+`hits` per kind, `note`), which the pages read. What the reader returns is the participant's (root on
+their instance): a line that does not parse is dropped, a reply of the wrong shape is a failed poll, at
+most 200 hits are kept per poll and 10 MB per hits file.
+
+The second form scans one archived run directory (/data-share/runs/<time>_<instance>/, as the
+run_archive role writes it) into a hits file.
 
 The scan reads the run's canaries.json, the AG-UI journals (agui/agui-journals/<session>.jsonl), the
 agent's run log (agui/agent-runs.jsonl) and Open WebUI's chats (openwebui-export.json in the run
@@ -13,33 +26,43 @@ With --html, every hit now in the hits file (not only those appended this run) i
 standalone participant page (hits_view.standalone), written with mode 0640 like the hits file itself:
 the early output (spec *Early output*).
 
-Logs carry paths, counts and errors only, never a canary value (decision 10).
+Logs carry workspace ids, paths, counts and error classes only, never a canary value, an excerpt, a line
+of a source or a path under sensitive/ (decision 10).
 
 Standard library only: the portal runs this from its repository checkout with the system Python.
 """
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import logging
+import math
 import os
+import re
+import selectors
+import shlex
+import subprocess
 import sys
 import tempfile
+import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from canary_hits import HitsFile, Place, JournalReader, agent_run_places, dedup_key, hits_for, openwebui_places  # noqa: E402
-from canary_record import RecordError, _scalar, load_canaries, read_hosts  # noqa: E402
+from canary_hits import (HITS_FILE_MAX, HitsFile, JournalReader, Place, agent_run_places, dedup_key,  # noqa: E402
+                         hits_for, openwebui_places, receiver_places)
+from canary_record import RecordError, _scalar, load_canaries, read_hosts, vm_argv  # noqa: E402
 from hits_view import participant_body, standalone  # noqa: E402
 
 OUTPUT_ROOT = Path(__file__).resolve().parents[1] / "ansible" / "output"  # spe_output_root's default
 ARCHIVE_GENERATION = "archive"  # the generation a scan by hand keys its hits under
 
-# Defaults for the daemon (Task 7); --archive's own flags are unchanged by them.
+# Defaults for the daemon; --archive's own flags are unchanged by them.
 REPORTS_DIR = "/data-share/reports"
 RUNS_DIR = "/data-share/runs"
 HITS_DIR = "/data-share/canary-hits"
@@ -51,8 +74,10 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _jsonl(path: Path):
-    """The parsed lines of a JSON Lines file; lines that do not parse are dropped (untrusted input)."""
+def _jsonl(path: Path, who: str | None = None):
+    """The parsed lines of a JSON Lines file; lines that do not parse are dropped (untrusted input). A file
+    that cannot be read (a PermissionError, a directory in its place) is skipped and logged under `who`
+    (the workspace id), by its name only: one bad source never ends a scan or the daemon."""
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -62,15 +87,17 @@ def _jsonl(path: Path):
                     continue
     except FileNotFoundError:
         return
+    except OSError as e:
+        logger.warning("%s: cannot read %s (%s), skipping it", who, path.name, type(e).__name__)
 
 
-def _archive_places(run_dir: Path) -> list[Place]:
+def _archive_places(run_dir: Path, who: str | None = None) -> list[Place]:
     places: list[Place] = []
     for journal in sorted((run_dir / "agui" / "agui-journals").glob("*.jsonl")):
         reader = JournalReader(journal.stem)
-        for line in _jsonl(journal):
+        for line in _jsonl(journal, who):
             places += reader.feed(line)
-    records = list(_jsonl(run_dir / "agui" / "agent-runs.jsonl"))
+    records = list(_jsonl(run_dir / "agui" / "agent-runs.jsonl", who))
     titles = {r.get("thread_id"): r.get("title") for r in records
               if isinstance(r, dict) and r.get("type") == "title" and isinstance(r.get("title"), str)}
     for record in records:
@@ -78,6 +105,9 @@ def _archive_places(run_dir: Path) -> list[Place]:
     try:
         export = json.loads((run_dir / "openwebui-export.json").read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
+        export = None
+    except OSError as e:
+        logger.warning("%s: cannot read openwebui-export.json (%s), skipping it", who, type(e).__name__)
         export = None
     chats = export.get("chats") if isinstance(export, dict) else None
     for chat in chats if isinstance(chats, list) else []:
@@ -93,7 +123,7 @@ def scan_archive(run_dir: str, hits: HitsFile, seen: set[str], meta: dict, api_h
     directory = Path(run_dir)
     canaries = load_canaries(directory)
     count = 0
-    for place in _archive_places(directory):
+    for place in _archive_places(directory, meta.get("workspace") or meta.get("instance")):
         for hit in hits_for(place, canaries, api_host):
             hit = {"id": None, "detected": _now(), "workspace": meta.get("workspace"),
                    "instance": meta.get("instance"), "owner": meta.get("owner"), **hit}
@@ -329,14 +359,540 @@ def discover(reports_dir: str, output_root: str, runs_dir: str) -> list[Workspac
     return workspaces
 
 
+# The daemon (spec *Watcher*, *How it pulls*, *Reader output is untrusted*, *On stop*)
+
+POLL_EVERY = 3.0  # seconds between polls of a running workspace
+BACKOFF = 60.0  # seconds after a failed poll
+POLL_TIMEOUT = 30  # seconds for one reader call
+REPLY_MAX = 32 << 20  # bytes of reader reply read; past it the poll fails
+HITS_PER_POLL = 200
+TITLES_MAX = 1000  # titles kept per workspace (run log threads, journals); the oldest go first
+READER = Path(__file__).resolve().parent / "canary_reader.py"
+# One SSH connection per instance, its socket on local disk (not /data-share's NFS); never a prompt.
+SSH_OPTIONS = ["-o", "ControlMaster=auto", "-o", "ControlPath=~/.ssh/cm-%C", "-o", "ControlPersist=60",
+               "-o", "BatchMode=yes"]
+SESSION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+OFFSET_KEYS = ("journals", "agent_runs", "receiver", "openwebui")
+
+
+class PollError(Exception):
+    """A failed poll. Its message names what failed, never anything the reply carried."""
+
+
+class OffsetsError(ValueError):
+    """Offsets that may not reach a command line. Its message names the key, never a value."""
+
+
+def _count(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def check_offsets(offsets: object) -> dict:
+    """The offsets the reader is handed, checked before they reach a command line: the four known keys,
+    journal keys session ids (lowercase UUIDs), byte offsets non-negative integers, Open WebUI's a finite
+    number. Raises OffsetsError (a ValueError)."""
+    if not isinstance(offsets, dict) or set(offsets) - set(OFFSET_KEYS):
+        raise OffsetsError("offsets: unexpected keys")
+    journals = offsets.get("journals", {})
+    if not isinstance(journals, dict):
+        raise OffsetsError("offsets: journals is not an object")
+    for key, value in journals.items():
+        if not (isinstance(key, str) and SESSION_ID.fullmatch(key) and _count(value)):
+            raise OffsetsError("offsets: a journal key or offset is malformed")
+    for name in ("agent_runs", "receiver"):
+        if name in offsets and not _count(offsets[name]):
+            raise OffsetsError(f"offsets: {name} is not a byte offset")
+    if "openwebui" in offsets and not _number(offsets["openwebui"]):
+        raise OffsetsError("offsets: openwebui is not a number")
+    return offsets
+
+
+def run_capped(argv: list[str], data: bytes, timeout: float, cap: int, env: dict | None = None) -> bytes:
+    """Run argv with `data` on its stdin and return its stdout. PollError when it runs past `timeout`
+    seconds, writes more than `cap` bytes or exits non-zero. Its stderr is discarded: what the instance
+    prints there is the participant's, and could carry a token into the log."""
+    proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
+    deadline = time.monotonic() + timeout
+    out, pending = bytearray(), memoryview(data)
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        if pending:
+            os.set_blocking(proc.stdin.fileno(), False)
+            selector.register(proc.stdin, selectors.EVENT_WRITE)
+        else:
+            proc.stdin.close()
+        while selector.get_map():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise PollError(f"timed out after {timeout} s")
+            for key, _ in selector.select(left):
+                if key.fileobj is proc.stdin:
+                    try:
+                        pending = pending[os.write(proc.stdin.fileno(), pending[:65536]):]
+                    except BrokenPipeError:
+                        pending = pending[:0]
+                    if not pending:
+                        selector.unregister(proc.stdin)
+                        proc.stdin.close()
+                    continue
+                chunk = os.read(proc.stdout.fileno(), 65536)
+                if not chunk:
+                    selector.unregister(proc.stdout)
+                    continue
+                out += chunk
+                if len(out) > cap:
+                    raise PollError(f"reply larger than {cap} bytes")
+        try:
+            code = proc.wait(timeout=max(deadline - time.monotonic(), 0.1))
+        except subprocess.TimeoutExpired:
+            raise PollError(f"timed out after {timeout} s") from None
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        selector.close()
+        for pipe in (proc.stdin, proc.stdout):
+            if not pipe.closed:
+                pipe.close()
+    if code != 0:
+        raise PollError(f"exit status {code}")
+    return bytes(out)
+
+
+def _parse_reply(out: bytes) -> object:
+    try:
+        return json.loads(out)
+    except ValueError:
+        raise PollError("reply is not JSON") from None
+
+
+class Transport:
+    """How the watcher runs the reader for a workspace: `read(ws, offsets)` returns its parsed reply."""
+
+    def read(self, ws: Workspace, offsets: dict) -> dict:
+        raise NotImplementedError
+
+
+class SshTransport(Transport):
+    """The reader over SSH, as the archive playbook connects (canary_record.vm_argv: hosts.yml's user,
+    target, key and arguments), with SSH_OPTIONS before the target; on a local controller (vm_argv is
+    []) `sudo python3 -` runs here. The reader's source goes on stdin, the offsets as its argument."""
+
+    def __init__(self, runner=run_capped):
+        self.runner = runner
+
+    def read(self, ws: Workspace, offsets: dict) -> dict:
+        payload = json.dumps(check_offsets(offsets), separators=(",", ":"))
+        prefix = vm_argv(ws.output_dir)
+        if prefix:
+            argv = prefix[:-1] + SSH_OPTIONS + [prefix[-1], "sudo python3 - " + shlex.quote(payload)]
+        else:
+            argv = ["sudo", "python3", "-", payload]
+        return _parse_reply(self.runner(argv, READER.read_bytes(), POLL_TIMEOUT, REPLY_MAX))
+
+
+class LocalTransport(Transport):
+    """The reader run here over local paths (SPE_READER_PATHS): a fake instance, for tests."""
+
+    def __init__(self, paths: dict):
+        self.paths = paths
+
+    def read(self, ws: Workspace, offsets: dict) -> dict:
+        payload = json.dumps(check_offsets(offsets), separators=(",", ":"))
+        env = dict(os.environ, SPE_READER_PATHS=json.dumps(self.paths))
+        return _parse_reply(run_capped([sys.executable, "-", payload], READER.read_bytes(), POLL_TIMEOUT,
+                                       REPLY_MAX, env))
+
+
+def _check_file(entry: object) -> None:
+    if not (isinstance(entry, dict) and all(_count(entry.get(k)) for k in ("size", "start", "end"))):
+        raise PollError("reply: a file entry lacks its offsets")
+    lines, starts = entry.get("lines"), entry.get("line_starts")
+    if not (isinstance(lines, list) and isinstance(starts, list) and len(lines) == len(starts)
+            and all(isinstance(line, str) for line in lines) and all(_count(s) for s in starts)):
+        raise PollError("reply: a file entry's lines are malformed")
+
+
+def check_reply(reply: object) -> dict:
+    """The reader's reply in the shape canary_reader.py's docstring gives, else PollError. A journal key
+    that is not a session id is no error: the chat app does not read such a file either, so it is left out."""
+    if not isinstance(reply, dict) or not isinstance(reply.get("files"), dict):
+        raise PollError("reply: no files")
+    for key, entry in reply["files"].items():
+        if key in ("agent_runs", "receiver") or (isinstance(key, str) and key.startswith("journal:")):
+            _check_file(entry)
+        else:
+            raise PollError("reply: an unknown file key")
+    openwebui = reply.get("openwebui")
+    if openwebui is not None and not (isinstance(openwebui, dict) and isinstance(openwebui.get("rows"), list)
+                                      and _number(openwebui.get("max"))):
+        raise PollError("reply: openwebui is malformed")
+    if not (isinstance(reply.get("missing"), list) and isinstance(reply.get("errors"), list)):
+        raise PollError("reply: no missing or errors list")
+    return reply
+
+
+def _iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _write_atomic(path: Path, text: str, mode: int) -> None:
+    """Write `text` to `path` with `mode` (whatever the umask), through a temporary file in the same
+    directory and os.replace, so a reader never sees half a file."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        try:
+            os.fchmod(fd, mode)
+            view = memoryview(text.encode())
+            while view:
+                view = view[os.write(fd, view):]
+        finally:
+            os.close(fd)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _bounded(mapping: dict, key: str, value: str) -> None:
+    mapping.pop(key, None)
+    mapping[key] = value
+    while len(mapping) > TITLES_MAX:
+        del mapping[next(iter(mapping))]
+
+
+def _fresh_state(generation: str | None) -> dict:
+    return {"generation": generation, "offsets": {"journals": {}, "agent_runs": 0, "receiver": 0, "openwebui": 0},
+            "run_starts": {}, "archived": [], "titles": {}, "journal_titles": {}}
+
+
+def _str_map(value: object, kind: type) -> dict:
+    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, kind)} if isinstance(value, dict) else {}
+
+
+def _load_state(data: object) -> tuple[dict, set[str]]:
+    """The state file's content, each part checked (a part of the wrong type starts afresh); and its seen keys."""
+    if not isinstance(data, dict):
+        return _fresh_state(None), set()
+    state = _fresh_state(data.get("generation") if isinstance(data.get("generation"), str) else None)
+    try:
+        state["offsets"] = check_offsets(data.get("offsets"))
+        state["offsets"] = _fresh_state(None)["offsets"] | state["offsets"]
+    except OffsetsError:
+        pass
+    state["run_starts"] = {k: v for k, v in _str_map(data.get("run_starts"), int).items()
+                           if SESSION_ID.fullmatch(k) and _count(v)}
+    state["titles"] = _str_map(data.get("titles"), str)
+    state["journal_titles"] = _str_map(data.get("journal_titles"), str)
+    archived = data.get("archived")
+    state["archived"] = [a for a in archived if isinstance(a, str)] if isinstance(archived, list) else []
+    seen = data.get("seen")
+    return state, {k for k in seen if isinstance(k, str)} if isinstance(seen, list) else set()
+
+
+@dataclass
+class _Watched:
+    """What the watcher holds for one workspace between ticks."""
+    ws: Workspace
+    state: dict
+    seen: set[str]
+    hits: HitsFile
+    kinds: Counter
+    status: dict
+    readers: dict[str, JournalReader]
+    next_poll: float = 0.0
+    dirty: bool = True
+    status_text: str = ""
+    foreign: set[str] | None = None
+    errors_seen: int = 0
+
+
+class Watcher:
+    """The daemon's loop body: `tick(now)` discovers the workspaces, polls each running one whose poll
+    is due, scans each new archived run of a workspace once, and writes the state and status files."""
+
+    def __init__(self, hits_dir: str, reports_dir: str, runs_dir: str, output_root: str, transport: Transport,
+                 hits_max: int = HITS_FILE_MAX):
+        self.hits_dir, self.runs_dir = Path(hits_dir), Path(runs_dir)
+        self.reports_dir, self.output_root = reports_dir, output_root
+        self.transport, self.hits_max = transport, hits_max
+        self.watched: dict[str, _Watched] = {}
+        self.hits_dir.mkdir(parents=True, exist_ok=True)
+
+    def run_forever(self) -> None:
+        while True:
+            started = time.monotonic()
+            try:
+                self.tick(time.time())
+            except Exception as e:  # never end the daemon; the class only (a message could carry data)
+                logger.error("tick failed: %s", type(e).__name__)
+            time.sleep(max(0.0, 1.0 - (time.monotonic() - started)))
+
+    def tick(self, now: float) -> None:
+        current: dict[str, _Watched] = {}
+        for ws in discover(self.reports_dir, self.output_root, str(self.runs_dir)):
+            w = self.watched.get(ws.id) or self._load(ws)
+            w.ws = ws
+            current[ws.id] = w
+            try:
+                self._step(w, now)
+            except Exception as e:
+                logger.error("%s: %s", ws.id, type(e).__name__)
+        self.watched = current
+
+    # loading and saving
+
+    def _path(self, ws_id: str, suffix: str) -> Path:
+        return self.hits_dir / f"{ws_id}{suffix}"
+
+    def _load(self, ws: Workspace) -> _Watched:
+        try:
+            state, seen = _load_state(json.loads(self._path(ws.id, ".state.json").read_text(encoding="utf-8")))
+        except FileNotFoundError:
+            state, seen = _fresh_state(None), set()
+        except (OSError, ValueError):
+            logger.warning("%s: unreadable state file, starting afresh", ws.id)
+            state, seen = _fresh_state(None), set()
+        try:
+            status = json.loads(self._path(ws.id, ".status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            status = None
+        if not isinstance(status, dict):
+            status = {}
+        hits = HitsFile(str(self._path(ws.id, ".jsonl")), self.hits_max)
+        existing = hits.read()
+        if state["generation"]:  # a hit written just before a crash, whose key the state missed
+            seen |= {dedup_key(h, state["generation"]) for h in existing
+                     if isinstance(h.get("canary"), dict) and isinstance(h["canary"].get("token"), str)}
+        kinds = Counter(h["kind"] for h in existing if isinstance(h.get("kind"), str))
+        status = {"state": status.get("state"), "since": status.get("since"), "last_poll": status.get("last_poll"),
+                  "hits": dict(kinds), "note": status.get("note")}
+        return _Watched(ws=ws, state=state, seen=seen, hits=hits, kinds=kinds, status=status, readers={},
+                        foreign=set())
+
+    def _save(self, w: _Watched) -> None:
+        if w.dirty:
+            text = json.dumps(w.state | {"seen": sorted(w.seen)})
+            _write_atomic(self._path(w.ws.id, ".state.json"), text, 0o600)
+            w.dirty = False
+        w.status["hits"] = dict(sorted(w.kinds.items()))
+        text = json.dumps(w.status)
+        if text != w.status_text:
+            _write_atomic(self._path(w.ws.id, ".status.json"), text, 0o640)
+            w.status_text = text
+
+    def _set_state(self, w: _Watched, state: str, now: float, note: str | None = None) -> None:
+        if w.status["state"] != state:
+            w.status["state"], w.status["since"] = state, _iso(now)
+        w.status["note"] = note
+
+    # one workspace, one tick
+
+    def _step(self, w: _Watched, now: float) -> None:
+        ws = w.ws
+        if ws.encrypted:  # the watcher cannot match: never polled, nothing scanned
+            self._set_state(w, "encrypted", now, "canary record is encrypted")
+            self._save(w)
+            return
+        if w.state["generation"] != ws.generation:  # a fresh instance: every offset starts again from 0
+            w.state = _fresh_state(ws.generation) | {"archived": w.state["archived"]}
+            w.seen, w.readers, w.dirty = set(), {}, True
+        pending = self._scan_runs(w, now)
+        if w.hits.full:
+            self._set_state(w, "capped", now, "hits file full")
+        elif ws.running:
+            if now >= w.next_poll:
+                self._poll(w, now)
+        elif not pending:
+            self._set_state(w, "stopped", now)
+        self._save(w)
+
+    def _scan_runs(self, w: _Watched, now: float) -> bool:
+        """Scan each archived run of this workspace not yet scanned, once its index.md (written last)
+        exists, over the whole directory with this workspace's dedup keys: what polling already found is
+        not written again. True while this stop's run directory is still being written."""
+        ws, suffix = w.ws, f"_{w.ws.instance}"
+        try:
+            hosts_mtime = (Path(ws.output_dir) / "hosts.yml").stat().st_mtime
+            entries = sorted(e for e in self.runs_dir.iterdir() if e.name.endswith(suffix))
+        except OSError:
+            return False
+        pending = False
+        for entry in entries:
+            if entry.name in w.state["archived"] or entry.name in w.foreign or not entry.is_dir():
+                continue
+            if not (entry / "index.md").exists():
+                try:
+                    pending = pending or entry.stat().st_mtime >= hosts_mtime
+                except OSError:
+                    pass
+                continue
+            if archive_meta(str(entry)).get("workspace") != ws.id:
+                w.foreign.add(entry.name)  # the same instance name, another workspace
+                continue
+            before = w.hits.count
+            meta = {"workspace": ws.id, "instance": ws.instance, "owner": ws.owner}
+            try:
+                count = scan_archive(str(entry), w.hits, w.seen, meta, ws.api_host, ws.generation)
+            except RecordError as e:
+                logger.warning("%s: archived run %s not scanned: %s", ws.id, entry.name, e)
+                count = 0
+            w.kinds.update(h["kind"] for h in w.hits.read(after=before) if isinstance(h.get("kind"), str))
+            w.state["archived"].append(entry.name)
+            w.dirty = True
+            logger.info("%s: %d new hits from archived run %s", ws.id, count, entry.name)
+        return pending
+
+    def _offsets(self, w: _Watched) -> dict:
+        """The offsets to hand the reader: a journal without a reader in memory (after a restart) is read
+        again from its open run's run_start, so the run's pieces are whole again."""
+        offsets = copy.deepcopy(w.state["offsets"])
+        for uuid_, start in w.state["run_starts"].items():
+            if uuid_ in offsets["journals"] and uuid_ not in w.readers:
+                offsets["journals"][uuid_] = start
+        return offsets
+
+    def _poll(self, w: _Watched, now: float) -> None:
+        sent = self._offsets(w)
+        try:
+            canaries = load_canaries(w.ws.output_dir)
+            reply = check_reply(self.transport.read(w.ws, sent))
+            added, dropped, over = self._apply(w, reply, sent, canaries, now)
+        except Exception as e:
+            w.readers = {}  # half-fed: re-read from the committed offsets and run starts
+            w.next_poll = now + BACKOFF
+            self._set_state(w, "unreachable", now)
+            # Only our own messages: another exception's could quote the reply (int('<token>') would).
+            reason = str(e) if isinstance(e, (PollError, RecordError, OffsetsError)) else type(e).__name__
+            logger.warning("%s: poll failed (%s), next in %d s", w.ws.id, reason, BACKOFF)
+            return
+        w.next_poll = now + POLL_EVERY
+        w.status["last_poll"] = _iso(now)
+        self._set_state(w, "capped" if w.hits.full else "running", now, "hits file full" if w.hits.full else None)
+        if added:
+            logger.info("%s: %d new hits", w.ws.id, added)
+        if dropped:
+            logger.info("%s: %d lines that do not parse dropped", w.ws.id, dropped)
+        if over:
+            logger.warning("%s: %d hits past %d in one poll dropped", w.ws.id, over, HITS_PER_POLL)
+        errors = len(reply["errors"])
+        if errors != w.errors_seen:
+            logger.warning("%s: the reader reports %d source errors", w.ws.id, errors)
+            w.errors_seen = errors
+
+    def _apply(self, w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: float) -> tuple[int, int, int]:
+        """Match one reply's lines and rows, append their new hits; (hits added, lines dropped, hits over
+        the per-poll limit). Offsets, run starts and titles are committed only once the whole reply is in."""
+        state = copy.deepcopy({k: w.state[k] for k in ("offsets", "run_starts", "titles", "journal_titles")})
+        offsets, run_starts = state["offsets"], state["run_starts"]
+        tally = {"added": 0, "dropped": 0, "over": 0}
+        detected = _iso(now)
+
+        def record(places: list[Place]) -> None:
+            for place in places:
+                for found in hits_for(place, canaries, w.ws.api_host):
+                    hit = {"id": None, "detected": detected, "workspace": w.ws.id, "instance": w.ws.instance,
+                           "owner": w.ws.owner, **found}
+                    if hit["at"] is None and hit["source"] == "receiver":
+                        hit["at"] = detected  # the receiver's log has no time: when it was read
+                    key = dedup_key(hit, w.ws.generation)
+                    if key in w.seen or w.hits.full:
+                        continue
+                    if tally["added"] >= HITS_PER_POLL:
+                        tally["over"] += 1
+                        continue
+                    if w.hits.append(hit) is None:
+                        continue
+                    w.seen.add(key)
+                    w.kinds[hit["kind"]] += 1
+                    tally["added"] += 1
+
+        def parsed(entry: dict):
+            for line, start in zip(entry["lines"], entry["line_starts"]):
+                try:
+                    yield json.loads(line), start
+                except ValueError:
+                    tally["dropped"] += 1
+
+        files = reply["files"]
+        for key in sorted(k for k in files if k.startswith("journal:")):  # journals first: their copy wins
+            session = key.removeprefix("journal:")
+            if not SESSION_ID.fullmatch(session):
+                continue
+            entry = files[key]
+            reader = w.readers.get(session)
+            if reader is None or entry["start"] < sent["journals"].get(session, 0):
+                if entry["start"] < sent["journals"].get(session, 0):  # replaced: shorter than its offset
+                    run_starts.pop(session, None)
+                reader = w.readers[session] = JournalReader(session)
+                reader.title = state["journal_titles"].get(session)
+            for line, start in parsed(entry):
+                places = reader.feed(line)
+                kind = line.get("type") if isinstance(line, dict) else None
+                if kind == "run_start" and session not in run_starts and line.get("run_id") in reader.runs:
+                    run_starts[session] = start  # the earliest open run: re-read from here after a restart
+                elif kind == "run_end" and not reader.runs:
+                    run_starts.pop(session, None)
+                record(places)
+            if reader.title is not None and state["journal_titles"].get(session) != reader.title:
+                _bounded(state["journal_titles"], session, reader.title)
+            offsets["journals"][session] = entry["end"]
+        if "agent_runs" in files:
+            for line, _ in parsed(files["agent_runs"]):
+                if isinstance(line, dict) and line.get("type") == "title":
+                    if isinstance(line.get("thread_id"), str) and isinstance(line.get("title"), str):
+                        _bounded(state["titles"], line["thread_id"], line["title"])
+                    continue
+                record(agent_run_places(line, state["titles"]))
+            offsets["agent_runs"] = files["agent_runs"]["end"]
+        if "receiver" in files:
+            for line, _ in parsed(files["receiver"]):
+                if isinstance(line, dict):
+                    record(receiver_places(line))
+            offsets["receiver"] = files["receiver"]["end"]
+        if reply["openwebui"] is not None:
+            for row in reply["openwebui"]["rows"]:
+                record(openwebui_places(row, "openwebui-db"))  # `chat` is the row's JSON text, parsed there
+            offsets["openwebui"] = reply["openwebui"]["max"]
+        if tally["added"] or any(w.state[k] != v for k, v in state.items()):
+            w.state.update(state)
+            w.dirty = True
+        return tally["added"], tally["dropped"], tally["over"]
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Scan an archived run directory into a canary hits file.")
-    parser.add_argument("--archive", required=True, metavar="RUN_DIR", help="the archived run directory")
-    parser.add_argument("--out", required=True, metavar="HITS.jsonl", help="the hits file to append to")
-    parser.add_argument("--html", metavar="PAGE.html", help="also render a standalone participant page from the whole --out hits file"
-                        " (every hit in it, from all runs scanned into it, not only this one)")
-    parser.add_argument("--api-host", metavar="HOST", help="the instance's API host (default: its hosts.yml)")
+    parser = argparse.ArgumentParser(description="Watch every running Coder workspace for canary hits (the daemon),"
+                                     " or scan one archived run directory into a hits file (--archive).")
+    parser.add_argument("--reports-dir", default=REPORTS_DIR, help="the report sidecars (default: %(default)s)")
+    parser.add_argument("--runs-dir", default=RUNS_DIR, help="the archived runs (default: %(default)s)")
+    parser.add_argument("--hits-dir", default=HITS_DIR, help="hits, state and status files (default: %(default)s)")
+    parser.add_argument("--output-root", default=str(OUTPUT_ROOT), help="the instances' output directories"
+                        " (default: this checkout's platform/ansible/output)")
+    parser.add_argument("--archive", metavar="RUN_DIR", help="scan this archived run directory instead, then exit")
+    parser.add_argument("--out", metavar="HITS.jsonl", help="with --archive: the hits file to append to")
+    parser.add_argument("--html", metavar="PAGE.html", help="with --archive: also render a standalone participant page"
+                        " from the whole --out hits file (every hit in it, from all runs scanned into it, not only this one)")
+    parser.add_argument("--api-host", metavar="HOST", help="with --archive: the instance's API host (default: its hosts.yml)")
     args = parser.parse_args(argv)
+    if not args.archive:
+        if args.out or args.html or args.api_host:
+            parser.error("--out, --html and --api-host go with --archive")
+        logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(levelname)s %(message)s")
+        watcher = Watcher(args.hits_dir, args.reports_dir, args.runs_dir, args.output_root, SshTransport())
+        logger.info("watching %s into %s", args.reports_dir, args.hits_dir)
+        watcher.run_forever()
+        return 0
+    if not args.out:
+        parser.error("--archive needs --out")
     meta = archive_meta(args.archive)
     api_host = _api_host(args.api_host, meta.get("instance"))
     hits = HitsFile(args.out)

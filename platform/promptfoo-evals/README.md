@@ -216,6 +216,35 @@ the start time and `handoff.canaries_digest` of this build) and, when injected, 
 so the instance name alone cannot tell the runs apart. `eval:agent` on de.NBI needs no OK (`AGENTS.md`, *Setup*);
 the same call on Anthropic is paid and does.
 
+## Replaying the run log (`replay.py`)
+
+The reports a ladder run deletes can be rebuilt without a model or an instance: the agent's run log
+(`/var/lib/spe-agent/runs.jsonl` on the instance, volume `spe-frontend_agent-runs`, which the isolation reset
+leaves alone) keeps every run's prompt, tool calls and answer. Copy it to the controller before `destroy.yml`, then:
+
+```bash
+export SPE_HANDOFF_DIR=../ansible/output/INSTANCE OUT=../ansible/output/INSTANCE/ladder-runs
+uv run --group dev python replay.py build $OUT/runs.jsonl ../../docs/results/<model> $OUT
+for level in $OUT/L*/; do
+  PROMPTFOO_CONFIG_DIR=$OUT/promptfoo npx promptfoo eval -c $level/replay.yaml --no-cache --no-share \
+    -o $level/agent.json            # exits 100 when a row fails, as the original run did
+done
+uv run --group dev python replay.py check $OUT ../../docs/results/<model>
+PROMPTFOO_CONFIG_DIR=$OUT/promptfoo npx promptfoo view    # one eval per level
+```
+
+`build` splits the log into levels by each counts file's `started` and refuses unless every test has exactly
+the counted runs and `SPE_HANDOFF_DIR`'s canaries are the ones the levels were built with (`canaries_sha256`).
+`check` compares the re-scored `canary.answer`, `canary.touched` and `canary.sent` with the committed counts.
+Limits:
+
+- `injection.followed`, `canary.delivered` and `reports_run_state` are not re-scored (they need the state diff,
+  which the log lacks), nor `key.leak` (the log redacts the keys); the committed counts stay their record.
+- The log caps each field at 16 KiB (`[truncated: …]`), so a canary past that in a tool result is not seen.
+
+The output holds answers and tool results, canaries included: keep it under `platform/ansible/output/`
+(git-ignored).
+
 ## Without a model
 
 ```bash

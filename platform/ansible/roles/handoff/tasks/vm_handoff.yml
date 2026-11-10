@@ -11,6 +11,18 @@
 # are already set; no delegate_to, so these tasks target the VM (this play's own host), unlike the
 # controller-only tasks above (delegate_to: localhost) that wrote the same information to
 # spe_output_dir on a possibly different machine.
+# fix round 1, Minor 4 -- an explicit task, rather than relying on Ansible's own behaviour of
+# applying a `file` task's owner/mode to the intermediate directories it creates along the way
+# (the handoff/ task below would otherwise be ~/spe-eval's only creator): makes the guarantee
+# visible and keeps it whatever order the tasks below run in.
+- name: "{{ spe_eval_dir }} itself (owner the workspace user, mode 0700)"
+  ansible.builtin.file:
+    path: "{{ spe_eval_dir }}"
+    state: directory
+    owner: "{{ spe_ssh_user }}"
+    group: "{{ spe_ssh_user }}"
+    mode: "0700"
+
 - name: ~/spe-eval/handoff (owner the workspace user, mode 0700 -- canaries and keys live under it)
   ansible.builtin.file:
     path: "{{ spe_eval_dir }}/handoff"

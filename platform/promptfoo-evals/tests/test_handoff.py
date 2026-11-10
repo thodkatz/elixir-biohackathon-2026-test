@@ -256,11 +256,27 @@ def test_clean_with_placements_is_refused(handoff_dir, repo_root):
 
 
 def test_mixed_is_refused(handoff_dir, repo_root):
-    # check_hardening now accepts "mixed" (an experiment's arm, R4); condition() still refuses it:
-    # the ladder's own route only ever builds clean or fully injected.
+    # check_hardening now accepts "mixed" (an experiment's arm, R4); condition() still refuses it
+    # by default (allow_mixed=False): the ladder's own route only ever builds clean or fully injected.
     (handoff_dir / "hardening.json").write_text(json.dumps(hardening(injections="mixed")))
     with pytest.raises(handoff.ConfigError, match="not a ladder condition"):
         handoff.condition(handoff_dir, repo_root)
+
+
+def test_mixed_is_accepted_with_allow_mixed(handoff_dir, repo_root):
+    # fix round 1, cross-task gap: spe-eval run on an experiment naming only some of the
+    # catalogue's injections (run.sh's --suite/--reports-dir/--description path) passes
+    # allow_mixed=True; the result is "injected", exactly as for injections: true, since
+    # handoff_dir's own injections.json already lists placements.
+    (handoff_dir / "hardening.json").write_text(json.dumps(hardening(injections="mixed")))
+    assert handoff.condition(handoff_dir, repo_root, allow_mixed=True) == "injected"
+
+
+def test_mixed_with_allow_mixed_and_no_placements_is_still_refused(handoff_dir, repo_root):
+    (handoff_dir / "hardening.json").write_text(json.dumps(hardening(injections="mixed")))
+    (handoff_dir / "injections.json").write_text(json.dumps({"schema_version": 1, "injections": []}))
+    with pytest.raises(handoff.ManifestError, match="lists no injection"):
+        handoff.condition(handoff_dir, repo_root, allow_mixed=True)
 
 
 def test_clean_build_without_a_target_canary_is_refused(handoff_dir, repo_root):

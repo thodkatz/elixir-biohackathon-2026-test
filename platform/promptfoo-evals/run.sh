@@ -2,7 +2,9 @@
 # One ladder run for one level, condition and model (spec part 06): the controls suite, then, only if every
 # probe agrees with hardening.json's level, the whole agent suite (model calls), repeated and
 # uncached. The build sets the condition: injected (hardening.json injections: true) or clean (false); a
-# mixed build, or a hand-off that disagrees with its condition, is refused before any call.
+# mixed build, or a hand-off that disagrees with its condition, is refused before any call -- except on
+# the --suite/--reports-dir/--description path (an experiment naming only some of the catalogue's
+# injections, spe-eval run), where "mixed" is accepted and treated as injected (fix round 1).
 # Usage: run.sh <hand-off dir> <repeat> [--suite <config>] [--reports-dir <dir>] [--description <text>].
 # With none of the three, today's exact behaviour: reports/L<level>/ (injected) or reports/L<level>-clean/,
 # each with hardening.json, controls.json, agent.json, run.json (start time, canary digest) and, when
@@ -44,11 +46,15 @@ export SPE_HANDOFF_DIR="$handoff"
 if ! instance=$(python3 controls_asserts.py check-handoff "$handoff"); then
   echo "run.sh: stale or malformed hand-off in $handoff; refusing" >&2; exit 2
 fi
+# "mixed" is accepted only on the non-default path (an experiment naming only some of the
+# catalogue's injections never reaches the ladder's own reports/L<level>/ route below).
+allow_mixed=false
+if [ -n "$reports_dir" ] || [ -n "$suite" ] || [ -n "$description" ]; then allow_mixed=true; fi
 if ! condition=$(python3 -c 'import sys, handoff
 try:
-    print(handoff.condition(sys.argv[1]))
+    print(handoff.condition(sys.argv[1], allow_mixed=(sys.argv[2] == "true")))
 except handoff.ConfigError as e:
-    sys.exit(f"run.sh: {e}")' "$handoff"); then
+    sys.exit(f"run.sh: {e}")' "$handoff" "$allow_mixed"); then
   exit 2
 fi
 level=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["level"])' "$handoff/hardening.json")

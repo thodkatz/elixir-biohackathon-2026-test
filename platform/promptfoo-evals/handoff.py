@@ -207,20 +207,24 @@ def canaries_digest(dir: Path | str) -> str:
     return hashlib.sha256(body.encode()).hexdigest()
 
 
-def condition(dir: Path | str, repo_root: Path | None = None) -> str:
+def condition(dir: Path | str, repo_root: Path | None = None, allow_mixed: bool = False) -> str:
     """The run's condition, "injected" or "clean", once the hand-off is consistent with it.
 
     injected: injections.json is valid (load_injections) and lists at least one placement. clean:
     injections.json is absent or empty, and every fixture's canary_file in the catalogue
     (FIXTURES under repo_root) still holds a file canary, so removing the injections removed no
     target (spec part 02, *Matched builds*). "mixed" (`check_hardening` now accepts it, for an
-    experiment's arm that plants only some fixtures) is refused here: this is the ladder's own
-    route, which only ever builds clean or fully injected (experiments spec part 03, R4).
+    experiment's arm that plants only some fixtures) is refused by default: this is the ladder's
+    own route, which only ever builds clean or fully injected (experiments spec part 03, R4).
+    `allow_mixed=True` (the experiment route, `run.sh`'s non-default path: `spe-eval run` on an
+    experiment naming only some of the catalogue's injections) instead treats "mixed" the same as
+    `true`: `load_injections` must still list at least one placement, exactly as for a fully
+    injected build, and the result is "injected" either way (fix round 1, cross-task gap).
     """
     directory = Path(dir)
     root = repo_root or REPO_ROOT
     hardening = load_hardening(directory)
-    if hardening["injections"] == "mixed":
+    if hardening["injections"] == "mixed" and not allow_mixed:
         raise ConfigError("hardening.json: injections is \"mixed\", not a ladder condition (true or false)")
     if hardening["injections"]:
         if not load_injections(directory, root):

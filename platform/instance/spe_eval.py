@@ -335,15 +335,21 @@ def promptfoo_env(handoff_dir: Path, config_dir: Path, progress_path: Path, base
     and `SPE_EVAL_PROGRESS` (R3), `SPE_AGENT_URL` (`handoff_dir`'s own `hosts.yml`, its `agent_url`
     key, left unset when that build has no `agui` frontend and hosts.yml has none), and
     `SPE_AGENT_API_KEY_FILE`/`SPE_LLM_API_KEY_FILE` as paths into `handoff_dir` -- this function
-    never opens either key file, so no key value is ever read here, let alone printed. Also
-    disables promptfoo's own telemetry, sharing and update check, as
-    `platform/promptfoo-evals/README.md`'s run steps set them by hand, and puts `/usr/local/bin`
-    (node, npx, uv: the `spe_eval` role's own symlinks) at the front of `PATH`, so `run.sh` finds
-    them whatever the caller's own PATH already has (e.g. a `systemd --user` unit's own minimal
-    one, R5).
+    never opens either key file, so no key value is ever read here, let alone printed. First drops
+    `SPE_AGENT_API_KEY`, `SPE_LLM_API_KEY`, `SPE_AGENT_URL` and `SPE_HANDOFF_DIR` if `base_env`
+    (ordinarily the caller's own inherited environment) carries any of them: `asserts._secret`
+    prefers the bare key over its `_FILE` variant, and the controller's own docs tell an operator
+    to export `SPE_LLM_API_KEY` by hand, so a shell that still has it set must not override the VM
+    hand-off this function is building (task 5 review, Minor 1). Also disables promptfoo's own
+    telemetry, sharing and update check, as `platform/promptfoo-evals/README.md`'s run steps set
+    them by hand, and puts `/usr/local/bin` (node, npx, uv: the `spe_eval` role's own symlinks) at
+    the front of `PATH`, so `run.sh` finds them whatever the caller's own PATH already has (e.g. a
+    `systemd --user` unit's own minimal one, R5).
     """
     handoff_dir = Path(handoff_dir)
     env = dict(base_env if base_env is not None else os.environ)
+    for stale in ("SPE_AGENT_API_KEY", "SPE_LLM_API_KEY", "SPE_AGENT_URL", "SPE_HANDOFF_DIR"):
+        env.pop(stale, None)
     hosts_path = handoff_dir / "hosts.yml"
     if hosts_path.is_file():
         hosts = yaml.safe_load(hosts_path.read_text()) or {}

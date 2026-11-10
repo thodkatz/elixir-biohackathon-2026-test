@@ -357,6 +357,46 @@ def test_promptfoo_env_never_reads_the_key_files_themselves(tmp_path):
     assert "super-secret-llm-key" not in repr(env)
 
 
+def test_promptfoo_env_drops_an_inherited_agent_and_llm_key(tmp_path):
+    # task 5 review, Minor 1: asserts._secret prefers the bare SPE_AGENT_API_KEY/SPE_LLM_API_KEY
+    # over the _FILE variant, so a caller's shell still carrying either (the controller's own docs
+    # tell an operator to export SPE_LLM_API_KEY by hand) must not override the VM hand-off.
+    handoff = tmp_path / "handoff"
+    handoff.mkdir()
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl",
+                                  base_env={"SPE_AGENT_API_KEY": "stale-agent-key",
+                                            "SPE_LLM_API_KEY": "stale-llm-key"})
+    assert "SPE_AGENT_API_KEY" not in env
+    assert "SPE_LLM_API_KEY" not in env
+    assert env["SPE_AGENT_API_KEY_FILE"] == str(handoff / "agent_api_key")
+
+
+def test_promptfoo_env_drops_a_stale_inherited_agent_url_when_hosts_yml_has_none(tmp_path):
+    handoff = tmp_path / "handoff"
+    write_hosts_yml(handoff, provision="existing")  # no agent_url: no agui frontend
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl",
+                                  base_env={"SPE_AGENT_URL": "http://127.0.0.1:9999/agent"})
+    assert "SPE_AGENT_URL" not in env
+
+
+def test_promptfoo_env_replaces_a_stale_inherited_agent_url_when_hosts_yml_has_one(tmp_path):
+    handoff = tmp_path / "handoff"
+    write_hosts_yml(handoff, agent_url="http://127.0.0.1:8100/agent")
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl",
+                                  base_env={"SPE_AGENT_URL": "http://127.0.0.1:9999/agent"})
+    assert env["SPE_AGENT_URL"] == "http://127.0.0.1:8100/agent"
+
+
+def test_promptfoo_env_drops_an_inherited_spe_handoff_dir(tmp_path):
+    # SPE_HANDOFF_DIR is run.sh's own controller-tunnel variable (handoff.handoff_dir()); a stale
+    # one inherited from the caller's shell must not leak into run.sh's own environment either.
+    handoff = tmp_path / "handoff"
+    handoff.mkdir()
+    env = spe_eval.promptfoo_env(handoff, tmp_path / "promptfoo", tmp_path / "progress.jsonl",
+                                  base_env={"SPE_HANDOFF_DIR": "/some/other/path"})
+    assert "SPE_HANDOFF_DIR" not in env
+
+
 # --- the lock (decision 11) -------------------------------------------------------------------
 
 def test_lock_holder_is_none_without_a_lock_file(tmp_path):

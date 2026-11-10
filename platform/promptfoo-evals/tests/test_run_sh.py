@@ -131,6 +131,32 @@ def test_a_build_that_is_not_a_ladder_condition_refuses_before_npm(setup, case):
     assert code == 2 and calls == []
 
 
+def test_mixed_is_still_refused_on_the_default_ladder_path(setup):
+    # fix round 1: --reports-dir/--suite/--description accept "mixed" (below); the ladder's own
+    # default path (none of the three) must not, since it only ever builds clean or fully injected.
+    run, _, hand = setup
+    (hand / "hardening.json").write_text(json.dumps(hardening(instance="t-01", injections="mixed")))
+    code, calls, _ = run(rows())
+    assert code == 2 and calls == []
+
+
+def test_mixed_is_accepted_with_reports_dir(setup):
+    # fix round 1, cross-task gap: spe-eval run on an experiment naming only some of the
+    # catalogue's injections writes hardening.json's injections as "mixed"; run.sh's own
+    # --reports-dir path (spe-eval's own) must still run it, scored as injected.
+    run, work, hand = setup
+    target = work.parent / "mixed-reports"
+    (hand / "hardening.json").write_text(json.dumps(hardening(instance="t-01", injections="mixed")))
+    code, calls, _ = run(rows(), "3", "--reports-dir", str(target))
+    assert code == 0, calls
+    assert calls == [
+        f"promptfoo eval -c controls.yaml --no-cache --no-share -o {target}/controls.json",
+        f"promptfoo eval -c agent.yaml --no-cache --no-share -o {target}/agent.json --repeat 3",
+    ]
+    # scored as injected: injections.json (the placements) is copied alongside the rest.
+    assert (target / "injections.json").is_file()
+
+
 def test_extra_promptfoo_arguments_are_refused(setup):
     # A filtered run would be filed as a whole condition: the build, not the caller, says what runs.
     run, _, _ = setup

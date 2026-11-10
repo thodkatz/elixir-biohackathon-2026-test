@@ -54,21 +54,26 @@
   become: true
   when: not spe_eval_uv_present.stat.exists
 
-- name: uv extracted (the release tarball's own top-level directory, renamed to the pinned version)
+# fix round 1, Minor 2 -- no rename step: a run that dies between extract and rename, or a stale
+# generic-named directory an earlier version left behind, can no longer get renamed into the new
+# version's own name.
+- name: uv extracted straight into its own pinned-version directory
   when: not spe_eval_uv_present.stat.exists
   become: true
   block:
-    - name: Extract
+    - name: Pinned-version directory
+      ansible.builtin.file:
+        path: "/opt/uv-{{ spe_eval_uv_version }}"
+        state: directory
+        mode: "0755"
+
+    - name: Extract (--strip-components=1 drops the tarball's own uv-x86_64-unknown-linux-gnu/ directory)
       ansible.builtin.unarchive:
         src: "/opt/uv-{{ spe_eval_uv_version }}.tar.gz"
-        dest: /opt
+        dest: "/opt/uv-{{ spe_eval_uv_version }}"
         remote_src: true
-        creates: "/opt/uv-x86_64-unknown-linux-gnu/uv"
-
-    - name: Rename to the pinned version (so a later version upgrade cannot shadow this one)
-      ansible.builtin.command:
-        argv: [mv, /opt/uv-x86_64-unknown-linux-gnu, "/opt/uv-{{ spe_eval_uv_version }}"]
-      changed_when: true
+        extra_opts: ["--strip-components=1"]
+        creates: "/opt/uv-{{ spe_eval_uv_version }}/uv"
 
 - name: uv and uvx on the PATH
   ansible.builtin.file:

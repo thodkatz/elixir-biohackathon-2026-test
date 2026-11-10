@@ -279,7 +279,9 @@ Under `spe_experiments`, `create.yml` also sets up measuring an experiment on th
   whichever arm was just applied (`roles/handoff/tasks/vm_hardening.yml`, tagged `frontend`, one of
   `spe-apply all`'s own tags, so a later re-apply keeps it current).
 - **The toolchain** (role `spe_eval`, tagged `eval_toolchain`, run once at build time, never one of
-  `spe-apply all`'s tags): Node (a version `platform/promptfoo-evals/package.json`'s promptfoo supports, from
+  `spe-apply all`'s tags): Node (`spe_eval_node_version`, pinned at or above
+  `platform/promptfoo-evals/package-lock.json`'s own `engines.node` floor for the promptfoo
+  package itself -- `test_spe_eval_node_version.py` checks the pin against that file -- from
   nodejs.org, checksum-verified) and `uv` (Astral's release binary, checksum-verified) on the host directly
   (never in a container, for the same reason as the hand-off), `npm ci` and `uv sync --group dev` in the
   clone's `platform/promptfoo-evals`, and lingering enabled for the workspace user (so a detached

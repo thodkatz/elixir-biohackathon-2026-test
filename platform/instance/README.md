@@ -16,3 +16,21 @@ What runs on an instance from the repository clone there (`spe_repo_dir`,
 A change in the clone is testable in the instance's chat without rebuilding the
 instance. The table in `../coder/README.md`, "Working in a workspace", says what
 each change needs.
+
+## `~/spe-eval` (`spe-experiments` builds only)
+
+Everything `spe-eval` keeps on the VM (experiments spec part 03), owned by the workspace user:
+
+| Path | What |
+|---|---|
+| `handoff/` | The VM-local hand-off (mode 0700): `canaries.json`, `hardening.json` (rewritten per arm), `injections.json`, `trs-installed.json`, `drs-inventory.json`, `ca.crt`, the agent and LLM key files, and `hosts.yml` (`provision: existing`, `ssh_target: localhost`). None of it is mounted into any container (decision 8) |
+| `reports/<experiment>/<run id>/<arm>/` | Every kept run: `controls.json`, `agent.json`, `hardening.json`, `run.json`, `progress.jsonl` |
+| `promptfoo/` | `PROMPTFOO_CONFIG_DIR`: promptfoo's own eval database, so `npx promptfoo view` works on the VM |
+| `windows.jsonl` | One line per run (start/end time), so the canary hit watcher can tell an eval hit from a chat hit |
+| `lock` | `flock`'d while an `arm` or `run` is in progress (decision 11) |
+
+`archive.yml` copies `reports/`, `promptfoo/` and `windows.jsonl` into the run directory's `evals/` on stop
+(`../ansible/README.md`, "Archive and destroy"); on a `spe` build (no `~/spe-eval`) it copies nothing.
+
+Node, npm, npx, `uv` and `uvx` are installed on the host directly (role `spe_eval`, `../ansible/README.md`,
+"Experiments") and linked onto `/usr/local/bin`, alongside `spe-apply` and `spe-eval` themselves.

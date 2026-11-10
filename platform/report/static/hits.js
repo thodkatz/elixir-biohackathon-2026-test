@@ -30,6 +30,8 @@
   var loudHits = toArray(list.querySelectorAll(":scope > details.hit"));
   var alsoSeenInit = list.querySelector(":scope > details.also-seen");
   var quietHits = alsoSeenInit ? toArray(alsoSeenInit.querySelectorAll(":scope > details.hit")) : [];
+  // Ids are hits-file line numbers, and the watcher only appends to that file (never truncates or
+  // replaces it), so an id seen once is never reused: a plain set is enough, no eviction needed.
   var seenIds = {};
   loudHits.concat(quietHits).forEach(function (el) { seenIds[el.dataset.id] = true; });
   var grouping = false;

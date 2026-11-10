@@ -26,6 +26,7 @@ from canary_hits import HitsFile  # noqa: E402
 WID = "11111111-2222-4333-8444-555555555555"
 OTHER = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 NOSIDECAR = "99999999-aaaa-4bbb-8ccc-dddddddddddd"
+NOOWNER = "33333333-4444-4555-8666-777777777777"  # a sidecar with no "owner" key
 USERS = {
     "tok-anna": {"username": "anna", "email": "anna@example.org", "roles": [{"name": "member"}]},
     "tok-bob": {"username": "bob", "email": "bob@example.org", "roles": []},
@@ -167,11 +168,22 @@ def test_other_user_gets_403(service):
     assert call(base, f"/reports/{WID}/hits.json", token="tok-bob")[0] == 403
 
 
+def test_sidecar_without_owner_gets_403(server):
+    """`can_see_hits` reads `meta.get("owner")`, not `meta["owner"]`: a sidecar missing `owner`
+    means only admins can see it (like no sidecar at all), not a KeyError (500)."""
+    base, hits_dir, srv = server
+    Path(srv.RequestHandlerClass.store.root, f"{NOOWNER}.json").write_text(
+        json.dumps({"workspace": "tm-no-owner"}))
+    write_hits(hits_dir, NOOWNER, [_record(NOOWNER, _agui_hit())])
+    assert call(base, f"/reports/{NOOWNER}/hits", token="tok-bob")[0] == 403
+    assert call(base, f"/reports/{NOOWNER}/hits", token="tok-root")[0] == 200
+
+
 def test_logged_out_redirect_and_401(service):
     base, _ = service
     status, headers, _ = call(base, f"/reports/{WID}/hits")
     assert status == 302
-    assert headers["Location"] == f"/login?redirect=%2Freports%2F{WID}"
+    assert headers["Location"] == f"/login?redirect=%2Freports%2F{WID}%2Fhits"
     assert call(base, f"/reports/{WID}/hits.json")[0] == 401
 
 
@@ -516,6 +528,21 @@ def test_streams_capped_503(server, streams):
             break
         time.sleep(0.2)
     assert again.status == 200
+
+
+def test_write_timeout_set_before_streaming(service, streams, monkeypatch):
+    """Without a write timeout, a client that stops reading blocks `wfile.write` forever (past the
+    30-minute bound, holding its stream slot): `hits_events` sets one on the connection before it
+    starts writing. A real stuck-client write block is OS-buffer-dependent and slow to force
+    reliably, so this checks the one thing that makes the existing `TimeoutError` catch real: the
+    socket gets `settimeout(stream_write_timeout)`, not the default (blocking forever)."""
+    base, _ = service
+    calls = []
+    real_settimeout = socket.socket.settimeout
+    monkeypatch.setattr(socket.socket, "settimeout", lambda self, v: (calls.append(v), real_settimeout(self, v)))
+    s = streams(base, WID)
+    assert s.status == 200
+    assert sr.STREAM_WRITE_TIMEOUT in calls
 
 
 def test_events_access_rule(service):

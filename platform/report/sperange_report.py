@@ -71,6 +71,7 @@ STREAM_MAX = 200  # open streams per server; past it, 503
 STREAM_POLL = 0.5  # seconds between looks at the hits and status files (decision 6: a hit shown within 2 s)
 STREAM_READ = 1 << 20  # bytes of the hits file read per look at most (a catch-up takes several)
 STREAM_PING = 15  # seconds with nothing sent before a ": ping" comment (keeps proxies from closing it)
+STREAM_WRITE_TIMEOUT = 30  # seconds a write may block (a client that stops reading); then the stream ends
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 STATIC_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2"}
@@ -428,8 +429,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def can_see_hits(self, meta: dict | None, user: dict) -> bool:
         """Decision 10: the workspace's owner and Coder owners; a workspace with no report sidecar
-        (`meta` None) is visible to admins only."""
-        return is_admin(user) or (meta is not None and user["username"] == meta["owner"])
+        (`meta` None) is visible to admins only. `meta.get`: a sidecar with no `owner` means only
+        admins, not a KeyError (500)."""
+        return is_admin(user) or (meta is not None and user["username"] == meta.get("owner"))
 
     # ---- the canary hit viewer's pages (spec *Participant page*)
 
@@ -510,6 +512,9 @@ class Handler(BaseHTTPRequestHandler):
                                   {"Retry-After": "60"})
         try:
             self.close_connection = True
+            # A client that stops reading would otherwise block wfile.write forever, past the 30-minute
+            # bound and holding its stream slot; the timeout makes the TimeoutError catch below real.
+            self.connection.settimeout(srv.stream_write_timeout)
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Security-Policy", CSP)
@@ -641,9 +646,7 @@ class Handler(BaseHTTPRequestHandler):
         if user is None:
             if rest.endswith(".md") or rest.endswith("/hits.json") or rest.endswith("/hits/events"):
                 return self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "not logged in"})
-            if rest.endswith("/hits"):
-                return self.login_redirect(PREFIX + "/" + rest[:-len("/hits")])
-            return self.login_redirect(path)
+            return self.login_redirect(path)  # the page asked for, the hits page included
         if rest == "":
             return self.send(HTTPStatus.OK, list_page(self.store.listing(), user))
         if rest.endswith("/hits/events"):
@@ -762,6 +765,7 @@ def make_server(listen: str, reports_dir: str, coder_url: str, hits_dir: str | N
     srv.streams, srv.streams_lock = 0, threading.Lock()  # open event streams (ruling 7)
     srv.stream_max, srv.stream_seconds = STREAM_MAX, STREAM_SECONDS
     srv.stream_poll, srv.stream_ping, srv.stream_read = STREAM_POLL, STREAM_PING, STREAM_READ
+    srv.stream_write_timeout = STREAM_WRITE_TIMEOUT
     return srv
 
 

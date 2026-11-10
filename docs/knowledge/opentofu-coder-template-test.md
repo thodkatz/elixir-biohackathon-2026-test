@@ -16,3 +16,11 @@ The coder provider plans with no Coder server. A parameter's value comes from th
 `planned_values.outputs`; `coder_agent.main.token` is unknown at plan time, so anything that includes it (the
 template's `ansible_vars`) is unknown too: test a value that leaves it out. `tofu console` does not read the
 data sources (`(known after apply)`).
+
+Data sources (parameters with their options, presets) are read at plan time and are in the plan JSON's
+`prior_state.values.root_module.resources`, not in `planned_values`; `platform/dev/tests/test_experiments_template.py`
+reads both. Set `CODER_WORKSPACE_ID` too when a value derives from the workspace id (the seed), or each plan differs.
+
+A preset's `description` is capped by the coder provider (2.20.0) at 128 **bytes**, not characters: `Error: expected
+length of description to be in the range (0 - 128)`. `·` counts 2 and `—` 3. `spe-experiments` cuts the
+experiment's own text to fit (its `main.tf`, `preset_descriptions`).

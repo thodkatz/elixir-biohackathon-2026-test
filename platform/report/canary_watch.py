@@ -20,10 +20,14 @@ Standard library only: the portal runs this from its repository checkout with th
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import logging
 import os
 import sys
 import tempfile
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -34,6 +38,13 @@ from hits_view import participant_body, standalone  # noqa: E402
 
 OUTPUT_ROOT = Path(__file__).resolve().parents[1] / "ansible" / "output"  # spe_output_root's default
 ARCHIVE_GENERATION = "archive"  # the generation a scan by hand keys its hits under
+
+# Defaults for the daemon (Task 7); --archive's own flags are unchanged by them.
+REPORTS_DIR = "/data-share/reports"
+RUNS_DIR = "/data-share/runs"
+HITS_DIR = "/data-share/canary-hits"
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -165,6 +176,157 @@ def _api_host(given: str | None, instance: str | None) -> str | None:
             return None
         return host if isinstance(host, str) and host else None
     return None
+
+
+@dataclass
+class Ssh:
+    """How to reach the workspace's VM, informational only: Task 7's SshTransport reaches it with
+    canary_record.vm_argv(output_dir) directly, which reads hosts.yml itself."""
+    user: str | None
+    host: str | None
+    key: str | None
+
+
+@dataclass
+class Workspace:
+    """One Coder workspace the watcher scans (spec *Watcher*, *What it scans*, *Which are
+    running*): a report sidecar naming an instance whose output directory has a readable
+    hosts.yml. `generation` changes with every rewrite of hosts.yml (a fresh instance); `running`
+    while hosts.yml is newer than every archive directory of this instance; `encrypted` when the
+    canary record is age-encrypted only (still returned, so its status can say so)."""
+    id: str
+    owner: str | None
+    instance: str
+    output_dir: str
+    api_host: str | None
+    ssh: Ssh
+    generation: str
+    running: bool
+    encrypted: bool
+
+
+def _is_uuid(stem: str) -> bool:
+    try:
+        uuid.UUID(stem)
+        return True
+    except ValueError:
+        return False
+
+
+def _newest_sidecars(reports_dir: Path) -> dict[str, tuple[str, dict]]:
+    """{instance: (workspace id, sidecar)}, the newest (by mtime) sidecar per instance. A
+    non-UUID filename, a sidecar that is not valid JSON, or one lacking `instance` is skipped
+    (untrusted input): discover never raises over one bad sidecar."""
+    best: dict[str, tuple[float, str, dict]] = {}
+    try:
+        paths = sorted(reports_dir.glob("*.json"))
+    except OSError:
+        return {}
+    for path in paths:
+        if not _is_uuid(path.stem):
+            continue
+        try:
+            sidecar = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            logger.warning("%s: unreadable report sidecar, skipping", path.stem)
+            continue
+        instance = sidecar.get("instance") if isinstance(sidecar, dict) else None
+        if not isinstance(instance, str) or not instance:
+            logger.warning("%s: report sidecar has no instance, skipping", path.stem)
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        current = best.get(instance)
+        if current is None or mtime > current[0]:
+            best[instance] = (mtime, path.stem, sidecar)
+    return {instance: (workspace_id, sidecar) for instance, (_, workspace_id, sidecar) in best.items()}
+
+
+def _record_status(output_dir: Path) -> tuple[bool, bool]:
+    """(usable, encrypted) of this output directory's canary record: encrypted when only
+    canaries.json.age is there (still usable: the workspace is discovered, so its status can say
+    so); usable (and not encrypted) when canaries.json parses with load_canaries; otherwise
+    neither file, or a malformed canaries.json, is not usable at all."""
+    has_json = (output_dir / "canaries.json").exists()
+    has_age = (output_dir / "canaries.json.age").exists()
+    if not has_json and has_age:
+        return True, True
+    if not has_json:
+        return False, False
+    try:
+        load_canaries(output_dir)
+    except RecordError:
+        return False, False
+    return True, False
+
+
+def _generation(hosts_path: Path) -> str:
+    """SHA-256 of hosts.yml's bytes and mtime: a rewrite with identical content still starts a
+    new generation, since its mtime changed (spec *Watcher*, *Which are running*)."""
+    digest = hashlib.sha256(hosts_path.read_bytes())
+    digest.update(str(hosts_path.stat().st_mtime_ns).encode())
+    return digest.hexdigest()
+
+
+def _is_running(hosts_path: Path, runs_dir: Path, instance: str) -> bool:
+    """hosts.yml newer than every runs_dir/*_<instance> directory (an exact suffix: "ws1" does
+    not match "x_ws10"). No matching archive directory at all: running (vacuously newer)."""
+    hosts_mtime = hosts_path.stat().st_mtime
+    suffix = f"_{instance}"
+    try:
+        entries = list(runs_dir.iterdir())
+    except OSError:
+        entries = []
+    for entry in entries:
+        if entry.is_dir() and entry.name.endswith(suffix):
+            try:
+                if entry.stat().st_mtime >= hosts_mtime:
+                    return False
+            except OSError:
+                continue
+    return True
+
+
+def discover(reports_dir: str, output_root: str, runs_dir: str) -> list[Workspace]:
+    """Every Coder workspace the watcher scans (decision 9): one per report sidecar whose
+    instance has a readable hosts.yml under output_root (the newest sidecar wins when two name
+    the same instance); a workspace with neither canaries.json nor canaries.json.age is skipped.
+    Never raises over a bad sidecar or record: logs the workspace id and moves on."""
+    reports_path, output_root_path, runs_path = Path(reports_dir), Path(output_root), Path(runs_dir)
+    workspaces: list[Workspace] = []
+    for instance, (workspace_id, sidecar) in _newest_sidecars(reports_path).items():
+        output_dir = output_root_path / instance
+        try:
+            hosts = read_hosts(output_dir)
+        except RecordError as e:
+            logger.warning("%s: %s, skipping", workspace_id, e)
+            continue
+        usable, encrypted = _record_status(output_dir)
+        if not usable:
+            logger.warning("%s: no usable canary record, skipping", workspace_id)
+            continue
+        owner = sidecar.get("owner") if isinstance(sidecar.get("owner"), str) else None
+        api_host = hosts.get("api_host") if isinstance(hosts.get("api_host"), str) else None
+        ssh = Ssh(
+            user=hosts.get("ssh_user") if isinstance(hosts.get("ssh_user"), str) else None,
+            host=next((v for v in (hosts.get("ssh_target"), hosts.get("floating_ip"), hosts.get("api_host"))
+                      if isinstance(v, str) and v), None),
+            key=hosts.get("ssh_key") if isinstance(hosts.get("ssh_key"), str) else None,
+        )
+        workspaces.append(Workspace(
+            id=workspace_id,
+            owner=owner,
+            instance=instance,
+            output_dir=str(output_dir),
+            api_host=api_host,
+            ssh=ssh,
+            generation=_generation(output_dir / "hosts.yml"),
+            running=_is_running(output_dir / "hosts.yml", runs_path, instance),
+            encrypted=encrypted,
+        ))
+    return workspaces
 
 
 def main(argv: list[str] | None = None) -> int:

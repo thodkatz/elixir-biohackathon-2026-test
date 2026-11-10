@@ -1,5 +1,6 @@
-"""canary_watch.py: the hits file and the scan of one archived run (decisions 3, 5, 10). The fixture
-run in fixtures/canary/run/ is laid out as run_archive writes it, with made-up tokens only."""
+"""canary_watch.py: the hits file, the scan of one archived run, and discover (decisions 3, 5, 9,
+10). The fixture run in fixtures/canary/run/ is laid out as run_archive writes it, with made-up
+tokens only."""
 from __future__ import annotations
 
 import json
@@ -8,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -201,3 +203,154 @@ def test_cli_rerun_with_surrogate_adds_nothing(tmp_path):
     done = subprocess.run(argv, capture_output=True, text=True, timeout=60)
     assert done.returncode == 0 and " 0 new hits" in done.stdout
     assert out.read_text().splitlines() == lines
+
+
+# --- discover: which Coder workspaces the watcher scans, and their generations (decision 9) ---
+
+WS1 = "11111111-1111-1111-1111-111111111111"
+WS2 = "22222222-2222-2222-2222-222222222222"
+
+
+def _hosts_yml(path: Path, api_host: str = "api.spe.test", ssh_target: str = "localhost") -> None:
+    path.write_text(
+        "instance: " + path.parent.name + "\n"
+        "api_host: " + api_host + "\n"
+        "ssh_user: ubuntu\n"
+        "provision: existing\n"
+        "ssh_target: " + ssh_target + "\n"
+    )
+
+
+def _sidecar(reports_dir: Path, workspace_id: str, instance: str, owner: str = "alice") -> Path:
+    path = reports_dir / f"{workspace_id}.json"
+    path.write_text(json.dumps({"owner": owner, "workspace": f"{owner}-ws", "instance": instance,
+                                "created": "2026-11-10 14:00 UTC", "parameters": {}}))
+    return path
+
+
+def _output_dir(output_root: Path, instance: str, encrypted: bool = False, no_record: bool = False) -> Path:
+    directory = output_root / instance
+    directory.mkdir(parents=True)
+    _hosts_yml(directory / "hosts.yml")
+    if no_record:
+        pass
+    elif encrypted:
+        (directory / "canaries.json.age").write_text("age-encrypted-stub")
+    else:
+        (directory / "canaries.json").write_text(json.dumps(
+            {"tokens": [{"token": "FCANARY-TEST01", "type": "file", "file": "flag.txt"}]}))
+    return directory
+
+
+def _layout(tmp_path: Path) -> tuple[Path, Path, Path]:
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    output_root = tmp_path / "output"
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    return reports, output_root, runs
+
+
+def test_no_sidecar_never_scanned(tmp_path):
+    """An output directory with canaries.json and hosts.yml but no sidecar is not in discover."""
+    reports, output_root, runs = _layout(tmp_path)
+    _output_dir(output_root, "ws1")
+    assert canary_watch.discover(str(reports), str(output_root), str(runs)) == []
+
+
+def test_newest_sidecar_wins(tmp_path):
+    """Two sidecars naming one instance (deleted and recreated under the same name): the newer only."""
+    reports, output_root, runs = _layout(tmp_path)
+    _output_dir(output_root, "ws1")
+    old = _sidecar(reports, WS1, "ws1", owner="old-owner")
+    new = _sidecar(reports, WS2, "ws1", owner="new-owner")
+    now = time.time()
+    os.utime(old, (now - 100, now - 100))
+    os.utime(new, (now, now))
+    result = canary_watch.discover(str(reports), str(output_root), str(runs))
+    assert [w.id for w in result] == [WS2]
+    assert [w.owner for w in result] == ["new-owner"]
+
+
+def test_running_until_archived(tmp_path):
+    """running while hosts.yml is newer than every runs_dir/*_<instance> directory; an archive dir
+    newer than hosts.yml makes it not running. A run dir for a different instance does not match
+    (exact suffix, not a prefix of it: ws1 must not match x_ws10)."""
+    reports, output_root, runs = _layout(tmp_path)
+    directory = _output_dir(output_root, "ws1")
+    _sidecar(reports, WS1, "ws1")
+    [w] = canary_watch.discover(str(reports), str(output_root), str(runs))
+    assert w.running is True
+    assert w.instance == "ws1"
+    assert w.output_dir == str(directory)
+    assert w.api_host == "api.spe.test"
+    assert w.ssh.user == "ubuntu" and w.ssh.host == "localhost"
+    assert w.encrypted is False
+
+    unrelated = runs / "20261110T000000_x_ws10"  # must not match instance "ws1"
+    unrelated.mkdir()
+    [w] = canary_watch.discover(str(reports), str(output_root), str(runs))
+    assert w.running is True
+
+    archived = runs / "20261110T010000_ws1"
+    archived.mkdir()
+    now = time.time()
+    os.utime(archived, (now + 1000, now + 1000))  # newer than hosts.yml
+    [w] = canary_watch.discover(str(reports), str(output_root), str(runs))
+    assert w.running is False
+
+
+def test_encrypted_record(tmp_path):
+    """A workspace whose record is only canaries.json.age is still returned, flagged encrypted."""
+    reports, output_root, runs = _layout(tmp_path)
+    _output_dir(output_root, "ws1", encrypted=True)
+    _sidecar(reports, WS1, "ws1")
+    [w] = canary_watch.discover(str(reports), str(output_root), str(runs))
+    assert w.encrypted is True
+
+
+def test_neither_record_file_is_skipped(tmp_path):
+    """Neither canaries.json nor canaries.json.age: the workspace is skipped entirely."""
+    reports, output_root, runs = _layout(tmp_path)
+    _output_dir(output_root, "ws1", no_record=True)
+    _sidecar(reports, WS1, "ws1")
+    assert canary_watch.discover(str(reports), str(output_root), str(runs)) == []
+
+
+def test_generation_changes_with_hosts_yml(tmp_path):
+    """generation is a SHA-256 of hosts.yml's bytes and mtime: a rewrite with the same bytes but a
+    later mtime, and a rewrite with different bytes, both start a new generation."""
+    reports, output_root, runs = _layout(tmp_path)
+    directory = _output_dir(output_root, "ws1")
+    _sidecar(reports, WS1, "ws1")
+    hosts_path = directory / "hosts.yml"
+
+    [w1] = canary_watch.discover(str(reports), str(output_root), str(runs))
+    data = hosts_path.read_bytes()
+    now = time.time()
+    os.utime(hosts_path, (now + 10, now + 10))  # same bytes, later mtime
+    [w2] = canary_watch.discover(str(reports), str(output_root), str(runs))
+    assert hosts_path.read_bytes() == data
+    assert w1.generation != w2.generation
+
+    hosts_path.write_text(hosts_path.read_text() + "extra: value\n")  # different bytes
+    os.utime(hosts_path, (now + 20, now + 20))
+    [w3] = canary_watch.discover(str(reports), str(output_root), str(runs))
+    assert w3.generation != w2.generation
+
+
+def test_bad_or_unmatched_sidecars_are_skipped(tmp_path):
+    """A sidecar that is not valid JSON, lacks `instance`, or whose filename is not a UUID: never
+    raises out of discover, just skipped. A sidecar naming an instance with no hosts.yml at all is
+    skipped too."""
+    reports, output_root, runs = _layout(tmp_path)
+    _output_dir(output_root, "ws1")
+    _sidecar(reports, WS1, "ws1")
+    (reports / "not-a-uuid.json").write_text(json.dumps({"instance": "ws1", "owner": "mallory"}))
+    (reports / f"{WS2}.json").write_text("{not json")
+    third = reports / "33333333-3333-3333-3333-333333333333.json"
+    third.write_text(json.dumps({"owner": "eve"}))  # no "instance"
+    fourth = reports / "44444444-4444-4444-4444-444444444444.json"
+    fourth.write_text(json.dumps({"instance": "no-such-instance", "owner": "eve"}))
+    [w] = canary_watch.discover(str(reports), str(output_root), str(runs))
+    assert w.instance == "ws1"

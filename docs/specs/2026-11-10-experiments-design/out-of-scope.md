@@ -9,3 +9,4 @@
 | A probe for every participant mitigation | a mitigation's `probe` is optional; without one the gate checks only the ladder's | a later spec, if experiments show the need |
 | The ladder matrix in the viewer | promptfoo has no levels or conditions | `matrix.py render`, as a command |
 | Comparing experiments across workspaces | the seed is secret, so builds differ | the official ladder's controller-side runs |
+| Keeping or deleting the existing template `spe` | the new template must prove itself first | the user, once `spe-experiments` runs the ladder experiments on the portal |

@@ -5,7 +5,7 @@
 | | How | Trade-off | |
 |---|---|---|---|
 | **A. One workspace, arms switched on the VM** | `spe-eval` applies the baseline arm, runs, applies the mitigated arm, runs; both on the workspace's VM from its clone | one VM, one build, the same canaries: the two arms differ only in the mitigation. A run takes twice one arm. The hand-off sits on the VM (03 says why that is acceptable here) | **chosen** (the agent's call in the design conversation of 2026-11-10; the user went on from it without objecting) |
-| B. Two workspaces | a baseline testbed and a mitigated one, compared across | two VMs, and two builds whose canaries differ unless the seed is fixed, and the seed is secret; breaks one-instance-at-a-time quotas | rejected |
+| B. Two workspaces | a baseline experiment and a mitigated one, compared across | two VMs, and two builds whose canaries differ unless the seed is fixed, and the seed is secret; breaks one-instance-at-a-time quotas | rejected |
 | C. Run from the portal VM | a portal service runs `run.sh` against the workspace's controller hand-off; a Coder link triggers it | the answer key never reaches the VM, as for the official ladder; but the portal's checkout is upstream `main`, so a participant's uncommitted mitigation and tests are not in the run | rejected for experiments; it is the official ladder's route, which stays |
 
 ## How results are shown
@@ -16,13 +16,20 @@
 | A results page of our own in the report service | full control, the ladder matrix possible; a second UI to build and keep | not now; the matrix stays a command (04) |
 | `promptfoo view`'s own Run button as the trigger | no `spe-eval` to build; but it runs a bare suite: no checks, no controls gate, no lock, no arms | rejected (04, *Read-only*) |
 
+## Where it lives
+
+| | Trade-off | |
+|---|---|---|
+| **A new template, `spe-experiments`** | `spe` and its users are untouched; the experiment flow can change freely while it settles; two templates to keep while both live, sharing playbooks and `run-ansible.sh` | **chosen** (the user, 2026-11-10: "propose a new coder template instead of editing the existing one, then the old one could be deleted or kept") |
+| Extend `spe` | one template; every workspace gets the flow at once, and every change to it reaches every participant | rejected |
+
 ## How options grow
 
 | | Trade-off | |
 |---|---|---|
-| **Options read from files** (`fileset()` over testbeds, as presets already are, and over `mitigations/`, which the sync copies into the pushed template directory) | a contribution adds files, never Terraform | **chosen** |
+| **Options read from files** (`fileset()` over `experiments/` and `mitigations/`, which the sync copies into the pushed template directory, as `spe`'s presets come from `testbeds/`) | a contribution adds files, never Terraform | **chosen** |
 | One `coder_parameter` per mitigation | explicit, but every contribution edits `main.tf` | rejected |
-| A `level` parameter L0–L3 | simple for the ladder; no place for a participant's mitigation, and a level bundles controls a participant cannot pick apart | rejected: levels become testbeds |
+| A `level` parameter L0–L3 | simple for the ladder; no place for a participant's mitigation, and a level bundles controls a participant cannot pick apart | rejected: levels become experiments |
 
 ## Existing tools searched
 

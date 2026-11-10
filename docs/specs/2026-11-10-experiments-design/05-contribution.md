@@ -2,20 +2,21 @@
 
 ## The path
 
-1. **A workspace from `spe`**, with any testbed (or an existing experiment to build on).
+1. **A workspace from `spe-experiments`**, with any experiment (`ladder-l0` for a plain one, or one to build on).
 2. **Build the experiment**, usually by asking the workspace's coding agent (Coder Agents, which follows
    `platform/instance/workspace/AGENTS.md`), or by hand:
+   - `spe-eval new <name>` writes the skeleton of what follows (07);
    - the threat (`threats/`, from `TEMPLATE.md`) and the path (`paths/`), if new;
    - the mitigation: its Ansible change guarded by `spe_mitigate_<id>` (default off), and `mitigations/<id>.yml`;
    - its tests, `tests/experiments/<name>.yaml`;
-   - the testbed, `testbeds/<name>.yml`, with its `experiment:` block and `parameters.experiment: <name>`.
+   - the experiment, `experiments/<name>.yml`, with its `experiment:` block and `parameters.experiment: <name>`.
 3. **Try it live**: `spe-eval arm mitigated` to apply it, chat with the agent; then **Run evaluation** and
    **Evaluations** for the two arms.
-4. **Check**: `python3 check_experiment.py <name>`.
+4. **Check**: `python3 check_experiment.py <name>`. (Every step has a command for a coding agent: 07.)
 5. **Build it fresh** (when the change acts only at creation, or to confirm a clean build): push
-   `template/<name>`; the portal makes `spe-<name>`, whose form already offers the new mitigation and experiment.
+   `experiment/<name>`; the portal makes `spe-x-<name>`, whose form already offers the new mitigation and experiment.
 6. **Open a PR** from the branch, with the experiment PR template. Merged upstream, the experiment and its
-   mitigation appear on `spe`'s form for everyone within minutes.
+   mitigation appear on `spe-experiments`' form for everyone within minutes.
 
 The portal follows upstream's `main` and makes branch templates from upstream branches, so step 5 needs push
 access there and step 6 is an upstream PR.
@@ -25,13 +26,13 @@ access there and step 6 is an upstream PR.
 At the repository root, beside `validate.py`, standard library plus PyYAML, offline, under a minute. It checks the
 experiment's structure, not its result:
 
-- the testbed exists, has an `experiment:` block, and sets `parameters.experiment` to its own stem;
+- the experiment file exists, has an `experiment:` block, and sets `parameters.experiment` to its own stem;
 - its threat, paths, mitigation, base mitigations and test ids resolve to files and tests;
 - `validate.py` passes (threats, paths, mitigations);
 - each named mitigation's `off` equals the Ansible defaults; `requires` and `conflicts` hold for base plus the one
   under test;
 - each test's labels resolve (the catalogue lint) and its Python assertions name real functions;
-- the testbed's `parameters` keys are parameters of `main.tf`, and its `vars` set no key a mitigation sets.
+- its `parameters` keys are parameters of the new template's `main.tf`, and its `vars` set no key a mitigation sets.
 
 Each refusal names the file and the id. Its unit tests cover one refusal each.
 
@@ -50,13 +51,13 @@ workspace guide gives:
 **Threat:** TM-NNN (new / existing): <one line>
 **Paths:** P<n> (new / existing): <the route>
 **Mitigation:** `<id>` (`spe_mitigate_<id>`): <what it changes, where>
-**Testbed:** `platform/coder/template/testbeds/<name>.yml`
+**Experiment file:** `experiments/<name>.yml`
 
 ### Files
 - [ ] threat and path files, if new (`validate.py` passes)
 - [ ] `mitigations/<id>.yml`; the Ansible change behind `spe_mitigate_<id>`, default off
 - [ ] `platform/promptfoo-evals/tests/experiments/<name>.yaml`
-- [ ] the testbed, with its `experiment:` block
+- [ ] `experiments/<name>.yml`, with its `experiment:` block
 
 ### Result
 Model: <provider / model>   Repeat: <n>
@@ -68,7 +69,7 @@ Utility tests pass with the mitigation on: yes / no
 ```
 
 The result is `matrix.py counts` output: labels and counts only, never an answer or a token, so it can be posted.
-A reviewer who wants to see it reproduced creates a workspace from `spe-<name>` and presses Run evaluation.
+A reviewer who wants to see it reproduced creates a workspace from `spe-x-<name>` and presses Run evaluation.
 
 ## The guides
 

@@ -9,7 +9,7 @@ is slice 1–2's work, and its test: if the ladder needs a special case, the str
 | Paths | P1–P4, a table in the ladder's design | `paths/P1-read-api-metadata.md`, `P2-agent-written-code.md`, `P3-installed-workflows.md`, `P4-egress.md` |
 | Mitigations | `spe_harden_trs_readonly`, `_data_tiers`, `_egress`, `_airlock`, `spe_agent_tool_surface` | `mitigations/L1.yml` (trs-readonly, closes P2, probes `trs-write`, `wes-inline`, `e2e-exploit`), `L2.yml` (data tiers, P3, `tier-reach`), `L3.yml` (egress, P4, `egress`, `api-reach`); `L4.yml`, `L5.yml` with `status: planned` |
 | Tests | the 13-test agent suite and the controls suite | unchanged, still `agent.yaml`; their labels now resolve from the files |
-| Builds | `instances/L<n>.example.yml` on a maintainer's controller | testbeds `ladder-l0` … `ladder-l3` |
+| Builds | `instances/L<n>.example.yml` on a maintainer's controller | experiments `ladder-l0` … `ladder-l3` on `spe-experiments` |
 | Results | `docs/results/qwen3.8-27b/` and its rendered matrix | the reference a participant's numbers are read against |
 
 ## The paths
@@ -23,12 +23,12 @@ is slice 1–2's work, and its test: if the ladder needs a special case, the str
 
 ## The experiments
 
-Every ladder testbed sets what the ladder's instance files set beyond the form (`vars`): `spe_frontends: [agui]`
+Every ladder experiment sets what the ladder's instance files set beyond the form (`vars`): `spe_frontends: [agui]`
 (the ladder scores through the AG-UI agent; Open WebUI would be a second, unhardened path), the three
 `spe_inject_*` switches, `spe_eval_sink: true`, `spe_agui_smoke: false`, and its canary types and workflows as
 parameters. The model is the portal's (de.NBI).
 
-| Testbed | `base` | `mitigation` | Baseline arm | Mitigated arm |
+| Experiment | `base` | `mitigation` | Baseline arm | Mitigated arm |
 |---|---|---|---|---|
 | `ladder-l0` | – | – | L0 | – (one run, no arms) |
 | `ladder-l1` | – | `L1` | L0 | L1 |
@@ -39,5 +39,5 @@ Each ladder experiment measures one rung's step. The full ladder (every level ag
 controller-side runs and their matrix; an experiment reproduces one step of it in one workspace, which is what a
 participant needs to see how a mitigation is shown to work before writing their own.
 
-The ladder's clean condition (no injections) is a testbed with the `spe_inject_*` switches off, `ladder-l0-clean`,
+The ladder's clean condition (no injections) is an experiment with the `spe_inject_*` switches off, `ladder-l0-clean`,
 if wanted; not part of the first slices.

@@ -1,6 +1,7 @@
 # Evaluation in the workspace
 
-An experiment is measured on the workspace's own VM, by a new command `spe-eval`
+An experiment is measured on the workspace's own VM (a `spe-experiments` workspace: all of this part is behind
+`spe_experiments`, 02), by a new command `spe-eval`
 (`platform/instance/spe-eval`, installed next to `spe-apply`), from the clone in `~/sperange`. That is where the
 participant's mitigation and tests are, committed or not; a run from the portal's checkout would not see them.
 
@@ -27,7 +28,7 @@ container it would need the Docker socket and the hand-off mounted, which decisi
 ## `spe-eval`
 
 ```
-spe-eval run [--repeat N]                  both arms of the workspace's experiment; refuses without one
+spe-eval run [--repeat N]                  both arms of the workspace's experiment
 spe-eval arm baseline|mitigated            apply one arm (spe-apply all with its mitigation values), no run
 spe-eval status                            the lock, the current arm, the last run's result lines
 ```

@@ -1,7 +1,7 @@
 # The experiment model
 
 An experiment ties four kinds of thing together. Three are descriptions, one file each, beside each other at the
-repository root; the fourth, tests, stays where the suites are. A testbed names them.
+repository root; the fourth, tests, stays where the suites are. An experiment file names them.
 
 | Kind | Where | Id | Exists today |
 |---|---|---|---|
@@ -9,7 +9,7 @@ repository root; the fourth, tests, stays where the suites are. A testbed names 
 | Path | `paths/P<n>-<slug>.md` | `P<n>` | no: P1–P4 are a table in the ladder's design text |
 | Mitigation | `mitigations/<id>.yml` | `L<n>` for ladder levels, else kebab-case | no: four Ansible variables |
 | Test | `platform/promptfoo-evals/tests/<group>.yaml` (ladder) and `tests/experiments/<name>.yaml` | kebab-case `id` in the test's `metadata` | ladder tests yes; experiment tests no |
-| Experiment | `platform/coder/template/testbeds/<name>.yml` with an `experiment:` block | the file's stem | testbeds yes (one, `all-data`); the block no |
+| Experiment | `experiments/<name>.yml` | the file's stem | no |
 
 **Threat and path differ.** A threat is what goes wrong (data exposure, prompt injection); a path is the concrete
 route through this stack (agent-written workflow code, egress). They are many-to-many: TM-001 happens through any
@@ -81,12 +81,15 @@ mitigation may be listed with `status: planned` and no `on`/`off`, which the for
 
 ## Experiments
 
-A testbed is a Coder preset; an experiment is a testbed with an `experiment:` block and, optionally, `vars:`:
+An experiment file is a preset of the `spe-experiments` template (02), in the shape of `spe`'s testbeds, with an
+`experiment:` block and, optionally, `vars:`:
 
 ```yaml
 name: TRS guard
 description: Does validating TRS writes stop agent-written workflows?
-parameters:              # the Coder parameters, as today
+parameters:              # the template's parameters; `experiment` and `mitigations` as well
+  experiment: trs-guard
+  mitigations: []        # = base: the workspace starts in the baseline arm
   samples: [HG002, HG003, HG004, HG005]
   ...
 experiment:
@@ -104,5 +107,5 @@ vars:                    # Ansible values the experiment needs that are not form
 not offer (frontends, the test receiver, injections). `main.tf` applies them (02). Keys in `vars` that a mitigation
 or a parameter also sets are refused by the checker: one place per value.
 
-An experiment's testbed fixes no seed: the seed is secret (it reproduces every canary), and the two arms already
+An experiment fixes no seed: the seed is secret (it reproduces every canary), and the two arms already
 share one build's canaries. Comparison across workspaces is the official ladder's business, not an experiment's.

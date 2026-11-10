@@ -2,7 +2,7 @@
 
 `canary_watch.py --archive` (slice 1 at `d3e56b7`) over all 51 runs in `/data-share/runs/` on the portal VM, run
 with `sudo python3 -I` from a temporary copy (removed). Pages: `/data-share/canary-hits/early-output/<run>.html`
-(root:root, dir 0750, files 0640; the portal has no `sperange-report` group, so root alone, ruling in the PR).
+(regenerated at `f6c79e6`, quiet kinds collapsed under "also seen", same counts; root:root, dir 0750, files 0640; the portal has no `sperange-report` group, so root alone, ruling in the PR).
 No `--api-host`: the archive keeps none and the instances' output directories are gone, so any URL host in a
 call's arguments would count as `sent`; none did.
 

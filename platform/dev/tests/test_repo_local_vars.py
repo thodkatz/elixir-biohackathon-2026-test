@@ -56,6 +56,31 @@ def test_every_spe_local_vars_name_resolves(tmp_path):
     assert values["spe_inject_workflow_comment"] is False
 
 
+def test_an_undefined_name_in_spe_local_vars_extra_still_fails_the_build(tmp_path):
+    # A misspelt (or otherwise undefined) non-switch name must still fail loudly: only the
+    # fixture switches get a default=false (review finding: default=false had come to cover
+    # every persisted name, so a typo in spe_local_vars_extra was silently written as false).
+    out = tmp_path / "out"
+    out.mkdir()
+    play = [{
+        "hosts": "localhost", "connection": "local", "gather_facts": False,
+        "tasks": [
+            {"name": "resolve", "ansible.builtin.set_fact": {"spe_local_values": "{{ spe_local_values }}"},
+             "vars": task_vars()},
+        ],
+    }]
+    (tmp_path / "play.yml").write_text(yaml.safe_dump(play, sort_keys=False))
+    (tmp_path / "extra.json").write_text(json.dumps({
+        "spe_catalog_dir": str(ANSIBLE / "catalog"), "spe_instance": "x1",
+        "spe_local_vars_extra": ["spe_local_vars_extra_typo_undefined"]}))
+    env = {**os.environ, "ANSIBLE_LOCALHOST_WARNING": "False"}
+    p = subprocess.run(["ansible-playbook", "-i", "localhost,", str(tmp_path / "play.yml"),
+                        "-e", f"@{ANSIBLE / 'inventory' / 'group_vars' / 'all.yml'}",
+                        "-e", f"@{tmp_path / 'extra.json'}"], env=env, capture_output=True, text=True)
+    assert p.returncode != 0, p.stdout[-2000:] + p.stderr[-2000:]
+    assert "spe_local_vars_extra_typo_undefined" in p.stdout + p.stderr
+
+
 def test_a_fixture_switch_with_no_group_vars_default_is_false_not_a_build_failure(tmp_path):
     # A new catalogue fixture naming a switch nobody declared a default for yet (bug found in review:
     # query('vars', *names) without a default errors on the first undefined name).

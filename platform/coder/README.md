@@ -208,20 +208,22 @@ A second template, `experiments-template/`, offers the catalogue of threats, pat
 (`../../threats/`, `../../paths/`, `../../mitigations/`) as `experiments/*.yml` presets
 (`../../experiments/README.md` indexes them) next to spe's own manual form:
 
-- **`experiment`** (order 1): a dropdown of `experiments/*.yml` stems, default `ladder-l0`. Its file sets
-  `samples`, `tiers`, `workflows`, `canaries`, `flavor` and `smoke_test`'s defaults (orders 3–9, spe's own
-  parameters, unchanged), and its `vars` (e.g. `spe_frontends`, `spe_eval_sink`).
+- **`experiment`** (order 1): a dropdown of `experiments/*.yml` stems, default `ladder-l0`. Picked with its
+  preset, which sets `samples`, `tiers`, `workflows`, `canaries`, `flavor` and `smoke_test` (orders 3–9, spe's
+  own parameters, unchanged) and its `vars` (e.g. `spe_frontends`, `spe_eval_sink`); `ladder-l0`'s values are
+  the form's own defaults, so a dropdown pick without its preset keeps the other values.
 - **`mitigations`** (order 2): a multi-select of every mitigation not `status: planned`
   (`../../mitigations/*.yml`), default `[]`. Selected mitigations' `on` values, the experiment's `vars` and its
   listed injections' switches all merge into the build; `validate.py` refuses an experiment whose `vars` set a
   key any catalogue mitigation or injection fixture also sets, so the three never collide.
-- "Create workspace" lists one preset per experiment file (`ladder-l0`'s description ends
-  `· no mitigation (one arm)`; others end `— <threat> via <paths> · mitigation <id>: <name>`, cut to the
-  provider's 128-byte limit on `description`), alongside the manual form.
+- "Create workspace" lists one preset per experiment file, its description ending
+  `— <threat> via <paths> · <mitigation <id>: <name>, or "no mitigation (one arm)">`, cut to the provider's
+  128-byte limit on `description`, alongside the manual form.
 
-`experiments-template/assemble.sh <repo root> [<template dir>]` copies `experiments/`, `mitigations/` and
-`catalog/injections/fixtures.json` into the template directory, since Terraform's `fileset()` only sees files
-already inside it (`.gitignore`d there, copied fresh before every plan or push, stale copies removed first).
+`experiments-template/assemble.sh <repo root> [<template dir>]` copies `experiments/`, `mitigations/`,
+`catalog/injections/fixtures.json` and `run-ansible.sh` into the template directory, since Terraform's
+`fileset()` only sees files already inside it (`.gitignore`d there, copied fresh before every plan or push,
+stale copies removed first).
 `sync-template.sh` pushes the result as `spe-experiments` (`SPE_EXPERIMENTS_TEMPLATE_NAME`) the same way it
 pushes `spe`, on its own head-changed check.
 

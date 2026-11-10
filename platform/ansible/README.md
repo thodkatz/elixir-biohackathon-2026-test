@@ -244,7 +244,8 @@ frontend down: `docker compose -p spe-frontend -f ~/spe-frontend/docker-compose.
 
 ## Experiments
 
-Three variables, all off or empty by default, so a build without them is today's (`group_vars/all.yml`):
+Three variables, all off or empty by default, so a build without them is today's apart from two empty
+`hardening.json` keys (`group_vars/all.yml`):
 `spe_experiments` (bool), `spe_experiment` (an `../../experiments/<name>.yml` stem) and `spe_mitigations`
 (a list of `../../mitigations/<id>.yml` ids). The `spe-experiments` Coder template
 (`../coder/README.md`, *spe-experiments*) is what normally sets them, from an experiment's selected

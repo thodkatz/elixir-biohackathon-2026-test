@@ -186,3 +186,20 @@ start reads this section; keep it short.
   `destroy.yml` leaves it on an existing host (only a build with `spe_eval_sink` off removes it) — from slice 4's
   pre-flight (F2); waits because the reset refuses any path outside the owned ones, and the evaluation reads the
   log by length, so an old log is harmless.
+- `sync-template.sh`: a branch `template/x-foo` and an experiment branch `experiment/foo` both map to the Coder
+  template name `spe-x-foo`, so pushing one after the other overwrites the other's template — from slice 2's
+  final review (#86) and task 4's review ruling (commit 17c10cb); waits for a fix: refuse `template/x-*` names,
+  or change one kind's prefix.
+- `spe-experiments`: an experiment whose generated measures line (`<threat> via <paths> · <mitigation>`) is
+  already at or past the coder provider's 128-byte preset description limit on its own fails the whole template
+  plan with the provider's generic error, naming no field — from slice 2's final review (#86), Task 3's deferred
+  minor; waits because no experiment reaches that length yet.
+- `spe-experiments`: a workspace built from a preset's experiment or mitigation selection, then moved (or
+  Rebuilt) onto a template version whose `experiments/` or `mitigations/` no longer has that stem, fails every
+  plan, stop included (`main.tf`'s `local.experiments[local.experiment_stem]` has no fallback) — from slice 2's
+  final review (#86), Task 3's deferred minor; waits because template versions are assembled fresh on every
+  push today, so no workspace has hit this yet.
+- `experiments-template/assemble.sh`: when `experiments/` or `mitigations/` is empty in the repo checkout it
+  copies from, `cp "$repo"/experiments/*.yml …` fails on the unexpanded glob with a misleading "no such file"
+  for a literal `*.yml` path, instead of a message naming the empty directory — from slice 2's final review
+  (#86), Task 3's deferred minor; waits because the repo always ships both directories populated.

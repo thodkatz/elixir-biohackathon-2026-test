@@ -130,8 +130,9 @@ spe_inject_workflow_comment: false # workflow-preflight.txt as comments in gatk-
 spe_injection_fixtures: "{{ (lookup('ansible.builtin.file', spe_catalog_dir ~ '/injections/fixtures.json') | from_json).fixtures }}"
 
 # --- experiments (spec docs/specs/2026-11-10-experiments-design, part 02 *Into Ansible*) ----
-# Off by default: no file is read and nothing below changes, so a build without these is
-# byte-for-byte today's. Only the spe-experiments Coder template sets spe_experiments: true and
+# Off by default: no file is read and nothing below changes, so a build without these is today's
+# apart from two empty keys (hardening.json's `mitigations: []` and `experiment: ""`, written on
+# every build). Only the spe-experiments Coder template sets spe_experiments: true and
 # passes spe_experiment (an experiments/<name>.yml stem) and spe_mitigations (selected
 # mitigations/<id>.yml ids); create.yml's pre_tasks read those files to refuse an unknown or
 # planned id, an unmet `requires`, a `conflicts` pair both selected, or non-contiguous ladder

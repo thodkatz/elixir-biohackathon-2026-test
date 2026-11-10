@@ -4,6 +4,12 @@ whole, self-contained HTML document (hits.css inlined, no script) for the early 
 (`canary_watch.py --archive ... --html PAGE.html`) and for tests. The live service page (slice 3) adds
 its own script (notifications, the event stream) around the same body.
 
+`status` is the watcher's status file (ruling 6: `state`, `since`, `last_poll`, `note`), read by the
+live service; `status_line` turns it into the header's clause ("running · watched 3 s ago"). `None`
+is reserved for the early output, which is never live (`_header`'s "archived run"): the live service
+passes `{}` instead when the workspace has no status file yet, so this one argument cannot be
+confused between the two callers.
+
 Every field is passed through html.escape; nothing here logs or raises on a canary value, since the
 value is exactly what the page is meant to show (decision 10: to the workspace's owner and Coder
 owners only, which the caller has already checked).
@@ -13,9 +19,14 @@ Standard library only: the portal runs this from its repository checkout with th
 from __future__ import annotations
 
 import html
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 NOTICE = "Matching is literal: an encoded, split or paraphrased canary is not seen."
+NO_HITS = "No hits yet."
+NOT_WATCHED = "Not watched yet."
+ENCRYPTED_NOTICE = "The canary record is encrypted: the watcher cannot match this workspace."
 
 # Loud kinds, in the headline's order (spec *Participant page* mockup); quiet kinds, and any hit whose
 # kind is unknown or missing, collapse into "also seen" (spec *Hits*).
@@ -113,21 +124,52 @@ def _headline(hits: list[dict]) -> str:
     return out
 
 
-def _status_text(status: dict | None) -> str:
-    """The header's status clause: "archived run" for the early output (status None, decision 1's
-    live polling does not apply to an archive scan); the live service (slice 3) passes a status dict
-    (running/not reachable, watched N s ago) whose shape that slice defines."""
+def _epoch(value: object) -> float | None:
+    """An `_iso`-formatted (canary_watch.py) timestamp as epoch seconds, or None for anything else
+    (a status file is the watcher's own write, but a clock or a crash mid-write can still leave it
+    short or malformed; the line is then just left out)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return None
+
+
+def status_line(status: dict | None, now: float) -> str:
+    """The header's live status clause (ruling 6: the watcher's status file: `state`, `since`,
+    `last_poll`, `note`): "running · watched 3 s ago", "stopped" (or "stopped · archive incomplete"
+    when `note` is set), "not reachable since 14:02", "hits file full" (state `capped`'s own note).
+    `None`, or a dict with no state yet (discovered but never polled, or simply no status file on
+    disk): "not watched yet". Anything else that is not a dict (a caller passing plain text) is
+    shown as-is; the caller escapes it."""
     if status is None:
-        return "archived run"
-    if isinstance(status, dict) and isinstance(status.get("text"), str):
-        return status["text"]
-    return str(status)  # plain: _header escapes it
+        return "not watched yet"
+    if not isinstance(status, dict):
+        return str(status)
+    state, note = status.get("state"), status.get("note")
+    if not state:
+        return "not watched yet"
+    if state == "running":
+        watched = _epoch(status.get("last_poll"))
+        return "running" if watched is None else f"running · watched {max(0, round(now - watched))} s ago"
+    if state == "stopped":
+        return f"stopped · {note}" if note else "stopped"
+    if state == "unreachable":
+        since = status.get("since")
+        return f"not reachable since {since[11:16]}" if isinstance(since, str) and len(since) >= 16 else "not reachable"
+    if state == "capped":
+        return note or "hits file full"
+    if state == "encrypted":
+        return "canary record is encrypted"
+    return str(state)
 
 
-def _header(meta: dict, hits: list[dict], status: dict | None) -> str:
+def _header(meta: dict, hits: list[dict], status: dict | None, now: float) -> str:
     label = meta.get("instance") or meta.get("workspace") or "workspace"
     owner = meta.get("owner")
-    head = f'<h1>Canary hits &middot; {_esc(label)} ({_esc(_status_text(status))})</h1>'
+    text = "archived run" if status is None else status_line(status, now)
+    head = f'<h1>Canary hits &middot; {_esc(label)} ({_esc(text)})</h1>'
     if owner:
         head += f'<p class="owner muted">owner {_esc(owner)}</p>'
     return head + _headline(hits)
@@ -138,8 +180,14 @@ def participant_body(meta: dict, hits: list[dict], status: dict | None) -> str:
     headline counts, the literal-matching notice, then the loud hits newest first, each collapsed
     under <details>, then the quiet ones (and any of unknown kind) newest first inside one collapsed
     "also seen (N)" block (spec *Hits*), left out when there are none. `meta` is
-    `workspace`/`instance`/`owner` (canary_watch.archive_meta's shape); `status` is None for an
-    archived run."""
+    `workspace`/`instance`/`owner` (canary_watch.archive_meta's shape, or the report sidecar's);
+    `status` is None for an archived run, else the watcher's status file (or `{}` for a live
+    workspace with none yet). A workspace whose record is encrypted (`status["state"] ==
+    "encrypted"`) shows that instead of any hits; otherwise, with none to show, "No hits yet." for an
+    archived run or a watched one, "Not watched yet." for one with no status yet."""
+    now = time.time()
+    state = status.get("state") if isinstance(status, dict) else None
+    not_watched_yet = isinstance(status, dict) and not state
     ordered = sorted(hits, key=lambda h: str(h.get("at") or h.get("detected") or ""), reverse=True)
     loud = [h for h in ordered if h.get("kind") in LOUD_KINDS]
     quiet = [h for h in ordered if h.get("kind") not in LOUD_KINDS]
@@ -147,11 +195,13 @@ def participant_body(meta: dict, hits: list[dict], status: dict | None) -> str:
     if quiet:
         items += (f'<details class="also-seen"><summary>also seen ({len(quiet)})</summary>'
                   f'{"".join(_hit_html(h) for h in quiet)}</details>')
-    if not items:
-        items = '<p class="muted">No hits yet.</p>'
+    if state == "encrypted":
+        items = f'<p class="muted">{_esc(ENCRYPTED_NOTICE)}</p>'
+    elif not items:
+        items = f'<p class="muted">{_esc(NOT_WATCHED if not_watched_yet else NO_HITS)}</p>'
     return (
         '<main class="hits">'
-        f'<header class="report-head card">{_header(meta, hits, status)}'
+        f'<header class="report-head card">{_header(meta, hits, status, now)}'
         f'<p class="notice muted">{_esc(NOTICE)}</p></header>'
         f'<section class="card hit-list">{items}</section>'
         '</main>'

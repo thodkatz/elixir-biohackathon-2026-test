@@ -16,15 +16,20 @@ Routes (Caddy sends /reports* here):
     GET  /reports/<id>.md          the Markdown, ETag = sha256 of the file
     PUT  /reports/<id>.md          save; If-Match required; 412 when the file changed
     POST /reports/preview          Markdown in, sanitized HTML fragment out
+    GET  /reports/<id>/hits        the canary hit viewer's participant page (spec *Participant
+                                    page*); 403 for anyone but the workspace's owner and Coder owners
+    GET  /reports/<id>/hits.json   the same hits as JSON, ?after=<id> for only the new ones
     GET  /reports/static/<file>    the page's CSS and script
     GET  /reports/healthz          200, no login
 
 Login is Coder's: the browser's coder_session_token cookie is forwarded to
 Coder's users/me endpoint and nowhere else. The report's owner (the sidecar's
-username) and Coder owners may write; everyone logged in may read.
+username) and Coder owners may write; everyone logged in may read. The hits
+routes are narrower (decision 10): only the workspace's owner and Coder owners.
 
 Standard library plus python3-markdown. Environment: CODER_URL (default
-http://127.0.0.1:7080), REPORTS_DIR (default /data-share/reports), LISTEN
+http://127.0.0.1:7080), REPORTS_DIR (default /data-share/reports), HITS_DIR
+(default /data-share/canary-hits, the canary hit viewer's watcher output), LISTEN
 (default 127.0.0.1:7090).
 """
 from __future__ import annotations
@@ -48,10 +53,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import markdown
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from canary_hits import HitsFile  # noqa: E402
+from hits_view import participant_body  # noqa: E402
+
 PREFIX = "/reports"
 COOKIE = "coder_session_token"
 MAX_BYTES = 1_000_000
 CACHE_SECONDS = 30
+HITS_DIR = "/data-share/canary-hits"
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 STATIC_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2"}
@@ -262,10 +272,16 @@ def is_admin(user: dict) -> bool:
 # top bar and cards. The editor is EasyMDE (vendored in static/, with Font Awesome 4
 # for its toolbar); readers get the rendered report instead of an editor.
 
-def page(title: str, body: str, user: dict | None, editor: bool = False) -> bytes:
+def page(title: str, body: str, user: dict | None, editor: bool = False, scripts: tuple[str, ...] = (),
+         styles: tuple[str, ...] = ()) -> bytes:
+    """`scripts` and `styles` are file names under `static/` (the hits page's `hits.js`,
+    `hits.css`), linked absolute like the page's own (`{PREFIX}/static/<name>`); always with a
+    `src`/`href`, never inline (the CSP forbids inline script)."""
     who = html.escape(user.get("username", "")) if user else ""
     extra = (f"<link rel=\"stylesheet\" href=\"{PREFIX}/static/font-awesome.min.css\">"
              f"<link rel=\"stylesheet\" href=\"{PREFIX}/static/easymde.min.css\">" if editor else "")
+    extra += "".join(f"<link rel=\"stylesheet\" href=\"{PREFIX}/static/{html.escape(name)}\">" for name in styles)
+    tail_scripts = "".join(f"<script src=\"{PREFIX}/static/{html.escape(name)}\"></script>" for name in scripts)
     return (
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
@@ -275,6 +291,7 @@ def page(title: str, body: str, user: dict | None, editor: bool = False) -> byte
         f"<nav><a href=\"/workspaces\">Portal</a><a href=\"{PREFIX}/\">Reports</a>"
         f"<span class=\"who\">{who}</span></nav></header>{body}</div>"
         + (f"<script src=\"{PREFIX}/static/easymde.min.js\"></script>" if editor else "")
+        + tail_scripts
         + f"<script src=\"{PREFIX}/static/report.js\"></script></body></html>"
     ).encode()
 
@@ -342,6 +359,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "sperange-report/1"
     store: Store
     coder: Coder
+    hits_dir: str | None = None
 
     # ---- helpers
     def send(self, status: int, body: bytes = b"", ctype: str = "text/html; charset=utf-8", headers: dict | None = None):
@@ -399,6 +417,71 @@ class Handler(BaseHTTPRequestHandler):
     def can_edit(self, meta: dict, user: dict) -> bool:
         return user.get("username") == meta.get("owner") or is_admin(user)
 
+    def can_see_hits(self, meta: dict | None, user: dict) -> bool:
+        """Decision 10: the workspace's owner and Coder owners; a workspace with no report sidecar
+        (`meta` None) is visible to admins only."""
+        return is_admin(user) or (meta is not None and user["username"] == meta["owner"])
+
+    # ---- the canary hit viewer's pages (spec *Participant page*)
+
+    def _hits_path(self, wid: str) -> str | None:
+        return os.path.join(self.hits_dir, wid + ".jsonl") if self.hits_dir else None
+
+    def _status_path(self, wid: str) -> str | None:
+        return os.path.join(self.hits_dir, wid + ".status.json") if self.hits_dir else None
+
+    def read_hits(self, wid: str, after: int = 0) -> list[dict]:
+        path = self._hits_path(wid)
+        return HitsFile(path).read(after=after) if path else []
+
+    def read_status(self, wid: str) -> dict | None:
+        """The watcher's status file (ruling 6), or None: no `hits_dir`, no file, or one that is
+        not valid JSON or not an object (never raises on it: untrusted only in the sense that the
+        watcher could be mid-write, never the participant's)."""
+        path = self._status_path(wid)
+        if not path:
+            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                status = json.load(f)
+        except (OSError, ValueError):
+            return None
+        return status if isinstance(status, dict) else None
+
+    def hits_page(self, wid: str, user: dict) -> None:
+        if not UUID_RE.match(wid):
+            return self.send(HTTPStatus.NOT_FOUND, message_page("Not found", "No such workspace.", user))
+        meta = self.store.meta(wid)
+        if not self.can_see_hits(meta, user):
+            return self.send(HTTPStatus.FORBIDDEN, message_page(
+                "Forbidden", "Only the workspace's owner and Coder owners can see its canary hits.", user))
+        hits = self.read_hits(wid)
+        status = self.read_status(wid)
+        label = (meta or {}).get("workspace") or wid
+        body_meta = meta if meta is not None else {"workspace": wid}
+        body_status = status if status is not None else {}  # {}: "not watched yet", never "archived run"
+        last = hits[-1]["id"] if hits else 0
+        content = (f'<section id="hits" data-wid="{html.escape(wid)}" data-last="{last}">'
+                   f'{participant_body(body_meta, hits, body_status)}</section>')
+        return self.send(HTTPStatus.OK, page(f"Canary hits · {label}", content, user,
+                                             scripts=("hits.js",), styles=("hits.css",)))
+
+    def hits_json(self, wid: str, user: dict) -> None:
+        if not UUID_RE.match(wid):
+            return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        meta = self.store.meta(wid)
+        if not self.can_see_hits(meta, user):
+            return self.send_json(HTTPStatus.FORBIDDEN, {"error": "forbidden"})
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        after = 0
+        if "after" in query:
+            try:
+                after = int(query["after"][-1])
+            except ValueError:
+                return self.send_json(HTTPStatus.BAD_REQUEST, {"error": "after must be an integer"})
+        return self.send_json(HTTPStatus.OK, {"workspace": wid, "status": self.read_status(wid),
+                                              "hits": self.read_hits(wid, after)})
+
     # ---- methods
     def do_HEAD(self):
         self.do_GET()
@@ -416,11 +499,17 @@ class Handler(BaseHTTPRequestHandler):
         except (urllib.error.URLError, OSError, ValueError):
             return self.send(HTTPStatus.BAD_GATEWAY, message_page("Portal unavailable", "Coder did not answer; try again in a moment."))
         if user is None:
-            if rest.endswith(".md"):
+            if rest.endswith(".md") or rest.endswith("/hits.json"):
                 return self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "not logged in"})
+            if rest.endswith("/hits"):
+                return self.login_redirect(PREFIX + "/" + rest[:-len("/hits")])
             return self.login_redirect(path)
         if rest == "":
             return self.send(HTTPStatus.OK, list_page(self.store.listing(), user))
+        if rest.endswith("/hits.json"):
+            return self.hits_json(rest[:-len("/hits.json")], user)
+        if rest.endswith("/hits"):
+            return self.hits_page(rest[:-len("/hits")], user)
         wid, is_md = (rest[:-3], True) if rest.endswith(".md") else (rest, False)
         if not UUID_RE.match(wid):
             return self.send(HTTPStatus.NOT_FOUND, message_page("Not found", "No such report.", user))
@@ -522,9 +611,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send(HTTPStatus.OK, data, STATIC_TYPES[ext], {"Cache-Control": "public, max-age=300"})
 
 
-def make_server(listen: str, reports_dir: str, coder_url: str) -> ThreadingHTTPServer:
+def make_server(listen: str, reports_dir: str, coder_url: str, hits_dir: str | None = None) -> ThreadingHTTPServer:
     host, _, port = listen.rpartition(":")
-    handler = type("BoundHandler", (Handler,), {"store": Store(reports_dir), "coder": Coder(coder_url)})
+    handler = type("BoundHandler", (Handler,), {"store": Store(reports_dir), "coder": Coder(coder_url),
+                                                 "hits_dir": hits_dir})
     srv = ThreadingHTTPServer((host or "127.0.0.1", int(port)), handler)
     srv.daemon_threads = True
     return srv
@@ -533,11 +623,12 @@ def make_server(listen: str, reports_dir: str, coder_url: str) -> ThreadingHTTPS
 def main():
     listen = os.environ.get("LISTEN", "127.0.0.1:7090")
     reports_dir = os.environ.get("REPORTS_DIR", "/data-share/reports")
+    hits_dir = os.environ.get("HITS_DIR", HITS_DIR)
     coder_url = os.environ.get("CODER_URL", "http://127.0.0.1:7080")
     if not os.path.isdir(reports_dir):
         sys.exit(f"sperange-report: REPORTS_DIR {reports_dir} is not a directory")
-    srv = make_server(listen, reports_dir, coder_url)
-    print(f"sperange-report: {reports_dir} on {listen}, Coder at {coder_url}", flush=True)
+    srv = make_server(listen, reports_dir, coder_url, hits_dir)
+    print(f"sperange-report: {reports_dir} on {listen}, Coder at {coder_url}, hits in {hits_dir}", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

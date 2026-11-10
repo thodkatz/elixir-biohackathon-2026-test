@@ -36,16 +36,19 @@ def write_mitigation(dir: Path, mitigation_id: str, **fields) -> None:
                                                               sort_keys=False))
 
 
-def run(tmp_path: Path, mitigations_root: Path, spe_mitigations: list[str]) -> subprocess.CompletedProcess:
+def run(tmp_path: Path, mitigations_root: Path | None, spe_mitigations: list[str],
+        play_dir: Path | None = None) -> subprocess.CompletedProcess:
     play = [{"hosts": "localhost", "connection": "local", "gather_facts": False, "pre_tasks": [mitigation_check_task()]}]
-    (tmp_path / "play.yml").write_text(yaml.safe_dump(play, sort_keys=False))
-    (tmp_path / "extra.json").write_text(json.dumps({
-        "spe_instance": "t-01", "spe_mitigations": spe_mitigations,
+    play_dir = play_dir or tmp_path
+    (play_dir / "play.yml").write_text(yaml.safe_dump(play, sort_keys=False))
+    extra = {"spe_instance": "t-01", "spe_mitigations": spe_mitigations}
+    if mitigations_root is not None:
         # Overrides the task's own vars entry (extra vars win precedence), as test_hardening.py
         # does for spe_catalog_dir: playbook_dir here is tmp_path, not platform/ansible/playbooks.
-        "spe_mitigations_root": str(mitigations_root)}))
+        extra["spe_mitigations_root"] = str(mitigations_root)
+    (tmp_path / "extra.json").write_text(json.dumps(extra))
     env = {**os.environ, "ANSIBLE_LOCALHOST_WARNING": "False"}
-    return subprocess.run(["ansible-playbook", "-i", "localhost,", str(tmp_path / "play.yml"),
+    return subprocess.run(["ansible-playbook", "-i", "localhost,", str(play_dir / "play.yml"),
                            "-e", f"@{ANSIBLE / 'inventory' / 'group_vars' / 'all.yml'}",
                            "-e", f"@{tmp_path / 'extra.json'}"], env=env, capture_output=True, text=True)
 
@@ -120,4 +123,15 @@ def test_non_contiguous_ladder_refused(tmp_path, selected):
 
 def test_contiguous_ladder_passes(tmp_path):
     p = run(tmp_path, REAL_MITIGATIONS, ["L1", "L2"])
+    assert p.returncode == 0, p.stdout[-2000:] + p.stderr[-2000:]
+
+
+def test_the_default_root_is_the_repositorys_mitigations(tmp_path):
+    # No override: the task's own default, relative to playbook_dir, from a play at create.yml's
+    # depth (platform/ansible/playbooks/) in a tree whose root holds the real mitigations.
+    assert (ANSIBLE / "playbooks" / "create.yml").is_file()
+    play_dir = tmp_path / "platform/ansible/playbooks"
+    play_dir.mkdir(parents=True)
+    (tmp_path / "mitigations").symlink_to(REAL_MITIGATIONS)
+    p = run(tmp_path, None, ["L1"], play_dir)
     assert p.returncode == 0, p.stdout[-2000:] + p.stderr[-2000:]

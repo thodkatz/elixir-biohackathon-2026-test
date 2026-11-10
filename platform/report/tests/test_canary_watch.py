@@ -150,3 +150,40 @@ def test_cli_missing_record_fails_without_token(tmp_path):
                           capture_output=True, text=True, timeout=60)
     assert done.returncode != 0
     assert "canaries.json" in done.stderr
+
+
+def test_lone_surrogate_in_a_source_line(tmp_path):
+    """Untrusted JSON can carry a lone surrogate ("\\ud800"): the scan completes, the hit is kept, and
+    the hits file stays valid UTF-8 JSON (the surrogate written as U+FFFD, offsets unchanged)."""
+    run = tmp_path / "run"
+    shutil.copytree(RUN, run)
+    record = {"run_id": "r8\udc00", "thread_id": "s8\udc00", "started": 1793714800.0, "input": "go", "tool_calls": [],
+              "answer": "\ud800 The flag is FCANARY-TEST01."}
+    with open(run / "agui" / "agent-runs.jsonl", "a") as f:
+        f.write(json.dumps(record) + "\n")  # ensure_ascii: the line holds the \ud800 escape
+    hits, count = scan(tmp_path, run=run)
+    raw = (tmp_path / "hits.jsonl").read_bytes()
+    raw.decode("utf-8")  # strict: valid UTF-8
+    records = hits.read()
+    assert count == len(records)
+    r8 = [h for h in records if h["run"] == "r8\ufffd"]  # a surrogate in the run id too
+    assert [(h["kind"], h["canary"]["token"]) for h in r8] == [("answer", "FCANARY-TEST01")]
+    excerpt = r8[0]["excerpt"]
+    assert excerpt["text"].startswith("� ")
+    assert excerpt["text"][excerpt["start"]:excerpt["end"]] == "FCANARY-TEST01"
+    assert [h["session"]["id"] for h in records if h["frontend"] == "openwebui"] == ["owc1"]  # later hits kept
+
+
+def test_cli_rerun_with_surrogate_adds_nothing(tmp_path):
+    """The key of a hit read back from the file (surrogate written as U+FFFD) matches a fresh scan's."""
+    run = tmp_path / "run"
+    shutil.copytree(RUN, run)
+    with open(run / "agui" / "agent-runs.jsonl", "a") as f:
+        f.write(json.dumps({"run_id": "r8\udc00", "thread_id": "s8", "answer": "FCANARY-TEST01 \ud800"}) + "\n")
+    out = tmp_path / "hits.jsonl"
+    argv = [sys.executable, str(WATCH), "--archive", str(run), "--out", str(out), "--api-host", API_HOST]
+    assert subprocess.run(argv, capture_output=True, timeout=60).returncode == 0
+    lines = out.read_text().splitlines()
+    done = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0 and " 0 new hits" in done.stdout
+    assert out.read_text().splitlines() == lines

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -317,12 +318,16 @@ def dedup_key(hit: dict, generation: str) -> str:
     hit, many copies*): the first copy written wins."""
     call_id = (hit.get("tool") or {}).get("call_id")
     parts = (hit.get("workspace"), generation, hit.get("run"), hit.get("place"), call_id, hit["canary"]["token"])
-    return hashlib.sha256("|".join("" if p is None else str(p) for p in parts).encode()).hexdigest()
+    text = LONE_SURROGATE.sub("\ufffd", "|".join("" if p is None else str(p) for p in parts))  # as written
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 # The hits file
 
 HITS_FILE_MAX = 10_000_000  # bytes per hits file (spec *Watcher*, untrusted reader output)
+# A lone surrogate (untrusted JSON's "\ud800") cannot be UTF-8: written as U+FFFD, one character for one,
+# so the excerpt's offsets still hold.
+LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 
 class HitsFile:
@@ -346,7 +351,7 @@ class HitsFile:
         if self.full:
             return None
         hit["id"] = self.count + 1
-        line = (json.dumps(hit, ensure_ascii=False) + "\n").encode()
+        line = (LONE_SURROGATE.sub("\ufffd", json.dumps(hit, ensure_ascii=False)) + "\n").encode()
         if self.size + len(line) > self.max_bytes:
             del hit["id"]
             self.full = True

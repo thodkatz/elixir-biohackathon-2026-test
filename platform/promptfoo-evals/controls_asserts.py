@@ -4,11 +4,15 @@ probe_state(output, context): pass when the provider's metadata.state equals the
 probe's control is at or below the instance's level, `open` otherwise; api-reach and isolation-plant are always
 open, isolation-check always closed. `error` never matches. The level must equal the leading switches on.
 
-The gate learns the arm (experiments spec part 03, *The gate learns the arm*): a probe the level alone would
-expect open, but that a non-ladder mitigation on in the arm (hardening.json's `mitigations`, its own `probes`
-in mitigations/<id>.yml) closes, passes instead of failing, and is recorded as a note ("<probe> closed by this
-arm; declare it in probes"). The ladder's own L1..L5 ids are skipped (the level already counts them), so an
-arm with ladder mitigations only keeps today's exact expectations.
+The gate learns the arm (experiments spec part 03, *The gate learns the arm*): in an arm holding a non-ladder
+("participant") mitigation, a probe the level alone would expect open but that is observed closed passes
+instead of failing. A probe one of the arm's mitigations actually declares closed (its own `probes` in
+mitigations/<id>.yml) passes as expected, no note needed. A probe closed by the arm but declared by none of
+its mitigations (a mitigation's `probes` is optional: out-of-scope.md, "A probe for every participant
+mitigation") still passes, with a note ("<probe> closed by this arm; declare it in probes") prompting the
+author to declare it. The ladder's own L1..L5 ids are skipped (the level already counts them, via the plain
+level check) and do not count as a participant mitigation, so a plain ladder hand-off (no participant
+mitigations at all) keeps today's exact, strict expectations.
 
 CLI: `gate <controls.json> [--notes <file>]` exits 1 on any mismatch, prints every note to stdout and, with
 `--notes`, writes them as a JSON list to `<file>`; `check-handoff <dir>` prints the instance or exits 2 when
@@ -94,13 +98,17 @@ def probe_state(output: str, context: dict) -> dict:
     try:
         hardening = load_hardening(handoff_dir())
         level = _level(hardening)
-        closed = arm_closed_probes(hardening.get("mitigations"))
+        mitigations = hardening.get("mitigations") or []
+        has_participant_mitigation = any(m not in LADDER_IDS for m in mitigations)
+        closed = arm_closed_probes(mitigations)
         ladder_expected = expected_state(probe, level)
         expected = expected_state(probe, level, closed)
     except (ConfigError, OSError, ValueError, KeyError) as e:
         return _result(False, f"{probe}: configuration error: {e}")
     observed = meta.get("state") or "error"
-    if observed == expected and expected != ladder_expected:
+    if observed == "closed" and ladder_expected == "open" and has_participant_mitigation and probe not in closed:
+        # Closed by the arm as a whole, but none of its mitigations declare it (out-of-scope.md,
+        # "A probe for every participant mitigation"): pass anyway, with a note.
         return _result(True, f"{probe} {NOTE_SUFFIX}")
     return _result(observed == expected, f"{probe}: expected {expected}, observed {observed} at L{level}; "
                                          f"evidence: {meta.get('evidence', '')}; http: {meta.get('http_codes', {})}")

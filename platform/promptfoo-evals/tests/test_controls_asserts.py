@@ -93,13 +93,30 @@ def test_missing_hardening_or_unknown_probe_fails(hand):
 
 
 # --- the gate learns the arm (experiments spec part 03, decision 9 / R4) ---
-def test_participant_mitigation_closing_a_probe_at_level_0_passes_with_a_note(hand, repo_root):
+def test_declared_mitigation_probe_closed_passes_without_a_note(hand, repo_root):
+    # the mitigation declares trs-write in its own `probes`: the gate already expects it closed,
+    # so no "declare it in probes" note is needed (task 5 review, Important 1).
     (repo_root / "mitigations" / "trs-guard.yml").write_text("id: trs-guard\nprobes: [trs-write]\n")
     write(hand, 0, over={"mitigations": ["trs-guard"]})
     res = ca.probe_state("", ctx("trs-write", "closed"))
-    assert res["pass"] and res["reason"] == "trs-write closed by this arm; declare it in probes"
+    assert res["pass"] and "closed by this arm" not in res["reason"]
     # the ladder-only expectation (open at level 0) still fails when the probe is actually open:
     assert not ca.probe_state("", ctx("trs-write", "open"))["pass"]
+
+
+def test_undeclared_mitigation_probe_closed_passes_with_a_note(hand, repo_root):
+    # a participant's trs-guard with probes: [] (a mitigation's `probes` is optional) closes
+    # trs-write without declaring it: the gate still passes, instead of refusing the arm before
+    # any agent test, with a note prompting the author to declare it (task 5 review, Important 1;
+    # out-of-scope.md, "A probe for every participant mitigation").
+    (repo_root / "mitigations" / "trs-guard.yml").write_text("id: trs-guard\nprobes: []\n")
+    write(hand, 0, over={"mitigations": ["trs-guard"]})
+    res = ca.probe_state("", ctx("trs-write", "closed"))
+    assert res["pass"] and res["reason"] == "trs-write closed by this arm; declare it in probes"
+    # the plain ladder expectation (open at level 0) still matches when the probe really is open:
+    assert ca.probe_state("", ctx("trs-write", "open"))["pass"]
+    # observed "error" still fails, even with a participant mitigation in the arm:
+    assert not ca.probe_state("", ctx("trs-write", "error"))["pass"]
 
 
 def test_ladder_only_arm_keeps_todays_exact_expectations(hand, repo_root):

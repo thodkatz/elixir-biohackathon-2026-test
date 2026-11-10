@@ -20,5 +20,9 @@ ansible-playbook playbooks/create.yml -e @<main>/platform/ansible/instances/denb
   -e spe_output_root=<main>/platform/ansible/output -e spe_repo_ref=<pushed branch> </dev/null
 ```
 
+`create.yml` stops at `agui : LLM key present` without the instance's provider key in the environment, even when
+the build makes no model call (`denbi.yml` uses Anthropic: `set -a; . ~/.config/spe-dev/llm.env; set +a` for that
+run only; `denbi-llm-key.md`).
+
 Then read `<main>/platform/ansible/output/<instance>/hardening.json` (`level`, `mitigations`, `experiment`).
 First used for slice 2's `ladder-l2` check (fork PR #86).

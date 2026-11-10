@@ -20,3 +20,8 @@ slice is the README's slices table; the handoffs say what each session did.
    duplicated it). *Cost if wrong:* none.
 5. **`hits.css` duplicates `report.css`'s tokens** so the static page is self-contained (no external stylesheet).
    *Cost if wrong:* the two drift; slice 3's served page links `report.css` and can drop the copy.
+6. **Accepted limits** (review of #77): `test_watcher_agrees_with_metrics` reaches `canary_hits` through
+   `metrics`' own `sys.path` insert (correct, and one line to make explicit when next touched); the agent run log's
+   `answer` joins a run's messages with no separator, so a token right after another message's last word fails
+   the whole-word match there, while the journal, one answer per message, still finds it. *Cost if wrong:* a
+   run with a run log and no journal misses that one hit.

@@ -277,10 +277,29 @@ def test_openwebui_answer_is_output_text_when_message_items_exist():
     plain = [p.value for p in canary_hits.openwebui_places(_assistant_chat(f"said {FCANARY}", None), "archive")
              if p.place == "answer"]
     assert plain == [[f"said {FCANARY}"]]
+    # With `output` set, `content` is never the answer: it may embed tool results (a turn stopped after a tool).
     reasoning_only = [{"type": "reasoning", "content": [{"type": "output_text", "text": "think"}]}]
     only = [p.value for p in canary_hits.openwebui_places(_assistant_chat("plain", reasoning_only), "archive")
             if p.place == "answer"]
-    assert only == [["plain"]]
+    assert only == []
+    tool_only = [{"type": "function_call", "call_id": "k", "name": "read_file", "arguments": "{}"},
+                 {"type": "function_call_output", "call_id": "k", "output": "data"}]
+    stopped = [p.place for p in canary_hits.openwebui_places(
+        _assistant_chat(f'<details type="tool_calls" result="{FCANARY}">', tool_only), "archive")]
+    assert "answer" not in stopped
+
+
+def test_compaction_message_makes_no_place():
+    journal = canary_hits.JournalReader("s")
+    lines = [
+        {"type": "run_start", "at": "a", "run_id": "r", "messages": []},
+        {"type": "event", "at": "b", "run_id": "r", "event": {"type": "TEXT_MESSAGE_START",
+                                                              "messageId": "spe-compaction-1"}},
+        {"type": "event", "at": "c", "run_id": "r", "event": {"type": "TEXT_MESSAGE_END",
+                                                              "messageId": "spe-compaction-1"}},
+        {"type": "run_end", "at": "d", "run_id": "r", "status": "done", "error": None},
+    ]
+    assert [p for line in lines for p in journal.feed(line)] == []
 
 
 GOOD_CHAT = {"id": "g", "title": "t", "chat": {"history": {"messages": {

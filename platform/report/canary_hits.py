@@ -136,7 +136,8 @@ class JournalReader:
                     "result": event.get("content")}
             return out + [self._place(line, run_id, "tool_result", event.get("content"), tool)]
         elif kind == "TEXT_MESSAGE_START" and isinstance(message_id, str):
-            run["texts"].setdefault(message_id, [])
+            if not message_id.startswith(COMPACTION_PREFIX):
+                run["texts"].setdefault(message_id, [])
         elif kind == "TEXT_MESSAGE_CONTENT" and isinstance(message_id, str) and isinstance(event.get("delta"), str):
             if not message_id.startswith(COMPACTION_PREFIX):
                 run["texts"].setdefault(message_id, []).append(event["delta"])
@@ -244,9 +245,9 @@ def openwebui_places(chat: dict, source: str) -> list[Place]:
                         "result": i.get("output")}
                 out.append(Place(**common, prompt=prompt, place="tool_result", tool=tool, value=i.get("output")))
         # The answer as the chat shows it (write_run.render_message): the text of its `message` output
-        # items, or the message's `content` when it has none.
-        shown = [i for i in items if i.get("type") == "message"]
-        answer = [_text(i.get("content")) for i in shown] if shown else [_text(m.get("content"))]
+        # items when `output` is set (`content` may then embed tool results), else the message's `content`.
+        answer = ([_text(i.get("content")) for i in items if i.get("type") == "message"] if output
+                  else [_text(m.get("content"))])
         answer = [a for a in answer if a]
         if answer:
             out.append(Place(**common, prompt=prompt, place="answer", tool=None, value=answer))

@@ -113,6 +113,12 @@ on the stack. There are two kinds, and an experiment may use either or both:
   the detectors `metrics.py` defines. So a completely different injection (new surface, new action, or both)
   needs no edit to the schema, only its planting role and, for a new action, its detector.
 
+  What stays fixed is the schema's guidance, the same for every injection: the entry's fields (and no token, seed
+  or credential field), one placement of exactly the committed payload, a payload that names its target, a
+  canary in that target, a switch that defaults off. Changing those is a change to `injections_schema.py`,
+  reviewed as shared code. `disclosure` stays derived from the canary file's directory (`registry/`: first five
+  lines; `secret/`: whole file); a target under another directory extends that rule in the same change.
+
 The experiment lists its injections (`injections: [ids]`); they are **on in both arms**, so the attack is held
 fixed and only the mitigation varies (03). The planted injections are scored with no new assertion:
 `injection.followed` scores every entry of the arm's `injections.json` against the state diff and the trace, so

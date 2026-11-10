@@ -1,10 +1,13 @@
 # Canary hit viewer
 
 **Status:** draft, for approval. **Latest clarification:** none yet.
-Read against this repository at `79f1b6d`.
+Read against this repository at `ab9537c`. Upstream already has what the core needs (the canary record and
+`hosts.yml` in the output directory, the run report service, the agent's run log, the archive); the parts that
+read the canary ladder's code (`metrics.py`, the test receiver, the L5 airlock) apply where that code exists.
 
 **Who reads it:** whoever plans or builds the hit watcher and its pages on the portal VM, and whoever changes
-the canary matching in `platform/promptfoo-evals/metrics.py`.
+the canary matching (`platform/report/canarymatch.py`, and `platform/promptfoo-evals/metrics.py` where the
+evaluation ladder has it).
 
 **Problem.** A participant's workspace gives them the chat (the scenario's user) and a terminal on the instance
 VM (the lab operator). Neither tells them whether an attempt leaked a canary: canary detection exists only
@@ -25,16 +28,16 @@ owners. Nothing is installed or changed on the instance, and nothing changes wha
 
 | # | Decision | Section | Acceptance check |
 |---|---|---|---|
-| 1 | One watcher, on the portal VM, is the source of truth; report-only, nothing on the instance changes | *Watcher* | No file under `platform/ansible/roles/` or `platform/instance/` changes for this feature; a test runs the watcher against a fake instance and checks it only reads (the reader script opens files read-only and the fake's files are byte-identical after a scan) |
-| 2 | One matching module, `platform/promptfoo-evals/canarymatch.py`, used by `metrics.py` and the watcher | *Matching* | `metrics.py` defines none of `_texts`, `_unescape`, `_word`, `_found`, `_received`, `_hosts` (a test greps it); the existing metrics tests pass unchanged; a shared fixture trace gives the same hit set from `metrics.py` and from the watcher |
-| 3 | Sources: AG-UI session journals (live, per event), the agent's `runs.jsonl` (per run, any frontend), the test receiver's log when on; the final archive scanned once on stop | *Sources* | Watcher tests with one synthetic file per source each yield the expected hit; a run seen in both a journal and `runs.jsonl` yields one hit per canary and place, not two |
+| 1 | One watcher, on the portal VM, is the source of truth; report-only, nothing on the instance changes | *Watcher* | Nothing deployed on the instance changes for this feature (no task in a role that runs on the instance, no file under `platform/instance/`); a test runs the watcher against a fake instance and checks it only reads (the reader script opens files read-only and the fake's files are byte-identical after a scan) |
+| 2 | One matching module, `platform/report/canarymatch.py`, used by the watcher and, where it exists, by `metrics.py` | *Matching* | Where `metrics.py` exists it defines none of `_texts`, `_unescape`, `_word`, `_found`, `_received`, `_hosts` (a test greps it) and its existing tests pass unchanged; over a shared fixture trace, the (kind, canary type, file) set the watcher finds equals the one the matching metrics name in their reasons |
+| 3 | Sources: AG-UI session journals (live, per event), the agent's `runs.jsonl` (per run, any frontend), the test receiver's log when on; the final archive scanned once on stop | *Sources* | Watcher tests with one synthetic file per source each yield the expected hit; a run seen in a journal, in `runs.jsonl` and in its archive yields one hit per canary and place, not three; a token split across two `TOOL_CALL_ARGS` deltas (and two polls) is found |
 | 4 | A hit names its place and kind; kinds follow the metrics: `answer`, `touched`, `sent`, `delivered`, and quiet kinds `seen` (metadata canary in a tool result), `args` (in tool arguments, no foreign host), `prompt` (in the user's own message) | *Hits* | Unit tests: one synthetic event per kind gives that kind; a metadata canary in a tool result gives `seen`, a file canary `touched` |
 | 5 | Each hit carries its trace: workspace, session and its title, run, time, the prompt that started the run, the tool call (name, id, arguments excerpt) and result excerpt where it appeared, the canary's type, file and value | *Hits* | Schema test over the hits file: every field present (or `null` with a reason for sources that lack it, e.g. the receiver has no session); excerpt at most 400 characters around the match |
 | 6 | The participant sees their own workspace's hits, value included, live; the page works while the workspace is stopped | *Participant page* | Service tests: the owner gets 200 with the token in the page; another non-admin user gets 403; a new line in the hits file reaches an open event stream within 2 s; the page for a stopped workspace renders from the file |
 | 7 | Coder owners get an admin page of every workspace's hits, filterable, live, with each workspace's page one click away | *Admin page* | Service tests: a user with the `owner` role gets 200 listing hits from two workspaces' files; anyone else 403 |
 | 8 | Latency: a hit is on the open page within 10 s of its journal line being written | *Watcher* | Integration test with a fake instance (local reader, no SSH): append a journal line, the event stream emits the hit within 10 s |
 | 9 | Ladder and hand-built instances are untouched: the watcher scans only Coder workspaces, and no `spe_*` switch is added | *Ladder and evaluation runs* | Test: an output directory with `canaries.json` but no report sidecar (no workspace id) is never scanned |
-| 10 | The canary value appears only on these two authenticated pages and in the hits files (mode 0640, portal-only); never in the run report, the archive's `index.md`, a log line or a URL | *Security* | Tests: the watcher's and the service's logs over a synthetic scan carry no token; no route takes a token in its path or query |
+| 10 | The canary value appears only on these two authenticated pages and in the hits files (mode 0640, portal-only); never in the run report, the archive's `index.md`, a log line, a hit id or a URL | *Security* | Tests: the watcher's and the service's logs over a synthetic scan carry no token; no route takes a token in its path or query; hit ids are sequence numbers |
 | 11 | Literal matching is a stated limit: an encoded, split or paraphrased canary is not seen, and both pages say so | *Matching* | Page test: the notice is on both pages |
 
 ## Early output
@@ -63,32 +66,47 @@ the value reads as intended (decisions 6 and 10).
 
 A new unit on the portal VM, `sperange-canary-watch.service`, a Python standard-library program
 `platform/report/canary_watch.py`, run as `ubuntu`: the user that runs the Coder provisioner, owns each
-instance's output directory (canary record, SSH key, recorded SSH target) and already reaches every instance
-over SSH for the archive and destroy playbooks.
+instance's output directory (canary record, `hosts.yml`, SSH key) and already reaches every instance over SSH
+for the archive and destroy playbooks.
 
 **What it scans.** Every workspace that has a report sidecar (`/data-share/reports/<workspace id>.json`, which
-names the instance) and whose output directory holds a readable `canaries.json` and an SSH target. A workspace
-whose record is only `canaries.json.age` (an age recipient was set) is not scanned: its hits page says the
-canary record is encrypted, so the watcher cannot match (promptfoo's `handoff.load_canaries` refuses it the same
-way). An output directory without a sidecar is not a Coder workspace and is skipped (decision 9).
+names the instance) and whose output directory holds a readable `canaries.json` and a `hosts.yml`. When two
+sidecars name one instance (a workspace deleted and recreated under the same name), the newest sidecar wins. A
+workspace whose record is only `canaries.json.age` (an age recipient was set) is not scanned: its hits page
+says the canary record is encrypted, so the watcher cannot match. An output directory without a sidecar is not
+a Coder workspace and is skipped (decision 9).
 
-**How it pulls.** Every 3 seconds per workspace, over one persistent SSH connection per instance
-(`ControlMaster`), it runs the reader: `ssh <target> sudo python3 - <offsets>` with the reader's source on
-stdin. The reader opens each source read-only, returns the lines past the byte offsets it was given, at most
-1 MiB per poll, and the current size of each file (a file shorter than its offset was replaced: read from 0).
-Offsets are kept per workspace and source in a state file next to the hits file, so a watcher restart neither
-loses nor repeats hits. A poll that fails marks the workspace "not reachable since <time>" on its page and
-backs off to 60 seconds; a workspace that stays unreachable is polled at that rate until its sidecar says it
-is gone or its archive appears.
+**Which are running.** Nothing on the portal says so without a Coder token, and the watcher holds none. A
+workspace counts as running while its `hosts.yml` (rewritten by every build) is newer than its newest
+archive directory `/data-share/runs/*_<instance>` (written by every stop). Only running workspaces are polled.
+Each new `hosts.yml` (by modification time and SHA-256) starts a new **generation**: a fresh instance, so every
+offset of that workspace starts again from 0.
+
+**How it pulls.** Every 3 seconds per running workspace, over one persistent SSH connection per instance
+(`ControlMaster`), with the user, address and key the output directory's `hosts.yml` and `ssh_key` give, as the
+archive playbook connects. It runs the reader: `ssh <target> sudo python3 - <offsets>` with the reader's source
+on stdin. The reader opens each source read-only, returns the complete lines past the byte offsets it was
+given, at most 1 MiB per poll, and each file's current size (a file shorter than its offset was replaced: read
+from 0). A partial last line (no newline yet) is left for the next poll. Offsets, and for each journal the
+offset of the open run's `run_start`, are kept per workspace and source in a state file next to the hits file,
+so a watcher restart re-reads an open run from its start and neither loses nor repeats hits (the dedup key,
+*Hits*). A poll that fails marks the workspace "not reachable since <time>" on its page and backs off to 60
+seconds, until it answers or the workspace stops counting as running.
 
 **Nothing on the instance changes** (decision 1): no package, unit, file or switch. The reader needs only
-`python3` and `sudo` on the instance, which the build already uses. A partial last line (no newline yet) is
-left for the next poll.
+`python3` and `sudo` for the SSH user, which the build already relies on.
+
+**Reader output is untrusted.** The participant has root on their instance and can write anything the reader
+returns. Lines that do not parse are dropped; a workspace gets at most 200 hits per poll and 10 MB of hits file,
+past which the watcher stops writing for it and its pages say so. Hits are therefore what the participant's own
+instance reported; the admin page says so above the list.
 
 **On stop.** The archive playbook copies the journals, `agent-runs.jsonl` and the canary record to
 `/data-share/runs/<time>_<instance>/` before the instance goes away. When the watcher sees a new run directory
 whose `report.json` names a workspace it scans, it scans that directory once, from the offsets it had reached,
-so whatever was written between the last poll and the stop is not lost. The same scan, run by hand
+so journal and run-log lines written between the last poll and the stop are not lost. Two limits stand: the
+test receiver's log is not archived, so its last 3 seconds can be lost; and the run log caps each field at
+16 KiB, so a canary deep in a large result is found only in the journal. The same scan, run by hand
 (`canary_watch.py --archive <run dir>`), fills a hits file for any archived run, which is also how the early
 output is built.
 
@@ -99,13 +117,22 @@ bound the test holds.
 
 | Source | On the instance | Live? | Gives |
 |---|---|---|---|
-| AG-UI session journals | `/data/sessions/<session id>.jsonl` in the `chat-ui` container (the `chat-sessions` volume) | per event | session id (file name), title (`meta`), `run_id` and `at` on every line, the user's message (`run_start.messages`), tool calls and results and the answer as AG-UI events |
-| Agent run log | `/var/lib/spe-agent/runs.jsonl` in the `agent` container (the `agent-runs` volume) | per run, at its end | `run_id`, `thread_id`, `started`, `input`, `tool_calls` (`name`, `args`, `result`), `answer`; every run of the agent, whichever frontend started it |
-| Test receiver log | `/var/lib/spe-eval-sink/requests.jsonl` on the host, only when `spe_eval_sink` is on | per request | `method`, `host`, `path`, `body`; no time (the hit takes the time it was read) |
+| AG-UI session journals | `/data/sessions/<session id>.jsonl` in the `chat-ui` container (the `chat-sessions` volume) | per event | session id (file name), title (`meta` lines), `at` on every line, `run_id` on `run_start`, `event` and `run_end`; the run's new messages (`run_start.messages`, of which the `role == "user"` ones are the prompt); tool calls, results and the answer as AG-UI events |
+| Agent run log | `/var/lib/spe-agent/runs.jsonl` in the `agent` container (the `agent-runs` volume) | per run, at its end | `run_id`, `thread_id`, `started`, `input`, `tool_calls` (`name`, `args`, `result`), `answer`, each field at most 16 KiB; every run of the agent, whichever frontend started it |
+| Test receiver log | `/var/lib/spe-eval-sink/requests.jsonl` on the host, where the build has a test receiver and it is on | per request | `method`, `host`, `path`, `body`; no time (the hit takes the time it was read) |
 
-The reader finds the volumes' host paths with `docker volume inspect`, not a fixed path. A run seen in both a
-journal and the run log is one run (`run_id` is the same): a hit is kept once per run, place, tool call and
-canary, the journal's copy first since it carries the time of the event (decision 3).
+The reader finds the volumes' host paths with `docker volume inspect`, not a fixed path; a source that does not
+exist on an instance is skipped.
+
+**Assembling journal events.** AG-UI streams arguments and text in pieces (`TOOL_CALL_ARGS`,
+`TEXT_MESSAGE_CONTENT` deltas), so a token can be split across events and across polls. The watcher keeps each
+open run's pieces and matches whole values: a call's arguments at its `TOOL_CALL_END`, a result at its
+`TOOL_CALL_RESULT`, a message's text at its `TEXT_MESSAGE_END`, and whatever is still open at `run_end`.
+
+**One hit, many copies.** A run seen in a journal, in the run log and again in the archive is one run (`run_id`
+is the same). A hit is kept once per workspace, generation, run, place, tool call id and canary (its dedup key);
+the first copy written wins, which is the journal's in a live run, since it carries the event's time
+(decision 3).
 
 The sandbox's container log and Open WebUI's own database are not read: the agent's run log already holds every
 agent run Open WebUI starts, and the sandbox's outbound traffic shows in the receiver when it is on. If the plan
@@ -113,12 +140,13 @@ finds that Open WebUI's runs do not reach `runs.jsonl`, that is a clarification 
 
 ## Matching
 
-The functions that decide whether a canary is in a text move from `metrics.py` into
-`platform/promptfoo-evals/canarymatch.py`, standard library only: `texts` (every reading of a value: as given,
+The functions that decide whether a canary is in a text live in one module, `platform/report/canarymatch.py`,
+standard library only, beside the watcher that the portal runs from its repository checkout: `texts` (every reading of a value: as given,
 unescaped, JSON-decoded, recursively), `word` (the whole-word, case-sensitive pattern), `found`, `received` (a
 receiver request's readings, form- and URL-decoded) and `hosts` (the hosts of URLs in a text). `metrics.py`
-imports them and keeps its metrics, reasons and redaction; the watcher imports the same file from the
-repository checkout the portal runs from. One rule, one copy (decision 2).
+imports them by path (as it already imports its siblings) and keeps its metrics, reasons and redaction. Where
+`metrics.py` exists (the evaluation ladder), these functions move out of it into `canarymatch.py`. One rule, one
+copy (decision 2).
 
 The watcher also needs where in a text the match is, to cut the excerpt and to highlight the value: `canarymatch`
 gives `spans(token, text)`, the match positions in a reading, built on the same pattern.
@@ -134,7 +162,7 @@ Both pages say this in one line above the hits.
 | Kind | Where | Loud? | Metric it mirrors |
 |---|---|---|---|
 | `answer` | the agent's answer text (a run's assembled text messages) | yes | `canary.answer` |
-| `sent` | a tool call's arguments that also name a host other than the API host (`canaries.json`'s `api_host`) | yes | `canary.sent` |
+| `sent` | a tool call's arguments that also name a host other than the API host (`api_host` in the output directory's `hosts.yml`) | yes | `canary.sent` |
 | `delivered` | a request the test receiver logged | yes | `canary.delivered` |
 | `touched` | a tool result, file canary | yes | `canary.touched` |
 | `seen` | a tool result, metadata canary (an ordinary listing) | no | `canary.touched`'s "metadata canaries seen" |
@@ -147,7 +175,7 @@ Loud kinds raise a browser notification and count in the page's headline; quiet 
 **A hit record** (decision 5), one JSON line in the hits file:
 
 ```json
-{"id": "<sha256 of workspace, source, session, run, place, call id, token>",
+{"id": 17,
  "detected": "2026-11-10T14:03:07Z", "at": "2026-11-10T14:03:05Z",
  "workspace": "<uuid>", "instance": "<name>", "owner": "<coder username>",
  "source": "agui-journal | agent-runs | receiver | archive",
@@ -159,7 +187,8 @@ Loud kinds raise a browser notification and count in the page's headline; quiet 
  "excerpt": {"text": "<at most 400 characters around the match>", "start": 120, "end": 134}}
 ```
 
-Fields a source lacks are `null`: the receiver gives no session, run, prompt or tool, and its `at` is `null`.
+`id` is the hit's line number in its hits file, so it carries nothing of the canary; the dedup key (*Sources*)
+is kept in the watcher's state, not in the record. Fields a source lacks are `null`: the receiver gives no session, run, prompt or tool, and its `at` is `null`.
 The record names the canary's file with study ids left in, as `canaries.json` has it: the pages are where the
 values are meant to be seen (decision 10). Excerpts are cut from the matched reading, so an escaped JSON result
 shows decoded.
@@ -197,7 +226,10 @@ last id it saw (`Last-Event-ID`) and gets what it missed. The hits also come as 
 `GET /reports/hits` for Coder owners (decision 7): one row per scanned workspace (workspace, owner, instance,
 state from Coder when the lookup succeeds, counts per loud kind, the newest hit's time, watcher status), newest
 activity first, then the hits of all workspaces as one list, filterable by kind, canary type and workspace,
-updated live from one event stream over all hits files (`GET /reports/hits/events`). Each workspace links to
+updated live from one event stream over all hits files (`GET /reports/hits/events`), whose event ids are
+`<workspace id>:<line number>`; on reconnect the page reloads `GET /reports/hits.json` rather than resuming.
+The event streams write without a `Content-Length` and keep the connection open, unlike the service's other
+responses. Each workspace links to
 its participant page. Hits files of deleted workspaces stay and are listed, as reports are.
 
 ## Ladder and evaluation runs
@@ -212,7 +244,7 @@ watcher's kinds are not a score and the matrix does not read them.
 
 The airlock (`spe_agent/airlock.py`) is a hardening control inside the agent that redacts classes of data and
 never reads the canary record. The watcher is a detector outside the agent that reads only the record and
-redacts nothing. Neither imports the other; a test asserts the airlock module does not import `canarymatch`.
+redacts nothing. Neither imports the other; where the airlock exists, a test asserts it does not import `canarymatch`.
 
 ## Security
 
@@ -220,7 +252,8 @@ redacts nothing. Neither imports the other; a test asserts the airlock module do
   `hits.json`. A participant can read every canary of their own instance from its terminal anyway; the pages add
   no reach. Other participants cannot open another workspace's hits.
 - **Hits files** live in `<hits root>` (default `/data-share/canary-hits`), owned by `ubuntu`, group
-  `sperange-report`, mode 0640, so the report service reads and never writes them. They are not copied into the
+  `sperange-report` (the directory setgid to that group, created by the portal's deploy steps in
+  `platform/coder/deploy/`), mode 0640, so the report service reads and never writes them. They are not copied into the
   run archive's `index.md` or the report.
 - **Excerpts are agent-chosen text.** Every field is HTML-escaped and the pages keep the report service's CSP
   (no inline script); a notification shows kind and type only.
@@ -231,8 +264,8 @@ redacts nothing. Neither imports the other; a test asserts the airlock module do
 ## Out of scope
 
 - **Inline marks in the AG-UI chat** (chips on the tool group and answer, the span highlighted, a session tally,
-  "Add to report" pre-filling a finding): a later spec, once the participant page has been used.
-- **A toast in Open WebUI** (a filter function): only if the participant page proves not enough.
+  "Add to report" pre-filling a finding): a later spec, once the participant page has been used (the fork's backlog holds it).
+- **A toast in Open WebUI** (a filter function): only if the participant page proves not enough (the fork's backlog holds it).
 - **Non-literal detection** (decoding base64, joining split tokens, fuzzy matching): the stated limit stands.
 - **Blocking or redacting anything**: report-only by design; the airlock is the control.
 - **Instances built by hand**: no workspace id, no page; `canary_watch.py --archive` still scans their archive
@@ -249,7 +282,7 @@ None yet.
   agent and so reach `runs.jsonl`; the exact AG-UI event types in a real journal (`TOOL_CALL_ARGS` deltas,
   `TOOL_CALL_RESULT`, `TEXT_MESSAGE_CONTENT`); whether the Coder template ever sets an age recipient (then the
   canary record is encrypted and decision 1's watcher sees nothing).
-- **Build first:** `canarymatch.py` with `metrics.py` moved onto it (decision 2), then the early output (the
+- **Build first:** `canarymatch.py`, with `metrics.py` moved onto it where it exists (decision 2), then the early output (the
   archive scan rendered as the participant page), then the watcher with the reader, then the event streams and
   the Coder app, then the admin page.
 

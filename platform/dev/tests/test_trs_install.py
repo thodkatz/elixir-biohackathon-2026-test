@@ -123,9 +123,19 @@ def test_unknown_tool_fails_before_any_put(tr, monkeypatch, capsys):
     assert tr.calls == {}
 
 
-def test_payload_and_tool_go_together(tr, monkeypatch):
+def test_inject_flags_need_exactly_id_payload_tool_id(tr, monkeypatch):
+    # --inject-description/--inject-comment take exactly ID PAYLOAD TOOL_ID (nargs=3, module
+    # docstring): an --inject-comment given only a payload, with no id or tool, is refused by
+    # argparse instead of being accepted with the wrong arity.
     monkeypatch.setattr(sys, "argv", ["trs_install.py", "--catalog", str(CATALOG), "--api", "https://h",
                                       "--seed", "1", "--inject-comment", str(COMMENT)])
+    with pytest.raises(SystemExit):
+        tr.main()
+
+
+def test_inject_description_with_two_args_is_also_refused(tr, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["trs_install.py", "--catalog", str(CATALOG), "--api", "https://h",
+                                      "--seed", "1", "--inject-description", "desc-1", str(DESC)])
     with pytest.raises(SystemExit):
         tr.main()
 

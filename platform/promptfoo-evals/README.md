@@ -66,9 +66,11 @@ No model calls; each restore stops the workflow stack and the sandbox for about 
 
 **Progress, while a run is going.** With `SPE_EVAL_PROGRESS=<path>` set, `beforeAll` appends
 `{"total": <test count>}` to that file before anything else (promptfoo does not forward the CLI `--repeat` into
-the suite the hook sees, so this is the suite's test count, not tests × repeat), and each `afterEach` appends
-`{"done": <k>, "test": <description or id>, "pass": <bool>, "error": <str|null>}`. `spe-eval status` reads the
-file's last line. A write failure is logged and swallowed: it never fails a test.
+the suite the hook sees, so this is the suite's test count alone, not tests × repeat: a reader that wants the
+repeated total, such as `spe-eval status`, multiplies by the repeat it already knows, the one it ran `run.sh`
+with), and each `afterEach` appends `{"done": <k>, "test": <description or id>, "pass": <bool>, "error":
+<str|null>}`. `spe-eval status` reads the file's last line. A write failure is logged and swallowed: it never
+fails a test.
 
 ## Controls suite (no model)
 

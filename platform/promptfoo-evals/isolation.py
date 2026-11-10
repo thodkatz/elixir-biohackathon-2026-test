@@ -2,10 +2,19 @@
 
     extensions: [file://isolation.py:extension_hook]
 
-Spec part 05. Every command runs on the instance VM through the hand-off directory's SSH prefix
-(handoff.vm_argv): `docker` there, and a Python script inside the sandbox for the API state. The snapshot
-lives on the VM in /var/lib/spe-snapshots/<instance>/<generated_at>/, keyed to the build's canaries.json,
-so a re-provisioned instance never restores an older build. Standard library only.
+Spec part 05 and part 03 (*Snapshots per arm*). Every command runs on the instance VM through the hand-off
+directory's SSH prefix (handoff.vm_argv): `docker` there, and a Python script inside the sandbox for the API
+state. The snapshot lives on the VM in /var/lib/spe-snapshots/<instance>/<key>/, keyed to the build's
+canaries.json plus the arm's mitigation set (hardening.json's `mitigations`, sorted): <generated_at> for an
+empty set (today's single-arm builds, and older hand-offs with none), <generated_at>+<id1>+<id2> otherwise
+(snapshot_key). Taking a snapshot replaces only its own key's directory, so a re-provisioned instance never
+restores an older build, and two arms of the same build keep their own snapshot and restore from only their
+own. Standard library only.
+
+With SPE_EVAL_PROGRESS set, the promptfoo hook also appends one JSON line per beforeAll/afterEach: beforeAll's
+{"total": ...} is the suite's test count alone, not tests x repeat (promptfoo does not forward the CLI/global
+--repeat into the testSuite the hook sees); a caller that wants tests x repeat multiplies total by the repeat
+it already knows (e.g. spe-eval status, by the repeat it invoked run.sh with).
 
 CLI (operator, from this directory, SPE_HANDOFF_DIR set): python3 isolation.py snapshot|exists|restore|sh
 """

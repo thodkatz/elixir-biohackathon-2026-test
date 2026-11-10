@@ -139,3 +139,10 @@ slice is the README's slices table; the handoffs say what each session did.
 33. **The screenshot ran on a hand-written fixture server** (`make_server` with a fake Coder, in the scratchpad),
     two workspaces with fixture tokens, the frontend filter set to Open WebUI and one hit appended while the page
     was open. *Cost if wrong:* none; it runs the code the tests run.
+34. **A deleted workspace's admin row keeps its UUID as its name** (no fallback to the instance name from its
+    status file): Coder no longer knows the workspace, and the UUID is what the hits file is named by. *Cost if
+    wrong:* an admin looks the UUID up; a small change in `workspace_rows`.
+35. **The logged-out check stays widened to `endswith("hits.json")` and the stream path**, so a logged-out fetch of
+    `hits.json` gets 401 like the stream, not a redirect to login a script cannot follow; the only difference left
+    is 401 versus redirect on paths that are no route. *Cost if wrong:* none worth a change (final review, left
+    alone).

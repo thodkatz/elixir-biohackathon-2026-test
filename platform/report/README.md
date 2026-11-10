@@ -12,7 +12,7 @@ from the first build on, kept after the workspace is gone. Design:
 | `tests/` | `pytest` against a fake Coder API |
 | `../coder/deploy/sperange-report.service`, `report.env.example` | The unit and its env file |
 | `canary_watch.py`, `canary_reader.py`, `canary_record.py`, `canarymatch.py`, `canary_hits.py` | The canary hit viewer's watcher: see *Canary hit watcher* below |
-| `hits_view.py` | Renders a hit to HTML and the participant page's body; used by both the watcher (`--html`, the standalone early output) and `sperange_report.py` (the participant page, *Canary hits pages* below) |
+| `hits_view.py` | Renders a hit to HTML, the participant page's body and the admin page's (its workspace rows), and reads the hits root and the watcher's status files; used by both the watcher (`--html`, the standalone early output) and `sperange_report.py` (both pages, *Canary hits pages* below) |
 | `../coder/deploy/sperange-canary-watch.service` | The watcher's unit |
 | `../ansible/roles/run_report/` | Writes the report and its sidecar at the first build of a workspace |
 | `../ansible/reports/run_report.md.j2` | The template the report starts from |

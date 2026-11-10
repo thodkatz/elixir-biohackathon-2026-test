@@ -426,3 +426,29 @@ def test_lock_release_lets_another_acquire(tmp_path):
     second.acquire("tok-2")
     assert second.holder() == "tok-2"
     second.release()
+
+
+def test_lock_holder_reports_a_stale_token_as_free(tmp_path):
+    # task 5 review, Important 4a: a process that died before release() (e.g. SIGKILLed) leaves
+    # its token in the file, but the flock itself goes with the process, so holder() must call
+    # this "free", not "held by that dead token forever".
+    path = tmp_path / "lock"
+    path.write_text("20261111T000000Z")
+    assert spe_eval.Lock(path).holder() is None
+    # a later acquire (as if from a fresh process) still works: the file is genuinely unheld.
+    lock = spe_eval.Lock(path)
+    lock.acquire("20261111T010000Z")
+    try:
+        assert lock.holder() == "20261111T010000Z"
+    finally:
+        lock.release()
+
+
+def test_lock_holder_reports_a_genuinely_held_lock(tmp_path):
+    path = tmp_path / "lock"
+    held = spe_eval.Lock(path)
+    held.acquire("tok-held")
+    try:
+        assert spe_eval.Lock(path).holder() == "tok-held"
+    finally:
+        held.release()

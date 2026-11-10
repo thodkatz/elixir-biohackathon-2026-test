@@ -391,14 +391,30 @@ class Lock:
         self._fd: int | None = None
 
     def holder(self) -> str | None:
-        """The token in the lock file, or `None` if the file does not exist or is empty: "a
-        missing lock file is 'not held'" (03)."""
+        """The token in the lock file, reported only when the lock is actually held: a missing
+        or empty file is "not held" (03), and so is a non-empty file whose `flock` a non-blocking
+        probe can still take -- a token left behind by a process that died before `release()`
+        ever ran (e.g. SIGKILLed past its SIGTERM grace period), rather than trusting the file's
+        text alone (task 5 review, Important 4a)."""
         try:
-            text = self.path.read_text()
+            text = self.path.read_text().strip()
         except FileNotFoundError:
             return None
-        text = text.strip()
-        return text or None
+        if not text:
+            return None
+        try:
+            fd = os.open(self.path, os.O_RDWR)
+        except FileNotFoundError:
+            return None
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return text  # genuinely held by another process
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return None  # a stale token in a file nothing holds: "free"
+        finally:
+            os.close(fd)
 
     def acquire(self, token: str) -> None:
         """Take the lock and write `token` (a run id) into it. Raises `LockHeld`, naming the

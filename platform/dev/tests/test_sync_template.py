@@ -168,6 +168,25 @@ def test_a_too_long_experiment_name_is_skipped_with_the_message(tmp_path):
     assert "skipped" in result.stderr
 
 
+def test_an_experiment_branch_without_the_experiments_template_is_skipped(tmp_path):
+    _, repo = make_repo(tmp_path)
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    # A commit lacking the experiments template, as on a branch cut before it existed.
+    subprocess.run(["git", "checkout", "--quiet", "-b", "old"], cwd=repo, check=True)
+    subprocess.run(["git", "rm", "--quiet", "-r", "platform/coder/experiments-template"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "old"], cwd=repo, env=env, check=True)
+    make_branch(repo, "experiment/old")
+    subprocess.run(["git", "checkout", "--quiet", "main"], cwd=repo, check=True)
+    log = tmp_path / "coder.log"
+    bin_dir = make_bin_dir(tmp_path, log)
+    result = run_sync(repo, bin_dir, tmp_path / "branches")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    assert not any(c[:2] == ["templates", "push"] and c[2] == "spe-x-old" for c in read_calls(log))
+    assert "experiment/old" in result.stderr and "skipped" in result.stderr
+
+
 def test_a_deleted_branchs_template_is_deleted(tmp_path):
     _, repo = make_repo(tmp_path)
     make_branch(repo, "template/to-delete")

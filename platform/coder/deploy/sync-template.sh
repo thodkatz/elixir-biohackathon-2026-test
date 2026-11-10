@@ -127,6 +127,12 @@ sync_one_branch() {
     ln -sfn "$SPE_REPO_DIR/platform/ansible/$d" "$wt/platform/ansible/$d" || return 1
   done
   if [[ $need_assemble == yes ]]; then
+    # A branch cut before the experiments template existed would fail here on every run,
+    # turning the service red and hiding real failures: skip it, as an invalid name is.
+    if [[ ! -x $wt/$subdir/assemble.sh ]]; then
+      echo "branch $kind/$name: its commit has no $subdir/assemble.sh; skipped" >&2
+      return 0
+    fi
     "$wt/$subdir/assemble.sh" "$wt" "$wt/$subdir" || return 1
   fi
   local bstate="$branch_dir/.pushed-$name_prefix$name"

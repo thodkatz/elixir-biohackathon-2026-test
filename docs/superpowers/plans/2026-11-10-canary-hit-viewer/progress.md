@@ -87,3 +87,22 @@ slice is the README's slices table; the handoffs say what each session did.
     operator reads the files.
 19. **The fixture run's journal is renamed to a session id** (`aaaaaaaa-…-444444444444.jsonl`) so the archive
     scan's session-id filter reads it. *Cost if wrong:* none.
+
+## Slice 3
+
+20. **Open WebUI's `chat` columns were checked against the v0.13.0 source** (the pinned
+    `spe_frontend_webui_image`), not a live instance: neither instance runs Open WebUI, and rebuilding one for a
+    column check is heavy. `chat`'s JSON history stays the complete store (`chat_message` is a dual write); a few
+    intermediate writes skip `updated_at` and are seen at the next write or on the archive scan. *Cost if wrong:*
+    a patched image's columns differ, and the reader reports `openwebui` unreadable, as designed.
+21. **`participant_body`'s `status` `{}` means no status file; `None` means the archived early output** (the
+    header reads "not watched yet" and "archived run"). *Cost if wrong:* a caller passing `None` for a live
+    workspace shows "archived run"; only the service and `--html` call it.
+22. **A status event is also sent when a stream opens**, not only when the status file changes, so a page
+    reopened after a stop shows the current state at once. *Cost if wrong:* one extra event per connection.
+23. **`terraform fmt` was not run on `main.tf`**: neither terraform nor opentofu is on the development machine,
+    and its nix store is read-only. The new `coder_app` copies the "Report" app's layout. *Cost if wrong:* a
+    formatting diff the next `fmt` makes; Coder parses the file either way.
+24. **The frontend label ("AG-UI", "Open WebUI") sits in the expanded hit, not its collapsed line**, as in the
+    spec's mockup (its second line), and "Group by run" groups the loud hits only; "also seen" stays one
+    collapsed block. *Cost if wrong:* a participant opens a hit to see its frontend.

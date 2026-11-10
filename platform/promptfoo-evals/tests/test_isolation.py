@@ -215,12 +215,18 @@ def test_snapshot_and_restore_scripts_round_trip(tmp_path):
     (vol / "sub").mkdir(parents=True)
     (vol / "a").write_text("1")
     (vol / "sub" / "b").write_text("2")
-    (roots["s"] / "eval-01" / "old").mkdir(parents=True)  # another key (arm, or an earlier build)
+    older_build = "2026-10-20T000000Z"  # a different stamp: an earlier build, pruned on this snapshot
+    (roots["s"] / "eval-01" / older_build).mkdir(parents=True)
+    same_build_other_arm = KEY + "+m1"  # same stamp, another arm: kept (Snapshots per arm)
+    (roots["s"] / "eval-01" / same_build_other_arm).mkdir(parents=True)
     (roots["s"] / "eval-01" / KEY / "stale.tar").parent.mkdir(parents=True)
     (roots["s"] / "eval-01" / KEY / "stale.tar").write_text("a previous snapshot of this same key")
     assert _sh(isolation.SNAP_SH, roots, "eval-01", KEY).returncode == 0
     assert (roots["s"] / "eval-01" / KEY / "COMPLETE").read_text() == KEY + "\n"
-    assert (roots["s"] / "eval-01" / "old").exists()  # another key's snapshot stays (Snapshots per arm)
+    # an earlier build's directory is pruned (task 5 review, Minor: piling up forever otherwise):
+    assert not (roots["s"] / "eval-01" / older_build).exists()
+    # another arm of the SAME build stays (Snapshots per arm):
+    assert (roots["s"] / "eval-01" / same_build_other_arm).exists()
     assert not (roots["s"] / "eval-01" / KEY / "stale.tar").exists()  # this key's own stale content goes
     (vol / "a").unlink()
     (vol / "c").write_text("left by a test")
@@ -259,7 +265,7 @@ def test_snapshot_saves_every_volume_and_marks_complete(hdir):
     for vol in isolation.VOLUMES:
         assert f"{vol}:/v/{vol}:ro" in call
     assert f"{isolation.SNAPSHOT_ROOT}:/s" in call and call[-2:] == ["eval-01", KEY]
-    assert 'd="/s/$1/$2"; rm -rf "$d"' in call[-4] and "COMPLETE" in call[-4]
+    assert 'd="/s/$i/$k"; rm -rf "$d"' in call[-4] and "COMPLETE" in call[-4]
     assert vm.index("docker stop") < vm.index("tar -cf") < vm.index("--force-recreate") < vm.index("service-info")
 
 
@@ -663,8 +669,11 @@ def test_after_all_restore_failure_is_loud_and_raised(hooked, hdir, monkeypatch,
 
 def test_before_all_refuses_a_snapshot_over_an_earlier_builds_dirty_stack(hooked, hdir, monkeypatch):
     _dirty(hdir, "2026-01-01T000000Z")
-    with pytest.raises(isolation.IsolationError, match="not restored before this rebuild.*ACCEPT_DIRTY"):
+    with pytest.raises(isolation.IsolationError, match="not restored before this rebuild.*ACCEPT_DIRTY") as exc:
         isolation.extension_hook("beforeAll", {"suite": {}})
+    # task 5 review, Minor: "destroy.yml, then create.yml" is a controller remedy a workspace has
+    # no destroy.yml for; the message must also name a workspace one.
+    assert "spe-apply all" in str(exc.value) and "destroy.yml" in str(exc.value)
     assert hooked["snapshot"] == 0
     hooked["exists"] = True  # a snapshot of this build: the marker is not consulted
     isolation.extension_hook("beforeAll", {"suite": {}})

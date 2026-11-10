@@ -323,6 +323,16 @@ def test_run_existing_reports_dir_is_refused(setup):
     assert "already exists" in p.stderr
 
 
+@pytest.mark.parametrize("repeat", ["0", "-1", "x"])
+def test_run_bad_repeat_is_rejected_up_front(setup, repeat):
+    # task 5 review, Minor: run.sh's own usage check only runs after a full `spe-apply all`,
+    # marking the arm `failed`; argparse must catch a bad --repeat before any of that.
+    run, _popen, calls, _repo, _home, logs = setup
+    p = run("run", "one-arm", "--repeat", repeat)
+    assert p.returncode == 2, p.stdout
+    assert calls(logs["apply"]) == []
+
+
 def test_run_refuses_while_another_run_holds_the_lock(setup):
     run, popen, _calls, _repo, home, _logs = setup
     holder = popen("run", "one-arm", env={"FAKE_RUN_SH_SLEEP": "1", "SPE_EVAL_RUN_ID": "20261110T130000Z"})

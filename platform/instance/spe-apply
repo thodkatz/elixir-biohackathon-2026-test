@@ -43,8 +43,9 @@
 # --help/-h/help refuses (exit 2) while an `spe-eval run` or `arm` holds ~/spe-eval/lock
 # (decision 11; a spe build never has that file, so a plain build is unaffected), unless
 # SPE_EVAL_LOCK in the environment equals the token the holder wrote into it -- spe-eval sets
-# it only for its own calls. status and logs stay available during a run (spe-eval status's own
-# "wait until the stack answers" calls spe-apply status), and --help never touches the stack.
+# it only for its own calls. status and logs stay available during a run (spe-eval's own "wait
+# until the stack answers" probes the agent's /healthz directly, never spe-apply status), and
+# --help never touches the stack.
 set -euo pipefail
 
 dir=${SPE_FRONTEND_DIR:-/home/ubuntu/spe-frontend}

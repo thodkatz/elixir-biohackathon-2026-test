@@ -24,11 +24,19 @@
       register: spe_eval_archive_dir
 
     - name: Pack reports/, promptfoo/ (always present, made by vm_handoff.yml) and windows.jsonl (if any)
+      # --warn=no-file-changed quiets tar's warning for "file changed as we read it" (a detached
+      # run still writing progress.jsonl or its sqlite database while this archive is being
+      # packed, e.g. on a workspace stop while an eval is in flight); that case alone is tar's
+      # exit 1, a real error (a missing file, a write failure) still exits >1 (task 5 review,
+      # Minor), so failed_when keeps catching those.
       ansible.builtin.command:
         argv: >-
-          {{ ['tar', '-czf', spe_eval_archive_dir.path ~ '/spe-eval-export.tar.gz', '-C', spe_eval_dir,
-              'reports', 'promptfoo'] + (['windows.jsonl'] if spe_eval_windows.stat.exists else []) }}
+          {{ ['tar', '--warn=no-file-changed', '-czf', spe_eval_archive_dir.path ~ '/spe-eval-export.tar.gz',
+              '-C', spe_eval_dir, 'reports', 'promptfoo'] +
+             (['windows.jsonl'] if spe_eval_windows.stat.exists else []) }}
+      register: spe_eval_tar
       changed_when: true
+      failed_when: spe_eval_tar.rc > 1
 
     - name: Fetch the archive
       ansible.builtin.fetch:

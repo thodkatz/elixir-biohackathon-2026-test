@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import tarfile
+import time
 from pathlib import Path
 
 import pytest
@@ -102,6 +103,62 @@ def test_export_packs_windows_jsonl_when_present(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
     names = bundle_names(out / "archive-bundle-spe-eval.tar.gz")
     assert any(n.endswith("windows.jsonl") for n in names), names
+
+
+def test_export_tolerates_a_file_changing_while_it_tars(tmp_path):
+    # task 5 review, Minor: a detached run still writing progress.jsonl or the promptfoo sqlite
+    # database while a workspace stop packs the archive makes tar exit 1 ("file changed as we
+    # read it"), not a real error; export_spe_eval.yml must not fail the archive over it.
+    #
+    # Reproduced reliably by writing to the file continuously for as long as the pack step runs
+    # (a one-off write race, timed against tar's own read speed, is not reliable), stopped once
+    # the playbook call returns.
+    import threading
+
+    spe_eval_dir = tmp_path / "spe-eval"
+    spe_eval_dir.mkdir()
+    make_spe_eval_dir(spe_eval_dir, with_windows_jsonl=False)
+    big = spe_eval_dir / "promptfoo" / "promptfoo.db"
+    big.write_bytes(b"0" * 300_000_000)  # large enough that tar is still reading it as the writer runs
+    out = tmp_path / "out"
+    out.mkdir()
+
+    stop = threading.Event()
+
+    def keep_growing():
+        while not stop.is_set():
+            with big.open("ab") as f:
+                f.write(b"x")
+            time.sleep(0.005)
+
+    t = threading.Thread(target=keep_growing)
+    t.start()
+    try:
+        proc = run_play(tmp_path, EXPORT_PLAY, "export.yml",
+                        {"spe_eval_dir": str(spe_eval_dir), "spe_output_dir": str(out)})
+    finally:
+        stop.set()
+        t.join(timeout=10)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert (out / "archive-bundle-spe-eval.tar.gz").is_file()
+
+
+def test_export_still_fails_on_a_real_tar_error(tmp_path):
+    # The tolerance above is only for tar's own exit 1; a real error (here, a file tar cannot even
+    # open) exits 2 and must still fail the task.
+    spe_eval_dir = tmp_path / "spe-eval"
+    spe_eval_dir.mkdir()
+    make_spe_eval_dir(spe_eval_dir, with_windows_jsonl=False)
+    unreadable = spe_eval_dir / "promptfoo" / "promptfoo.db"
+    unreadable.chmod(0o000)
+    out = tmp_path / "out"
+    out.mkdir()
+    try:
+        proc = run_play(tmp_path, EXPORT_PLAY, "export.yml",
+                        {"spe_eval_dir": str(spe_eval_dir), "spe_output_dir": str(out)})
+    finally:
+        unreadable.chmod(0o644)
+    assert proc.returncode != 0, proc.stdout + proc.stderr
 
 
 def test_export_removes_its_own_staging_directory_from_the_vm(tmp_path):

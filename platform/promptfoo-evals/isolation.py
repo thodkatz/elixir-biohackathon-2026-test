@@ -56,8 +56,18 @@ LABELS_FMT = "|".join(["{{.Name}}"] + [f'{{{{index .Config.Labels "com.docker.co
                                        ("project", "project.working_dir", "project.config_files", "service")])
 API_CHECK = ('for u in "$TRS_BASE/service-info" "$WES_BASE/service-info" "$DRS_BASE/service-info"; do '
              'curl -s -o /dev/null -w "%{http_code} " "$u"; done')
-SNAP_SH = ('set -eu; d="/s/$1/$2"; rm -rf "$d"; mkdir -p "$d"; '
-           'for v in /v/*; do tar -cf "$d/$(basename "$v").tar" -C "$v" .; done; echo "$2" > "$d/COMPLETE"')
+SNAP_SH = ('set -eu; i="$1"; k="$2"; stamp="${k%%+*}"; '
+           # Prune siblings from an older build (a different stamp) before taking this one's
+           # snapshot (task 5 review, Minor: a rebuild in place must not pile up every earlier
+           # build's directory forever); a sibling of the SAME build (this stamp, another arm's
+           # mitigation suffix) stays, so two arms keep their own snapshot (Snapshots per arm).
+           'if [ -d "/s/$i" ]; then for sib in "/s/$i"/*; do '
+           '[ -e "$sib" ] || continue; '
+           'b=$(basename "$sib"); '
+           'case "$b" in "$stamp") ;; "$stamp"+*) ;; *) rm -rf "$sib" ;; esac; '
+           'done; fi; '
+           'd="/s/$i/$k"; rm -rf "$d"; mkdir -p "$d"; '
+           'for v in /v/*; do tar -cf "$d/$(basename "$v").tar" -C "$v" .; done; echo "$k" > "$d/COMPLETE"')
 RESTORE_SH = ('set -eu; d="/s/$1/$2"; for v in /v/*; do n=$(basename "$v"); test -f "$d/$n.tar"; '
               'find "$v" -mindepth 1 -delete; tar -xpf "$d/$n.tar" -C "$v"; done')
 _INSTANCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
@@ -484,9 +494,10 @@ def refuse_dirty_rebuild(directory: Path) -> None:
     if left == _build(directory) or os.environ.get(ACCEPT_DIRTY) == "1":
         return
     raise IsolationError(f"the run of the previous build or arm ({left}) was not restored before this rebuild, so "
-                         "a snapshot now would hold its state: rebuild from a clean stack (destroy.yml, then "
-                         "create.yml), or restore before rebuilding next time; set "
-                         f"{ACCEPT_DIRTY}=1 to snapshot anyway")
+                         "a snapshot now would hold its state: restore before rebuilding next time, or rebuild "
+                         "from a clean stack -- on the controller, destroy.yml then create.yml; in a workspace "
+                         "(no destroy.yml here), spe-apply all (its own baseline restore clears this) or a new "
+                         f"workspace; set {ACCEPT_DIRTY}=1 to snapshot anyway")
 
 
 def guarded_snapshot(directory: Path) -> None:

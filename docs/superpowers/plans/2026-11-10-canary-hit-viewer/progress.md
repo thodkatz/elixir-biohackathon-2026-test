@@ -34,7 +34,7 @@ slice is the README's slices table; the handoffs say what each session did.
 2. **The on-stop scan runs `scan_archive` over the whole run directory** with the workspace's `seen` set and
    generation, not from the offsets reached: the dedup keys (no `source` in them) drop what polling found. *Cost if
    wrong:* one extra read of a run's archive.
-3. **`SshTransport` puts its `-o` options before `vm_argv`'s target**, and runs `sudo python3 -` locally when
+3. **`SshTransport` puts its `-o` options before `vm_argv`'s target**, and runs `sudo -n python3 -` locally when
    `vm_argv` is `[]`. *Cost if wrong:* none.
 4. **The watcher caps a reader reply at 32 MiB** (a file with no newline would otherwise be shipped whole); past
    it the poll fails (`unreachable`). Only the participant's own workspace can be stalled this way. *Cost if
@@ -67,3 +67,23 @@ slice is the README's slices table; the handoffs say what each session did.
     on the tick its run directory appears. *Cost if wrong:* a stop only discovery can tell (a run directory of the
     same instance name that is another workspace's), a rebuild (new generation) or a new workspace is noticed up to
     15 s later; a rebuild's first polls within that window read the old generation's offsets.
+14. **Local review round (#78 comment): findings 1–5 fixed.** A write failure fails the poll (offsets not
+    committed) or leaves an archived run unscanned, retried after 60 s; a stop missed across a rebuild is scanned
+    with the last generation's keys before their reset; a `hosts.yml` rewritten between discoveries is not polled
+    until rediscovered (so ruling 13's last cost no longer holds); the archive scan reads only `<session id>.jsonl`
+    journals and logs no file name; a stop without `index.md` is scanned `ARCHIVE_WAIT` (600 s) past its run
+    directory's mtime, `stopped` with the note `archive incomplete`. *Cost if wrong:* none beyond 15–19.
+15. **A hits-file write failure during a poll shows as `unreachable`** (the failed-poll path and its 60 s
+    back-off), not a state of its own. *Cost if wrong:* a portal disk problem reads as the instance being
+    unreachable on the pages; the log names `OSError`.
+16. **Before a reset, a past generation's run directories are scanned without waiting for `index.md`**: the
+    rebuild that followed means their archive is over. *Cost if wrong:* an archive still being written when the
+    rebuild lands is scanned in part, and the rest is never scanned.
+17. **A run scanned as incomplete is not scanned again** if its `index.md` appears later. *Cost if wrong:* hits
+    only in files the archive wrote more than 10 minutes late are missed.
+18. **`RecordError` messages are logged by class only**, superseding ruling 5: `read_hosts`'s `cannot read
+    <path>` names the output directory, that is the instance's name. Run directory names are no longer logged
+    either (they carry it too). *Cost if wrong:* the log names which workspace, not which file or run; the
+    operator reads the files.
+19. **The fixture run's journal is renamed to a session id** (`aaaaaaaa-…-444444444444.jsonl`) so the archive
+    scan's session-id filter reads it. *Cost if wrong:* none.

@@ -104,14 +104,17 @@ Decisions 1, 3, 10; *Watcher* (*How it pulls*, *Reader output is untrusted*, *On
     (run directories already scanned). After a restart a journal is re-read from its open run's `run_start`,
     the dedup keys drop the repeats.
   - Status per workspace in `<hits_dir>/<id>.status.json` (0640): `state`, `since`, `last_poll`, `hits`
-    (count per kind), `note` (e.g. "canary record is encrypted", "hits file full").
+    (count per kind), `note` (e.g. "canary record is encrypted", "hits file full", "archive incomplete").
   - `Watcher(hits_dir, reports_dir, runs_dir, output_root, transport).tick(now: float) -> None`: discovers (at most
-    every 15 s; a new run directory newer than `hosts.yml` marks the workspace stopped on the tick it appears), polls
-    each running workspace whose next poll is due (3 s; 60 s after a failure, `state` `unreachable`), scans each
-    new run directory whose `report.json` names a scanned workspace once, and only once its `index.md` exists
-    (the archive writes it last; `report.json` comes before the journals and exports,
-    `test_scan_waits_for_index_md`) (from the offsets reached, then
-    `state` `stopped`), and writes state and status. `run_forever()` calls `tick` every second.
+    every 15 s; a new run directory newer than `hosts.yml` marks the workspace stopped on the tick it appears; a
+    `hosts.yml` whose mtime changed since is not polled until the next tick discovers again), polls each running
+    workspace whose next poll is due (3 s; 60 s after a failure, `state` `unreachable`; a failed write of the hits
+    file is a failed poll), scans each new run directory whose `report.json` names a scanned workspace once, once
+    its `index.md` exists (the archive writes it last; `report.json` comes before the journals and exports,
+    `test_scan_waits_for_index_md`) or, without it, `ARCHIVE_WAIT` (600 s) past the directory's mtime (`note`
+    "archive incomplete"), over the whole directory with the workspace's dedup keys (then `state` `stopped`; a
+    failed write leaves it to retry after 60 s; on a new generation, the last one's run directories are scanned
+    with its keys before they are reset), and writes state and status. `run_forever()` calls `tick` every second.
   - Untrusted output: a line that is not JSON, or whose fields have the wrong type, is dropped (in polling and
     in the on-stop scan; a scan that still fails marks its run scanned); at most 200 hits per workspace per poll; `HitsFile`
     at 10 MB stops writing (`state` `capped`); a reader reply that is not the expected shape is a failed poll.

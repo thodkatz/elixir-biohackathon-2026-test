@@ -80,8 +80,8 @@ snapshot replaces only its own key's directory and the marker records the key, m
 ## While a run is going
 
 A run takes the workspace over: every test restores the stack, so the chat is not usable meanwhile and its answers
-would be reset. The Run evaluation app says so before it starts and prints a progress line per test (from the
-`afterEach` hook). The restore leaves chats, the agent's run log and Open WebUI's data alone, as it does today; what
+would be reset. `spe-eval run` says so before it starts, and `spe-eval status` shows the test in progress (from the `afterEach`
+hook). The restore leaves chats, the agent's run log and Open WebUI's data alone, as it does today; what
 a participant registered by hand in TRS or WES is reset to the snapshot, which is taken on an arm's first run.
 
 ## Canary hits

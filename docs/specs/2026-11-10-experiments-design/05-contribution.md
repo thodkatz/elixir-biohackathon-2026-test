@@ -10,8 +10,8 @@
    - the mitigation: its Ansible change guarded by `spe_mitigate_<id>` (default off), and `mitigations/<id>.yml`;
    - its tests, `tests/experiments/<name>.yaml`;
    - the experiment, `experiments/<name>.yml`, with its `experiment:` block and `parameters.experiment: <name>`.
-3. **Try it live**: `spe-eval arm mitigated` to apply it, chat with the agent; then **Run evaluation** and
-   **Evaluations** for the two arms.
+3. **Try it live**: `spe-eval arm mitigated` to apply it, chat with the agent; then `spe-eval run` for the two
+   arms, read with `spe-eval results` or in **Evaluations**.
 4. **Check**: `python3 check_experiment.py <name>`. (Every step has a command for a coding agent: 07.)
 5. **Build it fresh** (when the change acts only at creation, or to confirm a clean build): push
    `experiment/<name>`; the portal makes `spe-x-<name>`, whose form already offers the new mitigation and experiment.
@@ -69,7 +69,7 @@ Utility tests pass with the mitigation on: yes / no
 ```
 
 The result is `matrix.py counts` output: labels and counts only, never an answer or a token, so it can be posted.
-A reviewer who wants to see it reproduced creates a workspace from `spe-x-<name>` and presses Run evaluation.
+A reviewer who wants to see it reproduced creates a workspace from `spe-x-<name>` and runs `spe-eval run`.
 
 ## The guides
 

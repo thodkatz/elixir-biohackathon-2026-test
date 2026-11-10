@@ -16,7 +16,7 @@ Nothing experiment-specific is written in Terraform: options come from files, th
 | Presets | `testbeds/*.yml` | one per experiment file, `experiments/*.yml` at the repository root |
 | Parameters | samples, tiers, workflows, canaries, flavor, seed, smoke test | the same, plus `experiment` and `mitigations` |
 | Build | `run-ansible.sh create.yml` / `destroy.yml` | the same script and playbooks, with `spe_experiments: true` and the experiment's values |
-| Apps | Open WebUI, AG-UI chat, Rebuild, Report, Canary hits | the same, plus Run evaluation and Evaluations (04) |
+| Apps | Open WebUI, AG-UI chat, Rebuild, Report, Canary hits | the same, plus Evaluations (04) |
 | Branch templates | `template/<name>` → `spe-<name>` | `experiment/<name>` → `spe-x-<name>` |
 
 The Ansible side of experiments (the VM-local hand-off, Node and promptfoo on the host, `spe-eval`, `evals-view`,
@@ -44,7 +44,7 @@ The existing parameters, as in `spe`, plus:
 Each experiment file is also a preset: its `parameters` set the form, including `experiment` (its own stem) and
 `mitigations` (its `base`: the workspace starts in the baseline arm). `spe-eval` switches arms on the running VM
 (03); the form's `mitigations` is the arm the workspace is created in and returns to. Every workspace from this
-template has an experiment, so Run evaluation always has something to run.
+template has an experiment, so `spe-eval run` always has something to run.
 
 Changing either on a running workspace rebuilds it (stop is destroy, start is create): the form chooses a build,
 `spe-eval` compares arms.

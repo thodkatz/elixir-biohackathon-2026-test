@@ -1,4 +1,4 @@
-# The viewer and the apps
+# The viewer and its app
 
 ## `evals-view`
 
@@ -24,16 +24,13 @@ and the few writes the reading UI needs, and answers 403 to everything else. Whi
 settled by the plan with a test against 0.125.1's routes (`dist/src/server/index.js`): the default is to refuse.
 Without keys a run would fail anyway; the proxy makes it refuse plainly instead.
 
-## Apps
+## The app
+
+One app, **Evaluations**. Runs are started with `spe-eval run` (07), by the participant's coding agent or in the
+workspace terminal; a button that only types that command adds nothing, and would start a run nobody asked to
+detach or watch.
 
 ```hcl
-resource "coder_app" "run_evaluation" {
-  agent_id     = coder_agent.main.id
-  slug         = "run-evaluation"
-  display_name = "Run evaluation"
-  command      = "spe-eval run; echo; echo '== Evaluation finished. Close this tab, or use this shell.'; exec bash -l"
-}
-
 resource "coder_app" "evaluations" {
   agent_id     = coder_agent.main.id
   slug         = "evaluations"
@@ -45,9 +42,7 @@ resource "coder_app" "evaluations" {
 }
 ```
 
-Run evaluation ends in a shell for the reason Rebuild does: the web terminal reruns its command on reconnect, so
-a bare command would start a second run (which the lock would refuse, but noisily). Evaluations is owner-only, like
-the chats: the results hold canaries and the agent's answers.
+Evaluations is owner-only, like the chats: the results hold canaries and the agent's answers.
 
 ## What it does not show
 

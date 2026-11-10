@@ -2,8 +2,8 @@
 
 Most participants will run the whole path through a coding agent: Coder Agents in the dashboard, or Claude Code,
 Codex or opencode in the workspace terminal. (This is the participant's helper, not the SPE agent under test.) So
-every step a person does with a button, an agent can do with a command, read back as text, and judge from its
-exit code. The buttons (Run evaluation, Evaluations) are views over the same commands, never the only way.
+every step is a command an agent can run, read back as text, and judge from its exit code. The one app,
+Evaluations, is a view for people over what `spe-eval results` prints; there is no run button.
 
 ## One entry point for the agent
 
@@ -14,10 +14,15 @@ ladder experiments as worked examples. Nothing an agent needs is only in a UI or
 
 ## Commands
 
+How to run the tests is these commands, in this order: `test` after each edit (offline), `arm` to try a build by
+hand, `run` to measure both arms, `results` to read them. The workspace guide's *Experiments* section and
+`CONTRIBUTING.md` give the same table; `spe-eval --help` prints it.
+
 | Step | Command | For an agent |
 |---|---|---|
 | Start | `spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--from <experiment>]` | writes the skeleton: `experiments/<name>.yml`, `mitigations/<name>.yml` with a `spe_mitigate_<name>` switch, its default in `group_vars`, `tests/experiments/<name>.yaml` with one labelled test, and threat or path files from their templates when the ids are new; prints each path and the `TODO`s to fill |
 | Check | `check_experiment.py <name> [--json]` | each problem as `file:line: id: what is wrong: what to do`; `--json` the same as a list |
+| Test offline | `spe-eval test` | the offline checks, no instance and no model: the evaluations' unit tests (`pytest` in `platform/promptfoo-evals`, which lint the catalogue and every assertion a test names) and the checker; seconds, so an agent runs it after every edit |
 | Try | `spe-eval arm baseline\|mitigated` | applies one arm and exits when the stack answers |
 | Run | `spe-eval run [--repeat N] [--detach]` | `--detach` starts the run in the background (a user systemd unit) and returns at once with its id; the agent's own command timeouts never cut a run short |
 | Watch | `spe-eval status [--json]` | the lock, the run id, arm, test *k* of *n*, last error; `spe-eval wait [--timeout S]` blocks until the run ends or the timeout passes, for agents that can wait in bounded steps |

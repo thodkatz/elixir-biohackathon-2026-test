@@ -1,12 +1,13 @@
 # Slice 1 early output: hit counts over the portal's archive (2026-11-10)
 
-`canary_watch.py --archive` (slice 1 at `d3e56b7`) over all 50 runs in `/data-share/runs/` on the portal VM, run
+`canary_watch.py --archive` (slice 1 at `d3e56b7`) over all 51 runs in `/data-share/runs/` on the portal VM, run
 with `sudo python3 -I` from a temporary copy (removed). Pages: `/data-share/canary-hits/early-output/<run>.html`
 (root:root, dir 0750, files 0640; the portal has no `sperange-report` group, so root alone, ruling in the PR).
 No `--api-host`: the archive keeps none and the instances' output directories are gone, so any URL host in a
 call's arguments would count as `sent`; none did.
 
-Runs with hits (kind/frontend: count). The other 44 have none: 42 hold no journal, run log or chat with a
+Runs with hits (kind/frontend: count). The other 45 have none: `2026-11-10T020630Z_cw-thodkatz-thodkatz-workspace`,
+archived while the scan ran (51 pages, one per run, recounted after), has 0; 42 hold no journal, run log or chat with a
 canary-bearing turn, and `cw-landfried-pr17-test` and `cw-landfried-upd-test` (one journal, four agent runs each)
 leaked nothing.
 

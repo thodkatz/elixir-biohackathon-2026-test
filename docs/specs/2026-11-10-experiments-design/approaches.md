@@ -20,7 +20,7 @@
 
 | | Trade-off | |
 |---|---|---|
-| **Options read from files** (`fileset()` over `mitigations/` and testbeds, as presets already are) | a contribution adds files, never Terraform | **chosen** |
+| **Options read from files** (`fileset()` over testbeds, as presets already are, and over `mitigations/`, which the sync copies into the pushed template directory) | a contribution adds files, never Terraform | **chosen** |
 | One `coder_parameter` per mitigation | explicit, but every contribution edits `main.tf` | rejected |
 | A `level` parameter L0–L3 | simple for the ladder; no place for a participant's mitigation, and a level bundles controls a participant cannot pick apart | rejected: levels become testbeds |
 

@@ -4,6 +4,14 @@ One template, `spe` (`platform/coder/template/main.tf`), builds every experiment
 written in Terraform: options come from files, the way presets already come from `testbeds/*.yml`. A branch
 `template/<name>` gets the same, from its own files, as `spe-<name>`.
 
+## Where the options come from
+
+The portal pushes only `platform/coder/template/` to Coder (`deploy/sync-template.sh`), so Terraform's `fileset()`
+sees only files there. Testbeds already live there. Mitigations stay at the repository root beside threats and
+paths (01), and the sync copies `mitigations/*.yml` into the directory it pushes (a git-ignored
+`platform/coder/template/mitigations/`) for `spe` and for each branch template from that branch's worktree. The
+form so always matches the code the template builds with.
+
 ## Parameters
 
 Two new parameters, after the existing ones:
@@ -30,7 +38,9 @@ switches) is merged, in this order, with:
 1. every selected mitigation's `on` values;
 2. the experiment testbed's `vars`;
 3. `spe_experiment: <stem or "">` and `spe_mitigations: [ids]`, which `create.yml` records in `hardening.json` and in
-   `instances/local.yml`, so `spe-eval` on the VM knows the experiment and the arm it was built in.
+   `instances/local.yml`, so `spe-eval` on the VM knows the experiment and the arm it was built in. These two, the selected mitigations'
+   values and the experiment's `vars` join `spe_local_vars` (`group_vars/all.yml`), so `spe-apply` and a Rebuild
+   re-apply the build's arm instead of falling back to every mitigation off.
 
 Unselected mitigations contribute nothing, so their Ansible defaults (`off`) apply. `create.yml` checks `requires`
 and `conflicts` from the mitigation files and refuses a bad combination before creating anything.
@@ -38,7 +48,8 @@ and `conflicts` from the mitigation files and refuses a bad combination before c
 ## Apps
 
 Two `coder_app`s, defined in 04: **Run evaluation** and **Evaluations**. Both are on every workspace; with
-`experiment: none`, Run evaluation runs the ladder suite once on the build as it is (no arms).
+`experiment: none`, Run evaluation refuses and lists the experiment testbeds (a plain build has no test receiver
+and runs Open WebUI, so the ladder's metrics would not hold on it; `ladder-l0` is the plain build made measurable).
 
 ## Testbeds
 

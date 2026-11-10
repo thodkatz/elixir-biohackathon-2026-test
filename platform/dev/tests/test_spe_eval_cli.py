@@ -3,12 +3,20 @@ command table): `arm`, `run` (with `--detach`), `status`, `wait`, `runs`. Fakes 
 `run.sh` and `systemd-run` so no real Ansible, Docker or model call happens; a tiny two-experiment
 catalogue (`one-arm`, `two-arm`) keeps each test fast and independent of the real `experiments/`/
 `mitigations/` files (those are exercised against the real catalogue by `test_spe_eval.py`).
+
+The health wait (task 4 review, Critical 1) probes a real `http.server` on `127.0.0.1`, not a
+fake `spe-apply status` line: the real script prints the `/healthz` response *body*
+(`{"status": "ok", ...}`), not a bare status code, so a fake that invented `agent /healthz: 200`
+was asserting a contract the real script does not have.
 """
+import http.server
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -20,10 +28,7 @@ SPE_EVAL = HERE / "instance" / "spe-eval"
 
 FAKE_SPE_APPLY = """#!/bin/sh
 echo "$*" >> "$FAKE_SPE_APPLY_LOG"
-case "$1" in
-  status) echo "agent /healthz: ${FAKE_HEALTH_STATUS:-200}"; exit 0 ;;
-  *) exit "${FAKE_SPE_APPLY_EXIT:-0}" ;;
-esac
+exit "${FAKE_SPE_APPLY_EXIT:-0}"
 """
 
 # Mirrors run.sh's own --reports-dir contract (gate-notes.json always written, run.json only on
@@ -54,10 +59,63 @@ fi
 exit "$code"
 """
 
+# Starts, in the background, logs its call and returns at once (as the real systemd-run does:
+# task 4 review, Important 3 needs the *child* to take the lock asynchronously so --detach's own
+# poll loop has something real to wait for). Unless FAKE_SYSTEMD_RUN_NO_ACQUIRE is set, the
+# background subshell takes the lock file's flock itself (mirroring spe_eval.Lock's own format:
+# the token alone, written once the flock succeeds) and holds it for FAKE_SYSTEMD_RUN_HOLD
+# seconds, simulating the detached `spe-eval run` child actually running.
 FAKE_SYSTEMD_RUN = """#!/bin/sh
 echo "$*" >> "$FAKE_SYSTEMD_RUN_LOG"
+if [ -n "${FAKE_SYSTEMD_RUN_NO_ACQUIRE:-}" ]; then exit 0; fi
+token=""
+for a in "$@"; do
+  case "$a" in
+    --setenv=SPE_EVAL_RUN_ID=*) token=${a#--setenv=SPE_EVAL_RUN_ID=} ;;
+  esac
+done
+lock_file="$HOME/spe-eval/lock"
+mkdir -p "$(dirname "$lock_file")"
+(
+  exec 9>"$lock_file"
+  flock 9
+  printf '%s' "$token" >&9
+  sleep "${FAKE_SYSTEMD_RUN_HOLD:-0.5}"
+) &
 exit 0
 """
+
+
+class _HealthServer:
+    """A real HTTP server answering `/healthz` on `127.0.0.1`, for `_wait_for_stack`'s direct
+    probe. `status_code`/`body` mirror what the real agent's `/healthz` sends (200
+    `{"status": "ok", ...}` when ready, 503 `{"status": "starting", ...}` otherwise)."""
+
+    def __init__(self, status_code: int = 200, body: bytes = b'{"status": "ok", "tools": 1}'):
+        status, payload = status_code, body
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 (BaseHTTPRequestHandler's own naming)
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *args):  # keep test output clean
+                pass
+
+        self._httpd = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self._httpd.server_port}/healthz"
+
+    def close(self) -> None:
+        self._httpd.shutdown()
+        self._httpd.server_close()
 
 
 @pytest.fixture
@@ -108,29 +166,32 @@ def setup(tmp_path):
     log_apply = tmp_path / "spe-apply.log"
     log_run_sh = tmp_path / "run-sh.log"
     log_systemd = tmp_path / "systemd-run.log"
+    health = _HealthServer(200)  # the default: every arm's apply is answered at once
+
+    def base_env(env):
+        return {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(home),
+                "SPE_REPO_DIR": str(repo), "FAKE_SPE_APPLY_LOG": str(log_apply),
+                "FAKE_RUN_SH_LOG": str(log_run_sh), "FAKE_SYSTEMD_RUN_LOG": str(log_systemd),
+                "SPE_EVAL_HEALTH_URL": health.url, "SPE_EVAL_HEALTH_INTERVAL": "0.01",
+                "SPE_EVAL_HEALTH_TIMEOUT": "0.3", "SPE_EVAL_WAIT_INTERVAL": "0.05",
+                "SPE_EVAL_DETACH_WAIT_TIMEOUT": "3", "SPE_EVAL_DETACH_WAIT_INTERVAL": "0.02",
+                **(env or {})}
 
     def run(*args, env=None, timeout=20):
-        full_env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(home),
-                    "SPE_REPO_DIR": str(repo), "FAKE_SPE_APPLY_LOG": str(log_apply),
-                    "FAKE_RUN_SH_LOG": str(log_run_sh), "FAKE_SYSTEMD_RUN_LOG": str(log_systemd),
-                    "SPE_EVAL_HEALTH_INTERVAL": "0.01", "SPE_EVAL_HEALTH_TIMEOUT": "0.3",
-                    "SPE_EVAL_WAIT_INTERVAL": "0.05", **(env or {})}
-        return subprocess.run([sys.executable, str(SPE_EVAL), *args], env=full_env, capture_output=True,
+        return subprocess.run([sys.executable, str(SPE_EVAL), *args], env=base_env(env), capture_output=True,
                                text=True, timeout=timeout)
 
     def popen(*args, env=None):
-        full_env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(home),
-                    "SPE_REPO_DIR": str(repo), "FAKE_SPE_APPLY_LOG": str(log_apply),
-                    "FAKE_RUN_SH_LOG": str(log_run_sh), "FAKE_SYSTEMD_RUN_LOG": str(log_systemd),
-                    "SPE_EVAL_HEALTH_INTERVAL": "0.01", "SPE_EVAL_HEALTH_TIMEOUT": "0.3",
-                    "SPE_EVAL_WAIT_INTERVAL": "0.05", **(env or {})}
-        return subprocess.Popen([sys.executable, str(SPE_EVAL), *args], env=full_env, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, text=True)
+        return subprocess.Popen([sys.executable, str(SPE_EVAL), *args], env=base_env(env),
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     def calls(log_path: Path) -> list[str]:
         return log_path.read_text().splitlines() if log_path.exists() else []
 
-    return run, popen, calls, repo, home, {"apply": log_apply, "run_sh": log_run_sh, "systemd": log_systemd}
+    try:
+        yield run, popen, calls, repo, home, {"apply": log_apply, "run_sh": log_run_sh, "systemd": log_systemd}
+    finally:
+        health.close()
 
 
 def wait_until_locked(home: Path, timeout: float = 5.0) -> None:
@@ -152,14 +213,18 @@ def test_arm_one_arm_experiment_applies_and_waits(setup):
     assert "applied" in p.stdout
     apply_calls = calls(logs["apply"])
     assert any(c.startswith("all -e @") for c in apply_calls)
-    assert any(c == "status" for c in apply_calls)
 
 
 def test_arm_exits_1_when_the_stack_never_answers(setup):
+    # task 4 review, Critical 1: a real (never-ready) health server, not a fake spe-apply line.
     run, _popen, _calls, _repo, _home, _logs = setup
-    p = run("arm", "one-arm", "baseline", env={"FAKE_HEALTH_STATUS": "503"})
-    assert p.returncode == 1, p.stdout
-    assert "did not answer in time" in p.stderr
+    unhealthy = _HealthServer(503, b'{"status": "starting", "reason": "still loading"}')
+    try:
+        p = run("arm", "one-arm", "baseline", env={"SPE_EVAL_HEALTH_URL": unhealthy.url})
+        assert p.returncode == 1, p.stdout
+        assert "did not answer in time" in p.stderr
+    finally:
+        unhealthy.close()
 
 
 def test_arm_unknown_arm_name_is_a_configuration_error(setup):
@@ -246,20 +311,90 @@ def test_run_refuses_while_another_run_holds_the_lock(setup):
         holder.communicate(timeout=10)
 
 
+def test_run_sigterm_mid_run_sh_marks_stopped_and_still_cleans_up(setup):
+    # task 4 review, Important 2: a stop mid-run.sh still writes a terminal run.json, the
+    # windows.jsonl line, and still returns to the build's own arm, all before the lock frees.
+    run, popen, calls, _repo, home, logs = setup
+    proc = popen("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261111T100000Z", "FAKE_RUN_SH_SLEEP": "2"})
+    try:
+        wait_until_locked(home)
+        time.sleep(0.3)  # let the fake apply/health-wait finish and run.sh actually start sleeping
+        proc.send_signal(signal.SIGTERM)
+        _out, err = proc.communicate(timeout=10)
+        assert proc.returncode == 1, err
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
+
+    record = json.loads((home / "spe-eval" / "reports" / "one-arm" / "20261111T100000Z" / "baseline" /
+                          "run.json").read_text())
+    assert record["state"] == "stopped"
+    assert record["ended"]
+
+    windows = (home / "spe-eval" / "windows.jsonl").read_text().splitlines()
+    assert len(windows) == 1
+    window = json.loads(windows[0])
+    assert window["run"] == "20261111T100000Z"
+
+    apply_calls = [c for c in calls(logs["apply"]) if c.startswith("all")]
+    assert apply_calls[-1] == "all"  # the return-to-build-arm reapply still ran
+
+
 def test_run_detach_prints_the_run_id_and_returns_at_once(setup):
     run, _popen, calls, _repo, _home, logs = setup
     started = time.monotonic()
-    p = run("run", "one-arm", "--detach")
+    p = run("run", "one-arm", "--detach", env={"FAKE_SYSTEMD_RUN_HOLD": "2"})
     elapsed = time.monotonic() - started
     assert p.returncode == 0, p.stderr
-    run_id = p.stdout.strip()
+    run_id = p.stdout.strip().splitlines()[-1]
     assert re.fullmatch(r"\d{8}T\d{6}Z", run_id)
-    assert elapsed < 5  # the fake systemd-run exits at once; a real one would too (R5)
+    assert elapsed < 5
     systemd_calls = calls(logs["systemd"])
     assert len(systemd_calls) == 1
     assert f"--unit=spe-eval-{run_id}" in systemd_calls[0]
     assert f"SPE_EVAL_RUN_ID={run_id}" in systemd_calls[0]
     assert "run one-arm --repeat 1" in systemd_calls[0]
+
+
+def test_run_detach_validates_before_starting_the_unit(setup):
+    # task 4 review, Important 3: a typo'd experiment never reaches systemd-run.
+    run, _popen, calls, _repo, _home, logs = setup
+    p = run("run", "no-such-experiment", "--detach")
+    assert p.returncode == 2, p.stdout
+    assert calls(logs["systemd"]) == []
+
+
+def test_run_detach_refuses_while_locked(setup):
+    run, popen, calls, _repo, home, logs = setup
+    holder = popen("run", "one-arm", env={"FAKE_RUN_SH_SLEEP": "1", "SPE_EVAL_RUN_ID": "20261111T110000Z"})
+    try:
+        wait_until_locked(home)
+        p = run("run", "one-arm", "--detach")
+        assert p.returncode == 2, p.stdout
+        assert "holds the lock" in p.stderr
+        assert calls(logs["systemd"]) == []
+    finally:
+        holder.communicate(timeout=10)
+
+
+def test_run_detach_waits_for_the_child_to_hold_the_lock(setup):
+    # task 4 review, Important 3: --detach does not return until the (simulated) child has
+    # actually taken the lock, so a `wait` right after sees a run in progress, not "no run".
+    run, _popen, _calls, _repo, home, _logs = setup
+    p = run("run", "one-arm", "--detach", env={"FAKE_SYSTEMD_RUN_HOLD": "2"})
+    assert p.returncode == 0, p.stderr
+    run_id = p.stdout.strip().splitlines()[-1]
+    lock = home / "spe-eval" / "lock"
+    assert lock.read_text().strip() == run_id
+
+
+def test_run_detach_exits_1_if_the_child_never_takes_the_lock(setup):
+    run, _popen, _calls, _repo, _home, _logs = setup
+    p = run("run", "one-arm", "--detach", env={"FAKE_SYSTEMD_RUN_NO_ACQUIRE": "1",
+                                                "SPE_EVAL_DETACH_WAIT_TIMEOUT": "0.2"})
+    assert p.returncode == 1, p.stdout
+    assert "did not take the lock" in p.stderr
 
 
 # --- status / wait / runs ----------------------------------------------------------------------
@@ -291,6 +426,34 @@ def test_status_json_with_no_run_yet(setup):
                      "state": None, "done": None, "total": None, "last_error": None}
 
 
+def test_status_while_held_by_arm_leaves_run_arm_state_null(setup):
+    # task 4 review, minor 6: a holder with no report of its own (here, `arm`) must not be shown
+    # next to some earlier run's details.
+    run, popen, _calls, _repo, home, _logs = setup
+    prior = run("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261111T120000Z"})
+    assert prior.returncode == 0, prior.stderr
+
+    unhealthy = _HealthServer(503, b'{"status": "starting"}')
+    try:
+        # A generous health timeout (well past another subprocess's startup time under load),
+        # so the lock is reliably still held when `status` is checked below.
+        holder = popen("arm", "one-arm", "baseline",
+                        env={"SPE_EVAL_HEALTH_URL": unhealthy.url, "SPE_EVAL_HEALTH_TIMEOUT": "5"})
+        try:
+            wait_until_locked(home)
+            p = run("status", "--json")
+            assert p.returncode == 0, p.stderr
+            info = json.loads(p.stdout)
+            assert info["locked"] is True
+            assert info["run"] is None
+            assert info["arm"] is None
+            assert info["state"] is None
+        finally:
+            holder.communicate(timeout=10)
+    finally:
+        unhealthy.close()
+
+
 def test_wait_timeout_exits_1_and_says_so(setup):
     run, popen, _calls, _repo, home, _logs = setup
     holder = popen("run", "one-arm", env={"FAKE_RUN_SH_SLEEP": "2", "SPE_EVAL_RUN_ID": "20261110T150000Z"})
@@ -318,8 +481,46 @@ def test_wait_returns_the_run_s_outcome_once_the_lock_frees(setup):
         holder.communicate(timeout=10)
 
 
+def test_wait_with_no_run_at_all(setup):
+    run, _popen, _calls, _repo, _home, _logs = setup
+    p = run("wait")
+    assert p.returncode == 0, p.stderr
+    assert "no run has happened yet" in p.stdout
+
+
+def test_wait_when_lock_already_free_judges_the_newest_run(setup):
+    # task 4 review, Important 3: wait must not exit 0 unconditionally just because the lock
+    # happens to be free when it is called -- `run --detach && wait` racing past the run's own
+    # end must still see that run's real outcome.
+    run, _popen, _calls, _repo, _home, _logs = setup
+    first = run("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261111T130000Z", "FAKE_RUN_SH_EXIT": "3"})
+    assert first.returncode == 1, first.stderr
+    p = run("wait")
+    assert p.returncode == 1, p.stdout
+    assert "baseline: gate refused" in p.stdout
+
+
+def test_wait_for_an_arm_holder_with_no_report_exits_0(setup):
+    # task 4 review, minor 7: no report is not evidence of a failed *run* when the holder was an
+    # `arm` (which keeps none by design). A never-ready health server keeps the lock held for the
+    # fixture's SPE_EVAL_HEALTH_TIMEOUT (0.3s) so `wait` reliably calls in while it is still held.
+    run, popen, _calls, _repo, home, _logs = setup
+    unhealthy = _HealthServer(503, b'{"status": "starting"}')
+    try:
+        holder = popen("arm", "one-arm", "baseline", env={"SPE_EVAL_HEALTH_URL": unhealthy.url})
+        try:
+            wait_until_locked(home)
+            p = run("wait", "--timeout", "5")
+            assert p.returncode == 0, p.stdout
+            assert "no report found" in p.stdout
+        finally:
+            holder.communicate(timeout=10)
+    finally:
+        unhealthy.close()
+
+
 def test_runs_ordering_and_json_fields(setup):
-    run, _popen, _calls, _repo, home, _logs = setup
+    run, _popen, _calls, _repo, _home, _logs = setup
     first = run("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261110T170000Z"})
     assert first.returncode == 0, first.stderr
     second = run("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261110T180000Z"})
@@ -332,7 +533,6 @@ def test_runs_ordering_and_json_fields(setup):
     assert entries[0]["experiment"] == "one-arm"
     assert entries[0]["arms"]["baseline"]["state"] == "ok"
     assert entries[0]["arms"]["baseline"]["model"] == "anthropic:claude-haiku-5-5"  # decision 22
-    assert home  # the fixture's home dir backs both runs (sanity: no stray state leaks across runs)
 
 
 def test_runs_text_output_with_none_yet(setup):

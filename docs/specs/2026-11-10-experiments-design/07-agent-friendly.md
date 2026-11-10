@@ -53,6 +53,8 @@ reasons only. A reason may quote a canary, as the viewer does; both are the work
   `tests/experiments/<name>.yaml`, its branch `experiment/<name>`, its template `spe-x-<name>`.
 - **Templates for every file**: `threats/TEMPLATE.md` (exists), `paths/TEMPLATE.md`, `mitigations/TEMPLATE.yml`,
   `experiments/TEMPLATE.yml`, each with a comment per key; `spe-eval new` fills them.
+- **Commit and push as you go**: to `experiment/<name>`, after each working step; stop destroys the VM (the
+  archive saves unpushed work too, decision 21, but a pushed branch is what others can build from).
 - **One check before every push**: `check_experiment.py <name>` exits 0.
 - **A run needs the workspace alone**: the agent says so to the person before `spe-eval run` (chats are reset by
   the restores), and does not `spe-apply` while the lock is held (it would be refused).

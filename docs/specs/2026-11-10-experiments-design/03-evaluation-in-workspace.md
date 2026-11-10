@@ -101,10 +101,26 @@ hit. The canary hit watcher keeps the source with each hit, and the hits pages s
 their own heading, out of the counts of chat hits (decision 12): at L0 a suite leaks on purpose, and those hits
 would otherwise bury the participant's own.
 
+## What survives
+
+| Data | During a run | On stop (the VM is destroyed) |
+|---|---|---|
+| Results: reports, promptfoo evals, windows | kept, every run | archived, every run (below) |
+| Chats (AG-UI journals, Open WebUI), the agent's run log | kept: the restore leaves them alone | archived, as today |
+| The participant's work in `~/sperange` (mitigation, tests, experiment files) | kept: the restore never touches the clone | **archived** (below); safest pushed to `experiment/<name>` |
+| What was registered by hand in TRS or WES, files left in the sandbox's home | reset to the arm's snapshot before every test | gone with the VM, as today |
+
+The last row is the restore doing its job: each test starts from the same state. `spe-eval run` says so before it
+starts, and the snapshot is taken on an arm's first run, so state set up before the first run is kept as the
+baseline.
+
 ## Archive
 
 On stop, `archive.yml` copies all of `~/spe-eval/reports/` (every run, each arm's `controls.json`, `agent.json`,
 `hardening.json`, `run.json`), `~/spe-eval/promptfoo/` (every eval) and `windows.jsonl` into the run directory's
-`evals/` (decision 13). Stop destroys the VM, so this copy is what survives a workspace session; the next start
+`evals/` (decision 13). It also saves the participant's work in the clone, which stop would otherwise destroy:
+`git bundle` of every commit not on a remote branch, and `git diff` of what is not committed (tracked and
+untracked files, excluding git-ignored ones, so `instances/local.yml` and its seed never enter the archive), as
+`work/` in the run directory (decision 21). Stop destroys the VM, so this copy is what survives a workspace session; the next start
 begins with empty directories, and earlier sessions stay in their own run directories on the portal. They hold canaries, as the
 run directory's chats and `canaries.json` already do.

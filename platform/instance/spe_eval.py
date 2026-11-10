@@ -1,0 +1,349 @@
+"""`spe-eval`'s core library (experiments spec part 03, `docs/specs/2026-11-10-experiments-design/`):
+experiments, arms, the suite config, run ids and the lock. Standard library plus PyYAML only (the
+VM has `python3-yaml`); the only repository imports are `validate` (repo root) and
+`injections_schema` (`platform/promptfoo-evals/`), both read-only siblings of the same clone, not
+new dependencies.
+
+Used by the `spe-eval` CLI (a later task) and, for the lock, by `spe-apply` (in bash, mirroring
+`Lock`'s file format):
+
+    - `load_experiment`, `default_experiment_name`, `load_local_vars`, `check_build_matches`:
+      decision 7, which experiment a bare `spe-eval` command means and whether it still matches
+      this build.
+    - `experiment_arms`, `arm_mitigations`, `arm_vars`, `write_json`: decision 9, the `-e` values
+      for one arm, as the JSON file `spe-apply ... -e @<path>` passes.
+    - `suite_config`: spec part 03's R1, `agent.yaml` unchanged for an experiment with no tests
+      of its own, else a generated `suite.yaml` with absolute paths.
+    - `run_id`, `spe_eval_home`, `reports_dir`: decision 7's run id and the reports layout.
+    - `Lock`, `LockHeld`: decision 11, `~/spe-eval/lock`.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
+
+_HERE = Path(__file__).resolve()
+OWN_REPO_ROOT = _HERE.parents[2]  # platform/instance/spe_eval.py -> the repository root
+_PROMPTFOO_DIR = OWN_REPO_ROOT / "platform" / "promptfoo-evals"
+for _p in (str(OWN_REPO_ROOT), str(_PROMPTFOO_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+import validate  # noqa: E402  (repo root: EXPERIMENT_PARAMETER_ANSIBLE_NAMES, main.tf's own mapping)
+import injections_schema  # noqa: E402  (promptfoo-evals: switches(), built from the fixtures.json catalogue)
+
+
+class ConfigError(Exception):
+    """A usage or configuration problem (CLI exit 2): a missing or malformed file, an unknown
+    id, or an experiment whose creation-time settings do not match this build (decision 7)."""
+
+
+def repo_dir() -> Path:
+    """The clone `spe-eval` reads `experiments/`, `mitigations/` and `instances/local.yml`
+    from: `SPE_REPO_DIR`, or the repository containing this script (03, *Which experiment*)."""
+    value = os.environ.get("SPE_REPO_DIR")
+    return Path(value) if value else OWN_REPO_ROOT
+
+
+# --- which experiment (decision 7) --------------------------------------------------------------
+
+def load_experiment(name: str, repo_root: Path | None = None) -> dict:
+    """`experiments/<name>.yml`, parsed (01-experiment-model.md, *Experiments*)."""
+    repo_root = repo_root or repo_dir()
+    path = repo_root / "experiments" / f"{name}.yml"
+    try:
+        text = path.read_text()
+    except OSError as e:
+        raise ConfigError(f"{path}: {e.strerror or e}") from None
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path}: not a YAML mapping")
+    return data
+
+
+def load_local_vars(repo_root: Path | None = None) -> dict:
+    """`platform/ansible/instances/local.yml`, the build's own values (written at creation for
+    `spe-apply`; decision 7 compares an experiment's creation-time settings against it)."""
+    repo_root = repo_root or repo_dir()
+    path = repo_root / "platform" / "ansible" / "instances" / "local.yml"
+    try:
+        text = path.read_text()
+    except OSError as e:
+        raise ConfigError(
+            f"{path}: {e.strerror or e}: this instance was built before local re-apply existed; "
+            "start a new workspace") from None
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path}: not a YAML mapping")
+    return data
+
+
+def default_experiment_name(local_vars: dict) -> str:
+    """The experiment the workspace was built with (`spe_experiment` in `local_vars`), the
+    default `spe-eval` command target when none is named (03, *Which experiment*)."""
+    name = local_vars.get("spe_experiment")
+    if not name:
+        raise ConfigError("instances/local.yml has no spe_experiment: this is not a spe-experiments build")
+    return name
+
+
+# decision 7: not creation-time choices of the experiment itself (`seed` is not even a key of
+# validate.EXPERIMENT_PARAMETER_ANSIBLE_NAMES, so it needs no entry here).
+_SKIP_CREATION_TIME_PARAMETERS = frozenset({"experiment", "mitigations"})
+
+
+def check_creation_time(experiment: dict, local_vars: dict) -> list[str]:
+    """The Ansible keys where `experiment`'s `parameters` or `vars` differ from the build's own
+    (`local_vars`, from `instances/local.yml`), decision 7. Uses
+    `validate.EXPERIMENT_PARAMETER_ANSIBLE_NAMES`, the mapping `experiments-template/main.tf` uses
+    to turn a parameter into an Ansible variable, leaving out `experiment` and `mitigations`.
+    `canaries` has no single Ansible name: it expands to one `spe_canary_<type>` key per type the
+    build actually has (read from `local_vars`'s own keys, so every type the build supports is
+    checked). A parameter with no persisted Ansible name at all (`flavor`: VM sizing, done once at
+    creation) is skipped, since `local_vars` never holds anything to compare it to.
+    """
+    params = experiment.get("parameters") or {}
+    mismatches: list[str] = []
+    for key, ansible_name in validate.EXPERIMENT_PARAMETER_ANSIBLE_NAMES.items():
+        if key in _SKIP_CREATION_TIME_PARAMETERS or key not in params:
+            continue
+        if key == "canaries":
+            selected = set(params["canaries"] or [])
+            for local_key in local_vars:
+                if not local_key.startswith("spe_canary_"):
+                    continue
+                canary_type = local_key[len("spe_canary_"):]
+                if bool(local_vars[local_key]) != (canary_type in selected):
+                    mismatches.append(local_key)
+            continue
+        if ansible_name is None or ansible_name not in local_vars:
+            continue
+        if local_vars[ansible_name] != params[key]:
+            mismatches.append(ansible_name)
+    for key, value in (experiment.get("vars") or {}).items():
+        if local_vars.get(key) != value:
+            mismatches.append(key)
+    return sorted(set(mismatches))
+
+
+def check_build_matches(experiment: dict, local_vars: dict) -> None:
+    """Raises `ConfigError` naming every key `check_creation_time` finds differing, saying to
+    build fresh from the branch template (decision 7); returns normally when they all match."""
+    mismatches = check_creation_time(experiment, local_vars)
+    if mismatches:
+        raise ConfigError(
+            "this build does not match the experiment's creation-time settings: "
+            + ", ".join(mismatches)
+            + " differ; build a fresh workspace from its branch template (05, step 5)")
+
+
+# --- arms (decision 9) ----------------------------------------------------------------------
+
+def load_mitigations(repo_root: Path | None = None) -> dict[str, dict]:
+    """`mitigations/<id>.yml`, by id, skipping `status: planned` ones (no `on`/`off` to apply)."""
+    repo_root = repo_root or repo_dir()
+    mitigations: dict[str, dict] = {}
+    for path in sorted((repo_root / "mitigations").glob("*.yml")):
+        meta = yaml.safe_load(path.read_text())
+        if not isinstance(meta, dict) or meta.get("status") == "planned":
+            continue
+        mitigations[meta["id"]] = meta
+    return mitigations
+
+
+def experiment_arms(experiment: dict) -> tuple[str, ...]:
+    """This experiment's arms (decision 9): `baseline` alone when there is no mitigation under
+    test (`mitigation: null`), else `baseline` and `mitigated`."""
+    if experiment["experiment"].get("mitigation") is None:
+        return ("baseline",)
+    return ("baseline", "mitigated")
+
+
+def arm_mitigations(experiment: dict, arm: str) -> list[str]:
+    """The mitigation ids on in `arm`, in declared order (`base`, then the one under test for
+    `mitigated`). Raises `ValueError` for an arm this experiment does not have (e.g. `mitigated`
+    on a one-arm experiment such as `ladder-l0`)."""
+    arms = experiment_arms(experiment)
+    if arm not in arms:
+        raise ValueError(f"{arm!r}: not an arm of this experiment (has {', '.join(arms)})")
+    base = list(experiment["experiment"].get("base") or [])
+    if arm == "baseline":
+        return base
+    return base + [experiment["experiment"]["mitigation"]]
+
+
+def arm_vars(experiment: dict, arm: str, repo_root: Path | None = None) -> dict:
+    """The `-e` values for one arm (03, step 2; decision 9): every mitigation file's `on` for the
+    ids in this arm, `off` for every other mitigation file (so the arm is exactly its set,
+    whatever a mitigation selected on the form but outside the experiment was), plus
+    `spe_mitigations` (the arm's set), `spe_experiment`, and every injection switch from
+    `injections_schema.switches` (the same in both arms, 01, *Attacks*)."""
+    repo_root = repo_root or repo_dir()
+    on_ids = set(arm_mitigations(experiment, arm))
+    values: dict = {}
+    for mitigation_id, meta in load_mitigations(repo_root).items():
+        values.update(meta["on"] if mitigation_id in on_ids else meta["off"])
+    values["spe_mitigations"] = arm_mitigations(experiment, arm)
+    values["spe_experiment"] = experiment["parameters"]["experiment"]
+    values.update(injections_schema.switches(experiment["experiment"].get("injections") or [], repo_root))
+    return values
+
+
+def write_json(values: dict, path: Path) -> Path:
+    """Write `values` as the JSON file `spe-apply ... -e @<path>` passes (03, step 2)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(values, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+# --- the suite (R1) ------------------------------------------------------------------------------
+
+_FILE_URI = re.compile(r"^file://([^:]+)(:.*)?$")
+
+
+def _absolutize_file_uris(obj, base_dir: Path):
+    """Every `file://<path>[:<suffix>]` string in `obj` (recursively, through dicts and lists),
+    `<path>` made absolute under `base_dir` if it is not already: a `suite.yaml` written outside
+    `platform/promptfoo-evals/` still finds `agui_provider.py`, `isolation.py`, `asserts.py` and
+    `metrics.py` (R1, "paths in it are absolute, so it runs from any directory")."""
+    if isinstance(obj, dict):
+        return {k: _absolutize_file_uris(v, base_dir) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_absolutize_file_uris(v, base_dir) for v in obj]
+    if isinstance(obj, str):
+        m = _FILE_URI.match(obj)
+        if m:
+            rel, suffix = m.group(1), m.group(2) or ""
+            path = Path(rel)
+            if not path.is_absolute():
+                path = (base_dir / path).resolve()
+            return f"file://{path}{suffix}"
+    return obj
+
+
+def _load_tests(promptfoo_dir: Path) -> dict[str, dict]:
+    """Every test across `tests/*.yaml` and `tests/experiments/*.yaml`, by its `metadata.id`
+    (01, *Tests*). The first file to define an id wins (the ladder's own files are read first), so
+    a clash is silently resolved rather than raised: the catalogue's own tests stay canonical."""
+    tests: dict[str, dict] = {}
+    paths = sorted(promptfoo_dir.glob("tests/*.yaml")) + sorted(promptfoo_dir.glob("tests/experiments/*.yaml"))
+    for path in paths:
+        cases = yaml.safe_load(path.read_text()) or []
+        for case in cases:
+            tid = (case.get("metadata") or {}).get("id")
+            if tid:
+                tests.setdefault(tid, case)
+    return tests
+
+
+def suite_config(experiment: dict, out_dir: Path, repo_root: Path | None = None) -> Path:
+    """The agent suite to run for this experiment (spec part 03, R1). With no `tests` named,
+    `agent.yaml` unchanged (the ladder's own suite, byte for byte, so its 13 tests stay
+    comparable). With tests named: `agent.yaml`'s settings with `tests` replaced by those ids
+    (looked up across `tests/*.yaml` and `tests/experiments/*.yaml`; an unknown id raises
+    `ConfigError`) plus every test of the `utility` group not already named, written as
+    `<out_dir>/suite.yaml` with every `file://` path made absolute. Returns the path to run.
+    """
+    repo_root = repo_root or repo_dir()
+    promptfoo_dir = repo_root / "platform" / "promptfoo-evals"
+    agent_yaml = promptfoo_dir / "agent.yaml"
+    test_ids = (experiment.get("experiment") or {}).get("tests") or []
+    if not test_ids:
+        return agent_yaml
+    config = yaml.safe_load(agent_yaml.read_text())
+    all_tests = _load_tests(promptfoo_dir)
+    unknown = [tid for tid in test_ids if tid not in all_tests]
+    if unknown:
+        raise ConfigError(f"unknown test id(s): {', '.join(unknown)}")
+    chosen = [all_tests[tid] for tid in test_ids]
+    chosen_ids = set(test_ids)
+    for tid, case in all_tests.items():
+        if tid not in chosen_ids and (case.get("metadata") or {}).get("group") == "utility":
+            chosen.append(case)
+    config["tests"] = chosen
+    config = _absolutize_file_uris(config, promptfoo_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "suite.yaml"
+    out_path.write_text(yaml.safe_dump(config, sort_keys=False))
+    return out_path
+
+
+# --- run id and reports layout (decision 7) -------------------------------------------------
+
+def run_id() -> str:
+    """A run's id, fixed when the lock is taken (03, *Every run is kept*): UTC `YYYYMMDDTHHMMSSZ`."""
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def spe_eval_home(home: Path | None = None) -> Path:
+    """`~/spe-eval` (03, *The hand-off on the VM*; decision 11, the lock): everything `spe-eval`
+    keeps on the VM. `home` overrides `Path.home()`, for tests."""
+    return (home or Path.home()) / "spe-eval"
+
+
+def reports_dir(experiment_name: str, run_id_: str, arm: str, home: Path | None = None) -> Path:
+    """`~/spe-eval/reports/<experiment>/<run id>/<arm>/` (03, *Every run is kept*)."""
+    return spe_eval_home(home) / "reports" / experiment_name / run_id_ / arm
+
+
+# --- the lock (decision 11) -----------------------------------------------------------------
+
+class LockHeld(Exception):
+    """Another process holds the lock; `token` is its holder's token, read from the lock file
+    (`None` when the file could not be read, which should not happen once `flock` itself refused)."""
+
+    def __init__(self, token: str | None):
+        self.token = token
+        super().__init__(
+            f"spe-eval run {token} holds the lock; wait for it (spe-eval wait)" if token
+            else "the lock is held; wait for it (spe-eval wait)")
+
+
+class Lock:
+    """`~/spe-eval/lock` (`flock`): one `spe-eval run` or `arm` at a time per VM (decision 11).
+    `spe-apply` enforces the same file in bash, refusing unless `SPE_EVAL_LOCK` equals `holder()`."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._fd: int | None = None
+
+    def holder(self) -> str | None:
+        """The token in the lock file, or `None` if the file does not exist or is empty: "a
+        missing lock file is 'not held'" (03)."""
+        try:
+            text = self.path.read_text()
+        except FileNotFoundError:
+            return None
+        text = text.strip()
+        return text or None
+
+    def acquire(self, token: str) -> None:
+        """Take the lock and write `token` (a run id) into it. Raises `LockHeld`, naming the
+        current holder's token, if another process already holds it."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(fd)
+            raise LockHeld(self.holder()) from None
+        os.ftruncate(fd, 0)
+        os.write(fd, token.encode())
+        os.fsync(fd)
+        self._fd = fd
+
+    def release(self) -> None:
+        """Release the lock (03, step 5) and clear the file, so a stale token is never read as
+        held by a later `holder()` call. A no-op if this `Lock` never acquired it."""
+        if self._fd is None:
+            return
+        os.ftruncate(self._fd, 0)
+        fcntl.flock(self._fd, fcntl.LOCK_UN)
+        os.close(self._fd)
+        self._fd = None

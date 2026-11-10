@@ -8,11 +8,14 @@
 #                          until they answer
 #   spe-apply status       containers and health
 #   spe-apply logs [svc]   follow the logs
-#   spe-apply stack        run the Ansible roles of the GA4GH stack on this VM
+#   spe-apply stack [ARGS] run the Ansible roles of the GA4GH stack on this VM
 #                          (tags stack,drs,trs: services, configs, images, catalog
 #                          installers, registrations); a few minutes
-#   spe-apply all          stack plus the frontend roles (tags ...,frontend)
+#   spe-apply all [ARGS]   stack plus the frontend roles (tags ...,frontend)
 #   spe-apply ansible ARGS the playbook with your own arguments, e.g. --tags trs
+#
+# stack, all and ansible all pass any extra arguments through to ansible-playbook
+# (e.g. spe-apply all -e foo=bar), as ansible already did.
 #
 # What needs which step: the runbook and helper scripts (roles/sandbox/files/agent),
 # the agent's prompt (roles/sandbox/files/system_prompt.txt) and the agent's Python
@@ -35,9 +38,15 @@
 # platform/instance/compose.yml in the clone. SPE_COMPOSE_OVERLAYS in .env (absent by
 # default) names the Compose overlays a ladder level adds, platform/instance/compose.<name>.yml
 # in the clone, each passed with -f after the compose file. Secrets never appear in the output.
+#
+# On a spe-experiments build, every command here refuses (exit 2) while an `spe-eval run` or
+# `arm` holds ~/spe-eval/lock (decision 11; a spe build never has that file, so a plain build
+# is unaffected), unless SPE_EVAL_LOCK in the environment equals the token the holder wrote into
+# it -- spe-eval sets it only for its own calls.
 set -euo pipefail
 
 dir=${SPE_FRONTEND_DIR:-/home/ubuntu/spe-frontend}
+lock_file=$HOME/spe-eval/lock
 [[ -f $dir/.env ]] || { echo "spe-apply: $dir/.env not found (is this an SPE instance?)" >&2; exit 2; }
 set -a; . "$dir/.env"; set +a
 : "${SPE_REPO_DIR:?.env lacks SPE_REPO_DIR}" "${COMPOSE_PROFILES:?.env lacks COMPOSE_PROFILES}"
@@ -141,6 +150,21 @@ status() {
   fi
 }
 
+# One spe-eval run or arm at a time per VM (decision 11): refuse while ~/spe-eval/lock is held
+# (flock -n fails), unless SPE_EVAL_LOCK equals the token its holder wrote into it. A missing
+# lock file is "not held" (also true before flock would even get the chance to open it under a
+# directory that does not exist yet, e.g. a spe build with no ~/spe-eval at all).
+check_lock() {
+  [[ -f $lock_file ]] || return 0
+  if flock -n "$lock_file" -c true 2>/dev/null; then return 0; fi
+  local held_token
+  held_token=$(cat "$lock_file" 2>/dev/null || true)
+  if [[ -n ${SPE_EVAL_LOCK:-} && $SPE_EVAL_LOCK == "$held_token" ]]; then return 0; fi
+  echo "spe-apply: spe-eval run ${held_token:-?} holds the lock; wait for it (spe-eval wait)" >&2
+  exit 2
+}
+
+check_lock
 cmd=${1:-}; shift || true
 case $cmd in
   "")      build; up ;;
@@ -148,9 +172,9 @@ case $cmd in
   up)      up ;;
   status)  status ;;
   logs)    "${compose[@]}" logs -f --tail=100 "$@" ;;
-  stack)   run_ansible --tags stack,drs,trs ;;
-  all)     run_ansible --tags stack,drs,trs,frontend ;;
+  stack)   run_ansible --tags stack,drs,trs "$@" ;;
+  all)     run_ansible --tags stack,drs,trs,frontend "$@" ;;
   ansible) run_ansible "$@" ;;
-  -h|--help|help) sed -n '2,38p' "$0" ;;
+  -h|--help|help) sed -n '2,45p' "$0" ;;
   *) echo "spe-apply: unknown command '$cmd' (build, up, status, logs, stack, all, ansible)" >&2; exit 2 ;;
 esac

@@ -35,6 +35,8 @@ is fine (no experiments yet). See docs/specs/2026-11-10-experiments-design/
 01-experiment-model.md, *Experiments*:
   - only the allowed top-level keys are present; `parameters.experiment`
     equals the file stem
+  - every key in `parameters` is a parameter the spe-experiments template
+    defines (EXPERIMENT_PARAMETER_ANSIBLE_NAMES)
   - `experiment.threat` is a known threat id; `experiment.paths` names known
     paths
   - `experiment.mitigation` (unless null) and every id in `experiment.base`
@@ -50,6 +52,9 @@ is fine (no experiments yet). See docs/specs/2026-11-10-experiments-design/
   - no `vars` key is also set by any catalog mitigation's `on`, any
     fixtures.json entry's `switch`, or the template's own parameter Ansible
     names, selected by this experiment or not (one place per value)
+  - across the catalog: no two experiments share a `name`; at most one has
+    `default: true`; `ladder-l0.yml` is present whenever the directory holds
+    anything at all (main.tf hard-codes it as the form's defaults)
 
 Usage:
     python validate.py [--threats-dir threats] [--vocab vocabulary.yaml]
@@ -127,7 +132,8 @@ EXPERIMENT_BLOCK_REQUIRED_FIELDS = ["threat", "paths", "mitigation", "base", "in
 # *Experiments*: "vars" exists for build settings the form does not offer, and a vars key that a
 # parameter also sets is refused). `canaries` has no single name: it expands to one
 # spe_canary_<type> key per canary type, added by experiment_reserved_ansible_names below.
-# Single definition, reused by the Coder template (platform/coder/).
+# The Coder template (platform/coder/experiments-template/main.tf) hard-codes its own matching
+# parameter names; test_validate.py checks this dict's keys against them, so they cannot drift.
 EXPERIMENT_PARAMETER_ANSIBLE_NAMES: dict[str, str | None] = {
     "experiment": "spe_experiment",
     "mitigations": "spe_mitigations",
@@ -139,9 +145,15 @@ EXPERIMENT_PARAMETER_ANSIBLE_NAMES: dict[str, str | None] = {
     "smoke_test": "spe_run_smoke_test",
 }
 # Names the template reserves with no single matching parameter key above: the seed (a parameter,
-# but never set from an experiment file, since the seed is secret), the experiment select's own
-# backing list, and the mitigations multi-select's own backing list.
-EXPERIMENT_TEMPLATE_RESERVED_NAMES = frozenset({"spe_seed", "spe_experiments", "spe_local_vars_extra"})
+# but never set from an experiment file, since the seed is secret), the flag that marks a build as
+# made by this template (spe_experiments), the keys main.tf passes alongside the parameters
+# (spe_instance, the spe_coder_* identity keys), and the list of keys persisted into local.yml for
+# spe-apply and Rebuild to re-apply (spe_local_vars_extra).
+EXPERIMENT_TEMPLATE_RESERVED_NAMES = frozenset({
+    "spe_seed", "spe_experiments", "spe_local_vars_extra", "spe_instance",
+    "spe_coder_owner", "spe_coder_owner_email", "spe_coder_workspace", "spe_coder_workspace_id",
+    "spe_coder_agent_token", "spe_coder_init_script",
+})
 
 
 def experiment_reserved_ansible_names(canary_types: set[str]) -> set[str]:
@@ -635,6 +647,13 @@ def check_experiment(entry: ExperimentEntry, threat_ids: set[str], path_ids: set
     if not isinstance(parameters, dict):
         errors.append("'parameters' must be a mapping")
         parameters = {}
+    else:
+        for key in parameters:
+            if key not in EXPERIMENT_PARAMETER_ANSIBLE_NAMES:
+                errors.append(
+                    f"unknown parameters key '{key}' (not a spe-experiments template parameter: "
+                    f"{', '.join(sorted(EXPERIMENT_PARAMETER_ANSIBLE_NAMES))})"
+                )
 
     experiment = meta["experiment"]
     if not isinstance(experiment, dict):
@@ -753,6 +772,29 @@ def check_experiment(entry: ExperimentEntry, threat_ids: set[str], path_ids: set
     return errors
 
 
+def check_experiments_catalog(entries: list[ExperimentEntry], experiments_dir: Path) -> list[str]:
+    """Cross-experiment checks: duplicate names, more than one 'default: true', and ladder-l0.yml
+    present whenever the directory holds anything at all (main.tf hard-codes
+    local.experiments["ladder-l0"] as every workspace's form defaults)."""
+    errors = []
+    names_seen: dict[str, str] = {}
+    defaults: list[str] = []
+    for entry in entries:
+        name = entry.meta.get("name")
+        if name in names_seen:
+            errors.append(f"duplicate name '{name}' in {entry.path.name} and {names_seen[name]}")
+        else:
+            names_seen[name] = entry.path.name
+        if entry.meta.get("default"):
+            defaults.append(entry.path.name)
+    if len(defaults) > 1:
+        errors.append(f"more than one experiment has 'default: true': {', '.join(sorted(defaults))}")
+    if experiments_dir.is_dir() and any(experiments_dir.iterdir()) \
+            and not (experiments_dir / "ladder-l0.yml").exists():
+        errors.append("'ladder-l0.yml' is missing (main.tf hard-codes it as the form's defaults)")
+    return errors
+
+
 def validate_experiments_catalog(experiments_dir: Path, threat_ids: set[str], path_ids: set[str],
                                   mitigations: dict[str, dict], fixtures: list[dict], test_ids: set[str],
                                   reserved_vars: set[str]) -> tuple[list[ExperimentEntry], list[str]]:
@@ -773,6 +815,7 @@ def validate_experiments_catalog(experiments_dir: Path, threat_ids: set[str], pa
             problems.extend(f"{path.name}: {err}" for err in errors)
         else:
             entries.append(entry)
+    problems.extend(f"catalog: {err}" for err in check_experiments_catalog(entries, experiments_dir))
     return entries, problems
 
 

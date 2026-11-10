@@ -3,6 +3,7 @@
 Fixture tests mutate a tmp-dir copy of the real paths/ or mitigations/ directory, so a change
 to the repo's own files is exercised the same way a participant's would be.
 """
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,7 @@ REPO = Path(__file__).resolve().parents[3]
 VALIDATE = REPO / "validate.py"
 GROUP_VARS_PATH = REPO / "platform/ansible/inventory/group_vars/all.yml"
 PROBES_DIR = REPO / "platform/promptfoo-evals/probes"
+EXPERIMENTS_MAIN_TF = REPO / "platform/coder/experiments-template/main.tf"
 
 sys.path.insert(0, str(REPO))
 import validate  # noqa: E402  (the repository's validator)
@@ -119,10 +121,78 @@ def test_absent_experiments_dir_is_fine(tmp_path):
 
 
 def test_a_good_experiment_passes(tmp_path):
-    d = write_experiment(tmp_path, GOOD_EXPERIMENT)
+    # Named ladder-l0.yml: the catalog-level check below requires it whenever the directory
+    # holds anything at all, and this is the one test that asserts zero problems.
+    d = write_experiment(
+        tmp_path, GOOD_EXPERIMENT.replace("experiment: test-experiment", "experiment: ladder-l0"),
+        name="ladder-l0.yml",
+    )
     entries, problems = validate_experiments(d)
     assert not problems, problems
-    assert [e.path.stem for e in entries] == ["test-experiment"]
+    assert [e.path.stem for e in entries] == ["ladder-l0"]
+
+
+def coder_parameter_names() -> set[str]:
+    return set(re.findall(r'data "coder_parameter" "(\w+)"', EXPERIMENTS_MAIN_TF.read_text()))
+
+
+def test_known_parameter_keys_match_the_templates_coder_parameters():
+    # Ruling (final review of slice 2/7, Important/Minor on validate.py's known-parameters check):
+    # validate.py keeps its own EXPERIMENT_PARAMETER_ANSIBLE_NAMES list rather than parsing main.tf
+    # at run time, and this test keeps the two from drifting. 'seed' is the one coder_parameter the
+    # template defines that is never a key of an experiment's 'parameters' (the seed is secret, so
+    # it is never set from an experiment file): excluded here, not from the dict.
+    assert coder_parameter_names() - {"seed"} == set(validate.EXPERIMENT_PARAMETER_ANSIBLE_NAMES)
+
+
+def test_experiment_unknown_parameters_key_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
+        "  smoke_test: true\n", "  smoke_test: true\n  bogus: 1\n"
+    ))
+    _, problems = validate_experiments(d)
+    assert any("bogus" in p and "parameters key" in p for p in problems), problems
+
+
+def test_two_experiments_with_the_same_name_fail(tmp_path):
+    a = GOOD_EXPERIMENT.replace("experiment: test-experiment", "experiment: test-experiment-a")
+    b = GOOD_EXPERIMENT.replace("experiment: test-experiment", "experiment: test-experiment-b")
+    d = write_experiment(tmp_path, a, name="test-experiment-a.yml")
+    write_experiment(tmp_path, b, name="test-experiment-b.yml")
+    _, problems = validate_experiments(d)
+    assert any("duplicate name" in p and "Test experiment" in p for p in problems), problems
+
+
+def test_two_experiments_with_default_true_fail(tmp_path):
+    a = (GOOD_EXPERIMENT.replace("experiment: test-experiment", "experiment: test-experiment-a")
+         .replace("name: Test experiment\n", "name: Test experiment A\ndefault: true\n"))
+    b = (GOOD_EXPERIMENT.replace("experiment: test-experiment", "experiment: test-experiment-b")
+         .replace("name: Test experiment\n", "name: Test experiment B\ndefault: true\n"))
+    d = write_experiment(tmp_path, a, name="test-experiment-a.yml")
+    write_experiment(tmp_path, b, name="test-experiment-b.yml")
+    _, problems = validate_experiments(d)
+    assert any("more than one experiment has 'default: true'" in p for p in problems), problems
+
+
+def test_ladder_l0_missing_fails_when_the_dir_has_any_file(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT)  # written as test-experiment.yml, not ladder-l0.yml
+    _, problems = validate_experiments(d)
+    assert any("ladder-l0.yml" in p and "missing" in p for p in problems), problems
+
+
+def test_experiment_vars_key_set_by_spe_instance_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
+        "vars:\n  spe_eval_sink: true", "vars:\n  spe_instance: foo"
+    ))
+    _, problems = validate_experiments(d)
+    assert any("spe_instance" in p for p in problems), problems
+
+
+def test_experiment_vars_key_set_by_spe_coder_identity_key_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
+        "vars:\n  spe_eval_sink: true", "vars:\n  spe_coder_owner: foo"
+    ))
+    _, problems = validate_experiments(d)
+    assert any("spe_coder_owner" in p for p in problems), problems
 
 
 def test_experiment_parameters_experiment_mismatch_fails(tmp_path):

@@ -7,7 +7,7 @@ is slice 1–2's work, and its test: if the ladder needs a special case, the str
 |---|---|---|
 | Threats | TM-001, TM-003 | unchanged |
 | Paths | P1–P4, a table in the ladder's design | `paths/P1-read-api-metadata.md`, `P2-agent-written-code.md`, `P3-installed-workflows.md`, `P4-egress.md` |
-| Mitigations | `spe_harden_trs_readonly`, `_data_tiers`, `_egress`, `_airlock`, `spe_agent_tool_surface` | `mitigations/L1.yml` (trs-readonly, closes P2, probes `trs-write`, `wes-inline`, `e2e-exploit`), `L2.yml` (data tiers, P3, `tier-reach`), `L3.yml` (egress, P4, `egress`, `api-reach`); `L4.yml`, `L5.yml` with `status: planned` |
+| Mitigations | `spe_harden_trs_readonly`, `_data_tiers`, `_egress`, `_airlock`, `spe_agent_tool_surface` | `mitigations/L1.yml` (trs-readonly, closes P2, probes `trs-write`, `wes-inline`, `e2e-exploit`), `L2.yml` (data tiers, P3, `tier-reach`), `L3.yml` (egress, P4, `egress`; `api-reach` stays open by design); `L4.yml`, `L5.yml` with `status: planned` |
 | Tests | the 13-test agent suite and the controls suite | unchanged, still `agent.yaml`; their labels now resolve from the files |
 | Builds | `instances/L<n>.example.yml` on a maintainer's controller | experiments `ladder-l0` … `ladder-l3` on `spe-experiments` |
 | Results | `docs/results/qwen3.8-27b/` and its rendered matrix | the reference a participant's numbers are read against |
@@ -30,7 +30,7 @@ parameters. The model is the portal's (de.NBI).
 
 | Experiment | `base` | `mitigation` | Baseline arm | Mitigated arm |
 |---|---|---|---|---|
-| `ladder-l0` | – | – | L0 | – (one run, no arms) |
+| `ladder-l0` | – | – (`null`) | L0 | – (one arm: the baseline) |
 | `ladder-l1` | – | `L1` | L0 | L1 |
 | `ladder-l2` | `L1` | `L2` | L1 | L2 |
 | `ladder-l3` | `L1`, `L2` | `L3` | L2 | L3 |

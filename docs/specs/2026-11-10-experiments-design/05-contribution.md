@@ -35,7 +35,8 @@ experiment's structure, not its result:
 - each test's labels resolve (the catalogue lint) and its Python assertions name real functions;
 - its `parameters` keys are parameters of the new template's `main.tf`, and its `vars` set no key a mitigation sets.
 
-Each refusal names the file and the id. Its unit tests cover one refusal each.
+Each refusal names the file and the id. Its unit tests cover one refusal each. `--list-checks` prints one line per
+check above, which the PR template's *Checks* list repeats (a test compares them).
 
 It is the gate of a contribution: the coding agent runs it as the last step, the participant pastes its output into
 the PR, a reviewer runs it on the branch, and CI runs it once the repository has workflows. Whether the mitigation
@@ -67,6 +68,12 @@ Utility tests pass with the mitigation on: yes / no
 
 ### Checks
 `python3 check_experiment.py <name>`: <output>
+- [ ] the experiment file has an `experiment:` block and sets `parameters.experiment` to its own name
+- [ ] its threat, paths, mitigation, base mitigations and test ids resolve
+- [ ] `validate.py` passes (threats, paths, mitigations)
+- [ ] each mitigation's `off` equals the Ansible defaults; `requires` and `conflicts` hold
+- [ ] each test's labels resolve and its Python assertions name real functions
+- [ ] its `parameters` are the template's, and its `vars` set no key a mitigation sets
 ```
 
 The result is `matrix.py counts` output: labels and counts only, never an answer or a token, so it can be posted.

@@ -12,54 +12,62 @@ the machine under test.
 ## The hand-off on the VM
 
 `create.yml` writes a second copy of the hand-off into `~/spe-eval/handoff/` on the VM (mode 0700, owned by the
-workspace user): `canaries.json`, `hardening.json`, `injections.json`, `agent_api_key`, and a `hosts.yml` without an
-SSH prefix, so `isolation.vm_runner` runs commands locally (the path it already has for an empty prefix). Plus the
-LLM key file the key-leak metric reads. None of it is mounted into any container.
+workspace user): every file the handoff role writes to the controller that the suites read, `canaries.json`,
+`hardening.json`, `injections.json`, `trs-installed.json`, `drs-inventory.json` (the utility and injection groups'
+asserts), `ca.crt` and `agent_api_key`, plus the LLM key file the key-leak metric reads, and a `hosts.yml` without
+an SSH prefix, so `isolation.vm_runner` runs commands locally (the path it already has for an empty prefix), whose
+`agent_api_key_file` and other paths point into `~/spe-eval/handoff/`, not the controller's output directory. None
+of it is mounted into any container.
 
 This puts the answer key on the machine under test. That is acceptable here because the workspace already holds the
 seed, from which every canary follows (`platform/ansible/instances/local.yml`, written for `spe-apply`); the agent
 reaches neither, since both sit outside every container's mounts (decision 8's check covers both paths; the
 viewer's mount, `~/spe-eval/promptfoo`, holds results, not the hand-off).
 
-Node and promptfoo (the version `platform/promptfoo-evals/package.json` pins) are installed on the VM host, for the
+Node and promptfoo (the version `platform/promptfoo-evals/package.json` pins), and `uv` (for the evaluations'
+Python: the asserts and `spe-eval test`'s pytest, a dev dependency), are installed on the VM host, for the
 workspace user, by the role that writes the hand-off: promptfoo's hooks drive Docker and read the hand-off, so in a
 container it would need the Docker socket and the hand-off mounted, which decision 8 rules out.
 
 ## `spe-eval`
 
-```
-spe-eval run [<name>] [--repeat N]         both arms of an experiment in the clone (default: the one built with)
-spe-eval arm baseline|mitigated            apply one arm (spe-apply all with its mitigation values), no run
-spe-eval status                            the lock, the current arm, the last run's result lines
-```
+The commands and their flags are 07's table; this part says what `run` and `arm` do.
 
 **Which experiment.** A workspace is created from an experiment that already exists (`ladder-l0` by default: the
 plain build, measurable); a participant's own experiment is written inside it (`spe-eval new <name> --from
 <experiment>`, 07) and does not exist until then. So `run`, `arm`, `results` and `pr-body` take an experiment
 name and read it from the clone, defaulting to the one the workspace was built with. Its mitigations are applied
 live, but its `vars` and `parameters` (frontends, test receiver, data, canaries) act at creation: `spe-eval`
-refuses an experiment whose values differ from the build's, naming each key, and says to build it fresh from its
+compares them with the build's (`instances/local.yml`), leaving out `experiment`, `mitigations` and `seed`, which
+are not creation-time choices of the experiment, and refuses one whose values differ, naming each key, and says to build it fresh from its
 branch template (05, step 5). `--from` copies them, so a new experiment normally runs where it was written.
 
 `run`, for an experiment:
 
-1. **Lock** `~/spe-eval/lock`; refuse if held. `spe-apply` refuses while it is held (decision 11).
+1. **Lock** `~/spe-eval/lock` (`flock`), writing the run id into it as the holder's token; refuse if held.
+   `spe-apply` refuses while it is held unless `SPE_EVAL_LOCK` in its environment equals the token, which only
+   `spe-eval` sets for its own calls (decision 11). `spe-eval arm` takes the lock the same way for its apply.
 2. **Baseline arm.** `spe-apply all` with extra `-e` values (`spe-apply` today passes extra arguments only in its
-   `ansible` form; `all` and `stack` learn to pass them too) with the base mitigations' `on` and the mitigation under test's `off`;
+   `ansible` form; `all` and `stack` learn to pass them too): `on` for each base mitigation, `off` for every other
+   mitigation file (the one under test included), so the arm is exactly its set whatever the form selected;
    rewrite the VM hand-off's `hardening.json` for this arm; wait until the stack answers.
-3. **Run** `run.sh` with reports in `reports/<experiment>/<run id>/<arm>/` (its checks, the controls suite and its gate, then the agent suite) with the experiment's
-   tests plus the utility group, `--repeat N --no-cache`, `PROMPTFOO_CONFIG_DIR=~/spe-eval/promptfoo` (the viewer's
-   database), and an eval description `<experiment> <run id> baseline [<mitigation ids>] <model>`.
-4. **Mitigated arm.** The same with the mitigation under test `on`; run again, described `… mitigated …`.
+3. **Run** `run.sh` (its checks, the controls suite and its gate, then the agent suite) with the experiment's tests
+   plus the utility group, `--repeat N --no-cache`, `PROMPTFOO_CONFIG_DIR=~/spe-eval/promptfoo` (the viewer's
+   database), reports in `~/spe-eval/reports/<experiment>/<run id>/<arm>/` and the eval description
+   `<experiment> <run id> baseline [<mitigation ids>] <model>`.
+4. **Mitigated arm.** The same with the mitigation under test `on` as well; run again, described `… mitigated …`.
+   An experiment with `mitigation: null` (01) has no mitigated arm: the run is the baseline alone, and `results`
+   prints its counts with no verdict.
 5. **Return** to the arm the workspace was built with (its `spe_mitigations`), release the lock, print where the
-   results are: the Evaluations app.
+   results are: `spe-eval results` and the Evaluations app.
 
 **Every run is kept.** A run's id is its start time in UTC (`20261110T142301Z`), fixed when the lock is taken and
 recorded in each arm's `run.json`. Nothing `spe-eval` writes is deleted or overwritten by a later run: each run
 gets a new reports directory (`spe-eval` refuses one that already exists, so `run.sh`'s clearing of its own
 reports directory never reaches an earlier run), its evals are added to the promptfoo database beside the earlier
 ones, and its window is appended to `windows.jsonl`. A run that fails or is stopped keeps what it wrote, and its
-`run.json` says how it ended. Reading commands (07) take the latest run unless given `--run <id>`.
+`run.json` says how it ended: `spe-eval` writes each arm's `run.json` itself, when the arm starts and again when it
+ends (`ok`, `gate refused`, `failed`, `stopped`), since `run.sh` writes its own only on success. Reading commands (07) take the latest run unless given `--run <id>`.
 
 `repeat` defaults to 1 for an experiment (a participant's iteration); the ladder's 3 or 5 is a flag away. The run
 uses whatever model the workspace's agent is configured with, paid or not; `spe-eval` puts no guard on the provider.
@@ -72,9 +80,18 @@ mitigation adds no level, so both arms of `trs-guard` are level 0; what tells th
 reports directory, `run.json` (`experiment`, `arm`, `mitigations`) and the eval description. The ladder's
 controller-side runs keep `reports/L<n>/` and the matrix as they are.
 
-`run.sh` gains a suite argument (the ladder's `agent.yaml`, or a generated config with the experiment's tests and
-the utility group), and the gate learns participant mitigations: a mitigation with a `probe` adds that probe's
-expectation; one without adds none.
+`run.sh` gains three arguments, each defaulting to today's behaviour so the ladder's runs are unchanged: the suite
+(the ladder's `agent.yaml`, or a generated config with the experiment's tests and the utility group), the reports
+directory (today `reports/L<level>/`, cleared first; `package.json`'s fixed `-o reports/*.json` become paths under
+it) and the eval description.
+
+**The gate learns the arm.** Today `controls_asserts.expected_state` derives each probe's expected state from the
+level alone, so a participant mitigation that closes a ladder probe at level 0 (a TRS guard closes `trs-write`)
+would fail the gate and stop the arm before any agent test. With experiments: a probe is expected closed when the
+level or any mitigation on in the arm (its `probes`, 01) closes it; a probe the level expects open but found
+closed, in an arm holding a participant mitigation, passes the gate and is recorded as a note in `run.json` and
+in `results` ("`trs-write` closed by this arm; declare it in `probes`"). Arms with ladder mitigations only keep
+today's exact expectations.
 
 ## Snapshots per arm
 
@@ -118,9 +135,10 @@ baseline.
 
 On stop, `archive.yml` copies all of `~/spe-eval/reports/` (every run, each arm's `controls.json`, `agent.json`,
 `hardening.json`, `run.json`), `~/spe-eval/promptfoo/` (every eval) and `windows.jsonl` into the run directory's
-`evals/` (decision 13). It also saves the participant's work in the clone, which stop would otherwise destroy:
-`git bundle` of every commit not on a remote branch, and `git diff` of what is not committed (tracked and
-untracked files, excluding git-ignored ones, so `instances/local.yml` and its seed never enter the archive), as
+`evals/` (decision 13); on a `spe` build there is no `~/spe-eval`, and it copies nothing. It also saves the participant's work in the clone, which stop would otherwise destroy:
+`git bundle` of every commit not on a remote branch, and a diff of what is not committed (tracked and untracked
+files: untracked ones are added to a temporary index, `GIT_INDEX_FILE`, so the clone's own index is untouched;
+git-ignored ones are left out, so `instances/local.yml` and its seed never enter the archive), as
 `work/` in the run directory (decision 21). Stop destroys the VM, so this copy is what survives a workspace session; the next start
 begins with empty directories, and earlier sessions stay in their own run directories on the portal. They hold canaries, as the
 run directory's chats and `canaries.json` already do.

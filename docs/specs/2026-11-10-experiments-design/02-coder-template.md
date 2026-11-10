@@ -30,7 +30,8 @@ only files inside it. The sync assembles the new template's directory before pus
 `mitigations/*.yml`, `experiments/*.yml` and `platform/coder/template/run-ansible.sh` into git-ignored places in
 `platform/coder/experiments-template/`. It does the same from each `experiment/<name>` branch's worktree for
 `spe-x-<name>`, so a branch template's form always matches the code it builds with. Branch names follow the
-existing rule (lowercase, digits, hyphens; at most 26 characters, so `spe-x-<name>` stays within Coder's limit).
+existing rule's characters (lowercase, digits, hyphens), with a new, shorter limit for `experiment/` branches:
+at most 26 characters (`template/` allows 28), so `spe-x-<name>` stays within Coder's limit.
 
 ## Parameters
 
@@ -47,7 +48,13 @@ show where the experiment is picked. Threats and paths are not form fields: they
 not set the build. Its `parameters` set the form, including `experiment` (its own stem) and
 `mitigations` (its `base`: the workspace starts in the baseline arm). `spe-eval` switches arms on the running VM
 (03); the form's `mitigations` is the arm the workspace is created in and returns to. Every workspace from this
-template has an experiment, so `spe-eval run` always has something to run.
+template has an experiment, so `spe-eval run` always has something to run: the form's defaults are `ladder-l0`'s
+preset values (a Terraform test compares them). An experiment picked in the dropdown without its preset keeps the
+form's other values; when they differ from the experiment's `parameters`, `spe-eval` refuses it and names the keys
+(03), and the preset is the fix.
+
+`create.yml` refuses a build whose selected ladder mitigations are not contiguous from L1 (`[L2]` alone), as
+`handoff.check_hardening` already requires of the switches.
 
 Changing either on a running workspace rebuilds it (stop is destroy, start is create): the form chooses a build,
 `spe-eval` compares arms.
@@ -63,9 +70,9 @@ switches), merged in this order with:
    `hardening.json` and in `instances/local.yml`, so `spe-eval` on the VM knows the experiment and the arm it was
    built in.
 
-With `spe_experiments` on, those three, the selected mitigations' values and the experiment's `vars` join
-`spe_local_vars` (`group_vars/all.yml`), so `spe-apply` and a Rebuild re-apply the build's arm instead of falling
-back to every mitigation off.
+With `spe_experiments` on, those three, the participant mitigations' `spe_mitigate_*` switches and the experiment's
+`vars` join `spe_local_vars` (`group_vars/all.yml`; the `spe_harden_*` switches are in it already), so `spe-apply`
+and a Rebuild re-apply the build's arm instead of falling back to the defaults.
 
 Unselected mitigations contribute nothing, so their Ansible defaults (`off`) apply. `create.yml` checks `requires`
 and `conflicts` from the mitigation files and refuses a bad combination before creating anything.

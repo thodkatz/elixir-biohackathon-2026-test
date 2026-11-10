@@ -49,7 +49,7 @@ on:  {spe_harden_data_tiers: [ref, genomes]}
 off: {spe_harden_data_tiers: []}
 requires: []                 # optional: mitigation ids that must also be on
 conflicts: []                # optional: mitigation ids that must not be on
-probe: tier-reach            # optional: the controls-suite probe that shows it, if any
+probes: [tier-reach]         # optional: the controls-suite probes it closes when on (03, the gate)
 ```
 
 - `on` and `off` are the Ansible values; `off` must equal the defaults in `platform/ansible/inventory/group_vars/all.yml`
@@ -95,13 +95,17 @@ parameters:              # the template's parameters; `experiment` and `mitigati
 experiment:
   threat: TM-003
   paths: [P2]
-  mitigation: trs-guard  # the one under test: off in the baseline arm, on in the mitigated arm
+  mitigation: trs-guard  # the one under test: off in the baseline arm, on in the mitigated arm;
+                         # null for a one-arm experiment (ladder-l0: the build as it is)
   base: []               # mitigations on in both arms
   tests: [register-broken-workflow, summarise-workflows]   # ids; the utility group always runs as well
 vars:                    # Ansible values the experiment needs that are not form parameters
   spe_frontends: [agui]
   spe_eval_sink: true
 ```
+
+An experiment with `mitigation: null` has one arm, the baseline: it measures a build as it is (`ladder-l0`) and
+is a starting point to write experiments from, not a contribution (`spe-eval pr-body` refuses it).
 
 `vars` exists because a preset can only set form parameters, and an evaluation needs build settings the form does
 not offer (frontends, the test receiver, injections). `main.tf` applies them (02). Keys in `vars` that a mitigation

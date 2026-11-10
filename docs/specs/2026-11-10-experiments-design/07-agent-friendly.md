@@ -8,7 +8,8 @@ Evaluations, is a view for people over what `spe-eval results` prints; there is 
 ## One entry point for the agent
 
 `platform/instance/workspace/AGENTS.md`, which every one of those agents reads in the workspace, gets a section
-*Experiments*: the path of 05 as numbered steps, each with its command and what success prints. It points to
+*Experiments*: the path of 05 as numbered steps, each with its command and what success prints. Slice 3 writes its
+first steps (`arm`, `run`, `status`, `wait`), which the early output tries with an agent; slice 6 completes it. It points to
 `experiments/README.md`, the index of experiments (one line each: name, threat, paths, mitigation), and to the
 ladder experiments as worked examples. Nothing an agent needs is only in a UI or only in this spec.
 

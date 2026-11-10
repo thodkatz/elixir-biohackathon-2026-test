@@ -44,3 +44,12 @@ sees the results, and contributes it so others can rebuild and remeasure it.
   suites, scoring and isolation already exist on promptfoo. Taking either whole would leave the stack, the
   switches, the reset and the canaries to write again around it. Not used. Not trialled; recorded from what each
   is known to do, as of this spec.
+- **The viewer's read-only guard**: promptfoo 0.125.1 has no read-only mode for `promptfoo view` (its sharing and
+  telemetry switches do not cover the eval creator or replay), so a guard is needed; it is an existing reverse
+  proxy configured with a method and path allow-list (04), not a proxy of our own.
+- **`spe-eval`'s lock and background run**: `flock` for the lock and a user systemd unit (`systemd-run --user`) for
+  `--detach`, both on the VM already; what `spe-eval` itself adds is the order of arms and applies, which no tool
+  knows. No job runner (a queue, a CI runner on the VM) is used: one run at a time per VM needs none.
+
+The search was made in one session (Claude Code), from known tools, not a web search across harnesses; a reviewer
+who knows a closer fit for any piece should say so on the spec's PR.

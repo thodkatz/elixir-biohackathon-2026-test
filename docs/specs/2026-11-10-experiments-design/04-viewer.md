@@ -2,7 +2,7 @@
 
 ## `evals-view`
 
-A compose service in `platform/instance/compose.yml`, profile `evals`, on every instance built from the portal:
+A compose service in `platform/instance/compose.yml`, profile `evals`, on every instance built with `spe_experiments` (02):
 
 - runs `promptfoo view` at the version `platform/promptfoo-evals/package.json` pins (0.125.1), built from that
   directory's lock file, so viewer and runs agree on the database schema;
@@ -13,7 +13,7 @@ A compose service in `platform/instance/compose.yml`, profile `evals`, on every 
   `PROMPTFOO_DISABLE_UPDATE=1`, and no provider, agent or LLM key.
 
 The isolation reset neither restores nor recreates it: it is in neither `isolation.VOLUMES` nor `CONTAINERS`, and
-is listed in `NOT_RESTORED` with its reason.
+its data is a bind mount, not a volume, so there is nothing to snapshot.
 
 ## Read-only
 
@@ -22,6 +22,7 @@ input (`POST /api/eval/replay`) and change stored results. A run from the viewer
 checks, no gate, no lock. A small proxy in front of it (the service's entry point) forwards `GET`
 and the few writes the reading UI needs, and answers 403 to everything else. Which writes the reading UI needs is
 settled by the plan with a test against 0.125.1's routes (`dist/src/server/index.js`): the default is to refuse.
+The proxy is configuration of an existing reverse proxy (an allow-list of methods and paths), not code of our own.
 Without keys a run would fail anyway; the proxy makes it refuse plainly instead.
 
 ## The app

@@ -143,7 +143,8 @@ def _messages(prompt: str, context: dict | None) -> list[dict]:
 
 def _open_when_ready(req: urllib.request.Request, timeout: float, ready_timeout: float, poll: float):
     """POST, again while the agent answers 503: it does before any work, until it has (re)discovered the sandbox,
-    which a restore just recreated (its probe runs every 30 s). Past `ready_timeout` the 503 stands."""
+    which a restore just recreated (its probe runs every 30 s). A 503 for another reason (an upstream outage) waits
+    the same way. Past `ready_timeout` the 503 stands."""
     ready_by = time.monotonic() + ready_timeout
     while True:
         try:

@@ -28,9 +28,11 @@ start reads this section; keep it short.
   boundary*)? 20 of the 36 DRS object names on de.NBI carry a `registry-study-id` canary, so a utility row that
   lists DRS objects fails `canary.answer` at every level, and with it the row's utility pass rate (`matrix._tests`
   ANDs every assertion) — from slice 5's catalogue (F11) and final review; waits on the user: should metadata
-  canaries met in utility rows count? A *no* is a spec clarification; slice 10 reads the matrix either way. Slice
-  10's L3 reports (2026-11-10) found every direct row's `answer` failure there to be a metadata canary from a
-  listing, not the row's target data, so the answer decides most of the matrix above L1.
+  canaries met in utility rows count? A *no* is a spec clarification. Slice 10's L3 reports (2026-11-10) found every
+  direct row's `answer` failure there to be a metadata canary from a listing, not the row's target data, so the
+  answer decides most of the matrix above L1. Also open there: whether L3's `touched` `registry-study-id
+  (linkage.csv)` on direct rows is the DRS listing or the file, and which canaries L1 and L2's direct-row answers
+  were (their reports are gone; a rerun of one level answers both).
 
 ## Unscheduled
 

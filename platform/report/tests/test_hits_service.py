@@ -27,6 +27,8 @@ WID = "11111111-2222-4333-8444-555555555555"
 OTHER = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 NOSIDECAR = "99999999-aaaa-4bbb-8ccc-dddddddddddd"
 NOOWNER = "33333333-4444-4555-8666-777777777777"  # a sidecar with no "owner" key
+STATE_FAILS = "55555555-6666-4777-8888-999999999999"  # the fake Coder fails its state lookup
+WORKSPACE_STATES = {WID: "running", OTHER: "stopped"}  # the fake Coder's latest_build.status
 USERS = {
     "tok-anna": {"username": "anna", "email": "anna@example.org", "roles": [{"name": "member"}]},
     "tok-bob": {"username": "bob", "email": "bob@example.org", "roles": []},
@@ -71,6 +73,12 @@ class FakeCoder(BaseHTTPRequestHandler):
             if user is None:
                 return self.reply(401, {"message": "no"})
             return self.reply(200, user)
+        wid = self.path.rpartition("/")[2]
+        if self.path.startswith("/api/v2/workspaces/") and user is not None:
+            if wid == STATE_FAILS:
+                return self.reply(500, {"message": "boom"})
+            if wid in WORKSPACE_STATES:
+                return self.reply(200, {"latest_build": {"status": WORKSPACE_STATES[wid]}})
         self.reply(404, {"message": "?"})
 
     def reply(self, code, obj):
@@ -324,14 +332,16 @@ class Stream:
     """An open event stream, read by a daemon thread into a queue, so a test waits on the queue with
     a deadline and never blocks on the socket (a read that times out cannot be resumed)."""
 
-    def __init__(self, base: str, wid: str, token: str | None = "tok-anna", query: str = "",
+    def __init__(self, base: str, wid: str | None, token: str | None = "tok-anna", query: str = "",
                  last_event_id: str | None = None):
+        """`wid` None: the admin stream over every workspace (/reports/hits/events)."""
         host = urllib.parse.urlsplit(base).netloc
         self.conn = http.client.HTTPConnection(host, timeout=READ_BACKSTOP)
         headers = {"Cookie": f"{sr.COOKIE}={token}"} if token else {}
         if last_event_id is not None:
             headers["Last-Event-ID"] = last_event_id
-        self.conn.request("GET", f"/reports/{wid}/hits/events{query}", headers=headers)
+        path = f"/reports/{wid}/hits/events" if wid else "/reports/hits/events"
+        self.conn.request("GET", path + query, headers=headers)
         self.sock = self.conn.sock  # the response's file keeps it open past conn.close()
         self.resp = self.conn.getresponse()
         self.status, self.headers = self.resp.status, dict(self.resp.getheaders())
@@ -750,3 +760,149 @@ def test_coder_app_hits():
     text = main_tf.read_text()
     assert 'slug         = "hits"' in text
     assert "/reports/${data.coder_workspace.me.id}/hits" in text
+
+
+# --- Task 12: the admin page, its JSON and its stream (decisions 7, 10, 11; rulings 7, 9) ----------
+
+def _sidecar(srv, wid: str, owner: str, name: str, instance: str) -> None:
+    Path(srv.RequestHandlerClass.store.root, f"{wid}.json").write_text(
+        json.dumps({"owner": owner, "workspace": name, "instance": instance}))
+
+
+def _row_html(text: str, wid: str) -> str:
+    m = re.search(rf'<tr data-workspace="{wid}">.*?</tr>', text, re.S)
+    assert m, f"no row for {wid}"
+    return m.group(0)
+
+
+def test_admin_lists_two_workspaces(server):
+    base, hits_dir, srv = server
+    _sidecar(srv, OTHER, "bob", "bob-ws", "cw-bob-ws")
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
+    write_hits(hits_dir, OTHER, [_record(OTHER, _openwebui_hit()) | {"owner": "bob"}])
+    status, _, body = call(base, "/reports/hits", token="tok-root")
+    assert status == 200
+    text = body.decode()
+    assert f'href="/reports/{WID}/hits">tm-test</a>' in text
+    assert f'href="/reports/{OTHER}/hits">bob-ws</a>' in text
+    assert text.count('<details class="hit ') == 2
+    assert f'data-workspace="{WID}"' in text and f'data-workspace="{OTHER}"' in text
+    assert '<td class="state">running</td>' in _row_html(text, WID)
+    assert '<td class="state">stopped</td>' in _row_html(text, OTHER)
+    assert f'<script src="{sr.PREFIX}/static/hits-admin.js">' in text
+    for tag in re.findall(r"<script\b[^>]*>", text):
+        assert "src=" in tag
+    status, headers, _ = call(base, f"{sr.PREFIX}/static/hits-admin.js")
+    assert status == 200 and headers["Content-Type"].startswith("text/javascript")
+
+
+def test_admin_page_forbidden(service):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
+    for token in ("tok-anna", "tok-bob"):  # anna owns WID: still not an admin
+        assert call(base, "/reports/hits", token=token)[0] == 403
+        assert call(base, "/reports/hits.json", token=token)[0] == 403
+        assert call(base, "/reports/hits/events", token=token)[0] == 403
+    status, headers, _ = call(base, "/reports/hits")
+    assert status == 302 and headers["Location"] == "/login?redirect=%2Freports%2Fhits"
+    assert call(base, "/reports/hits.json")[0] == 401
+    assert call(base, "/reports/hits/events")[0] == 401
+
+
+def test_admin_notice_and_banner(service):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
+    text = call(base, "/reports/hits", token="tok-root")[2].decode()
+    assert hits_view.NOTICE in text
+    assert "Hits are what each participant&#x27;s own instance reported." in text
+    assert text.index("own instance reported.") < text.index('<details class="hit ')
+
+
+def test_deleted_workspace_listed(service):
+    base, hits_dir = service
+    write_hits(hits_dir, NOSIDECAR, [_record(NOSIDECAR, _agui_hit()) | {"owner": "carol", "instance": "cw-carol"}])
+    write_status(hits_dir, OTHER, {"state": "stopped"})  # a status file and no hits yet: a row, last
+    status, _, body = call(base, "/reports/hits", token="tok-root")
+    assert status == 200
+    row = _row_html(body.decode(), NOSIDECAR)
+    assert f'href="/reports/{NOSIDECAR}/hits">{NOSIDECAR}</a>' in row
+    assert "carol" in row and "cw-carol" in row
+    rows = json.loads(call(base, "/reports/hits.json", token="tok-root")[2])["workspaces"]
+    assert [r["workspace"] for r in rows] == [NOSIDECAR, OTHER]
+    assert rows[0]["owner"] == "carol" and rows[0]["instance"] == "cw-carol"
+    assert rows[0]["touched"] == 1 and rows[0]["quiet"] == 0
+    assert rows[0]["newest"] == "2026-11-10T14:03:30Z"
+    assert rows[1]["newest"] is None and rows[1]["status"] == "stopped"
+
+
+def test_workspace_rows_newest_first(tmp_path):
+    write_hits(tmp_path, WID, [_record(WID, _agui_hit()) | {"detected": "2026-11-10T14:00:00Z"}])
+    write_hits(tmp_path, OTHER, [_record(OTHER, _agui_hit()) | {"detected": "2026-11-10T15:00:00Z", "kind": "seen"}])
+    (tmp_path / "not-a-workspace.jsonl").write_text("")
+    rows = hits_view.workspace_rows(str(tmp_path), {WID: {"workspace": "tm-test", "owner": "anna"}, OTHER: None})
+    assert [r["workspace"] for r in rows] == [OTHER, WID]
+    assert rows[1]["name"] == "tm-test" and rows[0]["name"] == OTHER
+    assert rows[0]["quiet"] == 1 and rows[0]["touched"] == 0
+    assert rows[1]["status"] == "not watched yet"
+
+
+def test_filters_offer_present_values(service):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()), _record(WID, _openwebui_hit())])
+    text = call(base, "/reports/hits", token="tok-root")[2].decode()
+    selects = dict(re.findall(r'<select [^>]*data-filter="(\w+)"[^>]*>(.*?)</select>', text, re.S))
+    assert set(selects) == {"kind", "type", "frontend", "workspace"}
+    frontends = re.findall(r'<option value="([^"]*)"', selects["frontend"])
+    assert frontends == ["", "agui", "openwebui"]
+    assert re.findall(r'<option value="([^"]*)"', selects["workspace"]) == ["", WID]
+    assert re.findall(r'<option value="([^"]*)"', selects["kind"]) == ["", "touched"]
+    hit = HitsFile(str(hits_dir / f"{WID}.jsonl")).read()[0]
+    wrapper = (f'data-kind="touched" data-type="{hit["canary"]["type"]}" data-frontend="agui" '
+               f'data-workspace="{WID}"')
+    assert wrapper in text
+
+
+def test_admin_cap_500(service):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()) for _ in range(600)])
+    text = call(base, "/reports/hits", token="tok-root")[2].decode()
+    assert text.count('<details class="hit ') == 500
+    assert "100 more" in text
+    assert 'data-id="600"' in text and 'data-id="100"' not in text  # the newest kept
+    data = json.loads(call(base, "/reports/hits.json", token="tok-root")[2])
+    assert len(data["hits"]) == 600 and data["hits"][0]["id"] == 600
+
+
+def test_admin_stream_ids(service, streams):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit()), _record(WID, _agui_hit())])
+    write_hits(hits_dir, OTHER, [_record(OTHER, _agui_hit())])
+    s = streams(base, None, token="tok-root")
+    assert s.status == 200 and s.headers["Content-Type"] == "text/event-stream"
+    assert s.next(1.0) is None  # no resume: it starts at each file's current end
+    append(hits_dir, OTHER, _record(OTHER, _openwebui_hit()))
+    event = s.next(2.0)
+    assert event is not None and event["id"] == f"{OTHER}:2"
+    data = json.loads(event["data"])
+    hit = HitsFile(str(hits_dir / f"{OTHER}.jsonl")).read()[1]
+    assert data == {"id": 2, "kind": "touched", "loud": True, "type": hit["canary"]["type"],
+                    "frontend": "openwebui", "html": hits_view.hit_html(hit), "workspace": OTHER}
+
+
+def test_admin_stream_new_file(service, streams):
+    base, hits_dir = service
+    write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
+    s = streams(base, None, token="tok-root")
+    assert s.next(1.0) is None
+    append(hits_dir, NOSIDECAR, _record(NOSIDECAR, _agui_hit()))
+    event = s.next(3.0)
+    assert event is not None and event["id"] == f"{NOSIDECAR}:1"
+    assert json.loads(event["data"])["workspace"] == NOSIDECAR
+
+
+def test_coder_state_failure_renders(service):
+    base, hits_dir = service
+    write_hits(hits_dir, STATE_FAILS, [_record(STATE_FAILS, _agui_hit())])
+    status, _, body = call(base, "/reports/hits", token="tok-root")
+    assert status == 200
+    assert '<td class="state"></td>' in _row_html(body.decode(), STATE_FAILS)

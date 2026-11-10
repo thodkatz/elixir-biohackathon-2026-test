@@ -569,6 +569,28 @@ def test_new_generation_resets_offsets(tmp_path):
     assert fake.state()["offsets"]["openwebui"] == 500
 
 
+def test_restart_after_rebuild_keeps_new_generation_hits(tmp_path):
+    """A restart rebuilds the dedup keys from the hits file only for the current generation's hits: a
+    receiver hit (keyed by workspace, generation and canary only) from before a rebuild does not block the
+    rebuilt instance's first delivered hit of the same canary."""
+    fake = Fake(tmp_path)
+    request = (FIXTURES / "requests.jsonl").read_text()
+    fake.receiver.write_text(request)
+    fake.watcher().tick(1000.0)
+    assert [h["kind"] for h in fake.hits()] == ["delivered"]
+    hosts = fake.out / "hosts.yml"  # the rebuild: a new generation, the receiver's log empty again
+    hosts.write_text(hosts.read_text())
+    later = time.time() + 50
+    os.utime(hosts, (later, later))
+    fake.receiver.write_text("")
+    fake.watcher().tick(1003.0)
+    assert fake.state()["generation_start"] == 1
+    restarted = fake.watcher()
+    fake.receiver.write_text(request)
+    restarted.tick(1006.0)
+    assert [h["kind"] for h in fake.hits()] == ["delivered", "delivered"]
+
+
 def _reply(files: dict | None = None, openwebui: dict | None = None) -> dict:
     return {"files": files or {}, "openwebui": openwebui, "missing": [], "errors": []}
 

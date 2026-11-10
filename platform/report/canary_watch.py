@@ -7,7 +7,7 @@ run's archive once, writing each workspace's hits, state and status to the hits 
     canary_watch.py --archive RUN_DIR --out HITS.jsonl [--html PAGE.html] [--api-host HOST]
 
 The first form is the daemon (Watcher.run_forever). Per workspace id it keeps, in the hits directory,
-`<id>.jsonl` (the hits, 0640), `<id>.state.json` (0600: the generation, the reader's offsets, each
+`<id>.jsonl` (the hits, 0640), `<id>.state.json` (0600: the generation and the hits line it began at, the reader's offsets, each
 journal's open run's start, the dedup keys, the run directories scanned, the run log's titles) and
 `<id>.status.json` (0640: `state` running|stopped|unreachable|encrypted|capped, `since`, `last_poll`,
 `hits` per kind, `note`), which the pages read. What the reader returns is the participant's (root on
@@ -570,8 +570,11 @@ def _bounded(mapping: dict, key: str, value: str) -> None:
         del mapping[next(iter(mapping))]
 
 
-def _fresh_state(generation: str | None) -> dict:
-    return {"generation": generation, "offsets": {"journals": {}, "agent_runs": 0, "receiver": 0, "openwebui": 0},
+def _fresh_state(generation: str | None, generation_start: int = 0) -> dict:
+    """`generation_start`: the hits file's line count when this generation began; the hits past it are
+    this generation's (a hit records no generation of its own)."""
+    return {"generation": generation, "generation_start": generation_start,
+            "offsets": {"journals": {}, "agent_runs": 0, "receiver": 0, "openwebui": 0},
             "run_starts": {}, "archived": [], "titles": {}, "journal_titles": {}}
 
 
@@ -583,7 +586,8 @@ def _load_state(data: object) -> tuple[dict, set[str]]:
     """The state file's content, each part checked (a part of the wrong type starts afresh); and its seen keys."""
     if not isinstance(data, dict):
         return _fresh_state(None), set()
-    state = _fresh_state(data.get("generation") if isinstance(data.get("generation"), str) else None)
+    state = _fresh_state(data.get("generation") if isinstance(data.get("generation"), str) else None,
+                         data["generation_start"] if _count(data.get("generation_start")) else 0)
     try:
         state["offsets"] = check_offsets(data.get("offsets"))
         state["offsets"] = _fresh_state(None)["offsets"] | state["offsets"]
@@ -671,7 +675,9 @@ class Watcher:
         hits = HitsFile(str(self._path(ws.id, ".jsonl")), self.hits_max)
         existing = hits.read()
         if state["generation"]:  # a hit written just before a crash, whose key the state missed
-            seen |= {dedup_key(h, state["generation"]) for h in existing
+            # Only this generation's hits: an earlier one's receiver hit (keyed by workspace, generation and
+            # canary only) would otherwise block the rebuilt instance's first delivered hit of that canary.
+            seen |= {dedup_key(h, state["generation"]) for h in hits.read(after=state["generation_start"])
                      if isinstance(h.get("canary"), dict) and isinstance(h["canary"].get("token"), str)}
         kinds = Counter(h["kind"] for h in existing if isinstance(h.get("kind"), str))
         status = {"state": status.get("state"), "since": status.get("since"), "last_poll": status.get("last_poll"),
@@ -704,7 +710,7 @@ class Watcher:
             self._save(w)
             return
         if w.state["generation"] != ws.generation:  # a fresh instance: every offset starts again from 0
-            w.state = _fresh_state(ws.generation) | {"archived": w.state["archived"]}
+            w.state = _fresh_state(ws.generation, w.hits.count) | {"archived": w.state["archived"]}
             w.seen, w.readers, w.dirty = set(), {}, True
         pending = self._scan_runs(w, now)
         if w.hits.full:

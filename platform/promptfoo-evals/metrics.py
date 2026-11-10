@@ -34,10 +34,8 @@ if REPORT not in sys.path:
     sys.path.insert(0, REPORT)
 from canarymatch import (  # noqa: E402
     texts as _texts,
-    unescape as _unescape,
     word as _word,
     found as _found,
-    URL,
     hosts as _hosts,
     received as _received,
 )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pytest
 import sys
 from pathlib import Path
 
@@ -257,3 +258,92 @@ def test_same_run_from_journal_and_run_log_has_one_key():
     assert len(from_journal) == len(from_log) == 1
     assert canary_hits.dedup_key(from_journal[0] | {"workspace": "w"}, "g") == \
         canary_hits.dedup_key(from_log[0] | {"workspace": "w"}, "g")
+
+
+def _assistant_chat(content: object, output: list | None) -> dict:
+    a = {"id": "a", "parentId": "u", "role": "assistant", "content": content, "timestamp": 0}
+    if output is not None:
+        a["output"] = output
+    return {"id": "c", "title": "t", "chat": {"history": {"messages": {
+        "u": {"id": "u", "parentId": None, "role": "user", "content": "hi", "timestamp": 0}, "a": a}}}}
+
+
+def test_openwebui_answer_is_output_text_when_message_items_exist():
+    # What the chat shows: the `message` output items' text; `content` only without them.
+    shown = [{"type": "message", "content": [{"type": "output_text", "text": "shown text"}]}]
+    answer = [p.value for p in canary_hits.openwebui_places(_assistant_chat(f"hidden {FCANARY}", shown), "archive")
+              if p.place == "answer"]
+    assert answer == [["shown text"]]
+    plain = [p.value for p in canary_hits.openwebui_places(_assistant_chat(f"said {FCANARY}", None), "archive")
+             if p.place == "answer"]
+    assert plain == [[f"said {FCANARY}"]]
+    reasoning_only = [{"type": "reasoning", "content": [{"type": "output_text", "text": "think"}]}]
+    only = [p.value for p in canary_hits.openwebui_places(_assistant_chat("plain", reasoning_only), "archive")
+            if p.place == "answer"]
+    assert only == [["plain"]]
+
+
+GOOD_CHAT = {"id": "g", "title": "t", "chat": {"history": {"messages": {
+    "u": {"id": "u", "parentId": None, "role": "user", "content": "go", "timestamp": 0},
+    "a": {"id": "a", "parentId": "u", "role": "assistant", "content": f"it is {FCANARY}", "timestamp": 0}}}}}
+
+
+@pytest.mark.parametrize("bad", [
+    "not a chat", 7, None, ["x"],
+    {"id": "b", "chat": {"messages": 5}},
+    {"id": "b", "chat": {"messages": "abc"}},
+    {"id": "b", "chat": {"history": {"messages": [1, 2]}}},
+    {"id": "b", "chat": {"messages": [{"id": ["x"], "role": "user", "content": "q"},
+                                      {"id": "a", "role": "assistant", "content": "r"}]}},
+    {"id": "b", "chat": {"history": {"messages": {
+        "a": {"id": "a", "parentId": ["u"], "role": "assistant", "content": "r"}}}}},
+    {"id": "b", "chat": {"history": {"messages": {
+        "a": {"id": {"k": 1}, "parentId": "u", "role": "assistant", "content": "r"}}}}},
+    {"id": "b", "chat": {"history": {"messages": {
+        "a": {"id": "a", "parentId": "u", "role": "assistant", "content": "r", "output": 5}}}}},
+    {"id": "b", "chat": {"history": {"messages": {
+        "a": {"id": "a", "parentId": "u", "role": "assistant", "content": "r", "output": {"type": "message"}}}}}},
+    {"id": "b", "chat": {"history": {"messages": {
+        "a": {"id": "a", "parentId": "u", "role": "assistant", "content": "r",
+              "output": [{"type": "function_call", "call_id": ["x"], "arguments": "a"},
+                         {"type": "function_call_output", "call_id": {"y": 1}, "output": "o"}]}}}}},
+])
+def test_openwebui_hostile_shapes_skipped(bad):
+    found = []
+    for chat in (GOOD_CHAT, bad, GOOD_CHAT):
+        found += hits(canary_hits.openwebui_places(chat, "archive"))
+    assert [(h["kind"], h["session"]["id"]) for h in found] == [("answer", "g"), ("answer", "g")]
+
+
+def _good_journal_run(run_id: str) -> list[dict]:
+    return [
+        {"type": "run_start", "at": "a", "run_id": run_id, "messages": [{"role": "user", "content": "go"}]},
+        {"type": "event", "at": "b", "run_id": run_id, "event": {"type": "TEXT_MESSAGE_START", "messageId": "m"}},
+        {"type": "event", "at": "c", "run_id": run_id, "event": {"type": "TEXT_MESSAGE_CONTENT", "messageId": "m",
+                                                                  "delta": f"it is {FCANARY}"}},
+        {"type": "event", "at": "d", "run_id": run_id, "event": {"type": "TEXT_MESSAGE_END", "messageId": "m"}},
+        {"type": "run_end", "at": "e", "run_id": run_id, "status": "done", "error": None},
+    ]
+
+
+@pytest.mark.parametrize("bad", [
+    {"type": "run_start", "run_id": "rb", "messages": 5},
+    {"type": "run_start", "run_id": "rb", "messages": {"role": "user"}},
+    {"type": "run_start", "run_id": "rb", "messages": "user"},
+    {"type": "event", "run_id": "r1", "event": {"type": "TOOL_CALL_START", "toolCallId": ["x"]}},
+    {"type": "event", "run_id": "r1", "event": {"type": "TOOL_CALL_ARGS", "toolCallId": ["x"], "delta": "d"}},
+    {"type": "event", "run_id": "r1", "event": {"type": "TOOL_CALL_END", "toolCallId": {"x": 1}}},
+    {"type": "event", "run_id": "r1", "event": {"type": "TOOL_CALL_RESULT", "toolCallId": ["x"], "content": "c"}},
+    {"type": "event", "run_id": "r1", "event": {"type": "TEXT_MESSAGE_START", "messageId": ["m"]}},
+    {"type": "event", "run_id": "r1", "event": {"type": "TEXT_MESSAGE_CONTENT", "messageId": ["m"], "delta": "d"}},
+    {"type": "event", "run_id": "r1", "event": {"type": "TEXT_MESSAGE_END", "messageId": {"m": 1}}},
+    {"type": "event", "run_id": ["r1"], "event": {"type": "TEXT_MESSAGE_END", "messageId": "m"}},
+    {"type": "meta", "title": ["x"]},
+    "not a line", 3, None,
+])
+def test_journal_hostile_lines_skipped(bad):
+    reader = canary_hits.JournalReader("s")
+    first, second = _good_journal_run("r1"), _good_journal_run("r2")
+    lines = first[:3] + [bad] + first[3:] + [bad] + second
+    found = hits([p for line in lines for p in reader.feed(line)])
+    assert [(h["kind"], h["run"]) for h in found] == [("answer", "r1"), ("answer", "r2")]

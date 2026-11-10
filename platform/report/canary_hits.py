@@ -95,7 +95,12 @@ class JournalReader:
         if not isinstance(run_id, str):
             return []
         if kind == "run_start":
-            users = [m for m in line.get("messages") or [] if isinstance(m, dict) and m.get("role") == "user"]
+            messages = line.get("messages")
+            if messages is None:
+                messages = []
+            if not isinstance(messages, list):
+                return []
+            users = [m for m in messages if isinstance(m, dict) and m.get("role") == "user"]
             prompt = "\n".join(_text(m.get("content")) for m in users) if users else None
             self.runs[run_id] = {"prompt": prompt, "calls": {}, "texts": {}}
             return [self._place(line, run_id, "prompt", prompt)] if prompt else []
@@ -113,8 +118,10 @@ class JournalReader:
         return self._event(line, run_id, event)
 
     def _event(self, line: dict, run_id: str, event: dict) -> list[Place]:
-        run, kind = self._run(run_id), event.get("type")
         call_id, message_id = event.get("toolCallId"), event.get("messageId")
+        if not isinstance(call_id, (str, type(None))) or not isinstance(message_id, (str, type(None))):
+            return []  # ids are dict keys: anything but a string is a hostile record
+        run, kind = self._run(run_id), event.get("type")
         if kind == "TOOL_CALL_START" and isinstance(call_id, str):
             run["calls"][call_id] = {"name": event.get("toolCallName"), "args": [], "args_done": False}
         elif kind == "TOOL_CALL_ARGS" and call_id in run["calls"] and isinstance(event.get("delta"), str):
@@ -165,25 +172,37 @@ def agent_run_places(record: dict, titles: dict[str, str]) -> list[Place]:
 
 # Open WebUI
 
+def _id(value: object) -> bool:
+    """A message or call id, used as a dict key: a string or missing; anything else is hostile."""
+    return value is None or isinstance(value, str)
+
+
 def _messages(chat: dict) -> list[dict]:
     """The chat's messages: history.messages (a dict by id), or the flat `messages` list of an older
-    chat, whose replies then answer the user message before them."""
-    history = (chat.get("history") or {}).get("messages") if isinstance(chat.get("history"), dict) else None
+    chat, whose replies then answer the user message before them. A message whose `id` or `parentId`
+    is not a string is skipped."""
+    history = chat.get("history").get("messages") if isinstance(chat.get("history"), dict) else None
     if isinstance(history, dict) and history:
-        return [m for m in history.values() if isinstance(m, dict)]
-    flat = [m for m in chat.get("messages") or [] if isinstance(m, dict)]
-    out, last_user = [], None
-    for m in flat:
-        out.append(m if "parentId" in m else m | {"parentId": last_user})
-        if m.get("role") == "user":
-            last_user = m.get("id")
-    return out
+        found = list(history.values())
+    else:
+        flat = chat.get("messages")
+        found, last_user = [], None
+        for m in flat if isinstance(flat, list) else []:
+            if not isinstance(m, dict) or not _id(m.get("id")):
+                continue
+            found.append(m if "parentId" in m else m | {"parentId": last_user})
+            if m.get("role") == "user":
+                last_user = m.get("id")
+    return [m for m in found if isinstance(m, dict) and _id(m.get("id")) and _id(m.get("parentId"))]
 
 
 def openwebui_places(chat: dict, source: str) -> list[Place]:
     """One chat: an item of the export's `chats`, or one row of the database's `chat` table (`id`,
     `title`, `chat` as JSON text). An assistant message is one run (its `id`); its prompt is the
-    content of the user message it answers (its `parentId`)."""
+    content of the user message it answers (its `parentId`). Records of the wrong shape (root-controlled
+    data) are skipped: a chat, message or output item, never an exception."""
+    if not isinstance(chat, dict):
+        return []
     body = chat.get("chat")
     if isinstance(body, str):
         try:
@@ -207,7 +226,10 @@ def openwebui_places(chat: dict, source: str) -> list[Place]:
             continue
         parent = by_id.get(m.get("parentId"))
         prompt = _text(parent.get("content")) if parent else None
-        items = [i for i in m.get("output") or [] if isinstance(i, dict)]
+        output = m.get("output")
+        if output is not None and not isinstance(output, list):
+            continue
+        items = [i for i in output or [] if isinstance(i, dict) and _id(i.get("call_id"))]
         calls = {i.get("call_id"): i for i in items if i.get("type") == "function_call"}
         outputs = {i.get("call_id"): i.get("output") for i in items if i.get("type") == "function_call_output"}
         for i in items:
@@ -221,9 +243,10 @@ def openwebui_places(chat: dict, source: str) -> list[Place]:
                 tool = {"name": call.get("name"), "call_id": call_id, "args": call.get("arguments"),
                         "result": i.get("output")}
                 out.append(Place(**common, prompt=prompt, place="tool_result", tool=tool, value=i.get("output")))
-        # The answer: the message's content, and the text of its `message` output items, which the
-        # chat shows instead of `content` when `output` is set.
-        answer = [_text(m.get("content"))] + [_text(i.get("content")) for i in items if i.get("type") == "message"]
+        # The answer as the chat shows it (write_run.render_message): the text of its `message` output
+        # items, or the message's `content` when it has none.
+        shown = [i for i in items if i.get("type") == "message"]
+        answer = [_text(i.get("content")) for i in shown] if shown else [_text(m.get("content"))]
         answer = [a for a in answer if a]
         if answer:
             out.append(Place(**common, prompt=prompt, place="answer", tool=None, value=answer))
@@ -370,7 +393,8 @@ class HitsFile:
         """The hits whose id is past `after`, in order; a line that does not parse is skipped."""
         out = []
         try:
-            with open(self.path, encoding="utf-8") as f:
+            # errors="replace": a line cut mid-character by a crash fails to parse, not the read
+            with open(self.path, encoding="utf-8", errors="replace") as f:
                 for n, line in enumerate(f, 1):
                     if n <= after:
                         continue

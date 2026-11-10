@@ -100,13 +100,21 @@ def test_ids_are_line_numbers(tmp_path):
 
 
 def test_hits_file_mode_0640(tmp_path):
-    old = os.umask(0o002)
+    old = os.umask(0o077)  # tighter than 0640: only the fchmod gives group read
     try:
         hits = HitsFile(str(tmp_path / "hits.jsonl"))
         hits.append({"kind": "answer"})
     finally:
         os.umask(old)
     assert stat.S_IMODE(os.stat(tmp_path / "hits.jsonl").st_mode) == 0o640
+
+
+def test_hits_file_read_survives_a_cut_multibyte_line(tmp_path):
+    path = tmp_path / "hits.jsonl"
+    whole = json.dumps({"id": 1, "excerpt": "\u00e9t\u00e9"}, ensure_ascii=False).encode() + b"\n"
+    cut = json.dumps({"id": 2, "excerpt": "\u00e9"}, ensure_ascii=False).encode()[:-3] + b"\xc3"
+    path.write_bytes(whole + cut)
+    assert [h["id"] for h in HitsFile(str(path)).read()] == [1]
 
 
 def test_hits_file_cap(tmp_path):

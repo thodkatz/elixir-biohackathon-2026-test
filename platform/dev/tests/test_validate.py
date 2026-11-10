@@ -35,11 +35,191 @@ def real_path_ids() -> set[str]:
     return {e.meta["id"] for e in entries}
 
 
+def real_threat_ids() -> set[str]:
+    entries, problems = validate.validate_catalog(REPO / "threats", validate.load_vocabulary(REPO / "vocabulary.yaml"))
+    assert not problems, problems
+    return {e.meta["id"] for e in entries}
+
+
+def real_mitigations_by_id() -> dict:
+    mitigations, problems = validate.validate_mitigations_catalog(
+        REPO / "mitigations", real_path_ids(), real_probe_ids(), real_group_vars()
+    )
+    assert not problems, problems
+    return {m.meta["id"]: m.meta for m in mitigations}
+
+
+def real_fixtures() -> list[dict]:
+    return validate.load_fixtures(REPO / "platform/ansible/catalog/injections/fixtures.json")
+
+
+def real_test_ids() -> set[str]:
+    return validate.test_ids_from(REPO / "platform/promptfoo-evals/tests")
+
+
+def real_reserved_vars() -> set[str]:
+    return validate.experiment_reserved_ansible_names(real_canary_types())
+
+
+def validate_experiments(d: Path, mitigations: dict | None = None):
+    return validate.validate_experiments_catalog(
+        d, real_threat_ids(), real_path_ids(), mitigations if mitigations is not None else real_mitigations_by_id(),
+        real_fixtures(), real_test_ids(), real_reserved_vars(),
+    )
+
+
+def write_experiment(tmp_path: Path, text: str, name: str = "test-experiment.yml") -> Path:
+    d = tmp_path / "experiments"
+    d.mkdir(exist_ok=True)
+    (d / name).write_text(text)
+    return d
+
+
+# A valid experiment: base L1, mitigation under test L2, one real injection, no own tests.
+GOOD_EXPERIMENT = """
+name: Test experiment
+description: A fixture experiment for validate.py's tests.
+parameters:
+  experiment: test-experiment
+  mitigations: [L1]
+  samples: [HG002]
+  tiers: [ref]
+  workflows: [wes-drs-smoke]
+  canaries: [flag_file]
+  flavor: de.NBI mini
+  smoke_test: true
+experiment:
+  threat: TM-001
+  paths: [P2]
+  mitigation: L2
+  base: [L1]
+  injections: [registry-preflight]
+  tests: []
+vars:
+  spe_eval_sink: true
+"""
+
+
 def test_cli_validates_the_repos_files():
     res = subprocess.run([sys.executable, str(VALIDATE)], cwd=REPO, capture_output=True, text=True)
     assert res.returncode == 0, res.stdout + res.stderr
     assert res.stdout.strip().startswith("OK:")
-    assert "paths" in res.stdout and "mitigations" in res.stdout
+    assert "paths" in res.stdout and "mitigations" in res.stdout and "experiments" in res.stdout
+
+
+def test_four_ladder_experiments_pass():
+    entries, problems = validate_experiments(REPO / "experiments")
+    assert not problems, problems
+    assert {e.path.stem for e in entries} == {"ladder-l0", "ladder-l1", "ladder-l2", "ladder-l3"}
+
+
+def test_absent_experiments_dir_is_fine(tmp_path):
+    entries, problems = validate_experiments(tmp_path / "no-such-dir")
+    assert entries == [] and problems == []
+
+
+def test_a_good_experiment_passes(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT)
+    entries, problems = validate_experiments(d)
+    assert not problems, problems
+    assert [e.path.stem for e in entries] == ["test-experiment"]
+
+
+def test_experiment_parameters_experiment_mismatch_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("experiment: test-experiment", "experiment: wrong-name"))
+    _, problems = validate_experiments(d)
+    assert any("parameters.experiment" in p and "wrong-name" in p for p in problems), problems
+
+
+def test_experiment_unknown_threat_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("threat: TM-001", "threat: TM-999"))
+    _, problems = validate_experiments(d)
+    assert any("TM-999" in p for p in problems), problems
+
+
+def test_experiment_unknown_path_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("paths: [P2]", "paths: [P99]"))
+    _, problems = validate_experiments(d)
+    assert any("P99" in p for p in problems), problems
+
+
+def test_experiment_planned_mitigation_under_test_fails(tmp_path):
+    # L4 exists but is status: planned (no on/off yet).
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("mitigation: L2", "mitigation: L4"))
+    _, problems = validate_experiments(d)
+    assert any("L4" in p and "planned" in p for p in problems), problems
+
+
+def test_experiment_unknown_mitigation_in_base_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("base: [L1]", "base: [not-a-mitigation]"))
+    _, problems = validate_experiments(d)
+    assert any("not-a-mitigation" in p for p in problems), problems
+
+
+def test_experiment_mitigation_under_test_also_in_base_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("mitigation: L2", "mitigation: L1"))
+    _, problems = validate_experiments(d)
+    assert any("L1" in p and "also in base" in p for p in problems), problems
+
+
+def test_experiment_parameters_mitigations_mismatch_base_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("mitigations: [L1]", "mitigations: []"))
+    _, problems = validate_experiments(d)
+    assert any("parameters.mitigations" in p for p in problems), problems
+
+
+def test_experiment_unknown_injection_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
+        "injections: [registry-preflight]", "injections: [not-a-fixture]"
+    ))
+    _, problems = validate_experiments(d)
+    assert any("not-a-fixture" in p for p in problems), problems
+
+
+def test_experiment_unknown_test_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("tests: []", "tests: [not-a-test]"))
+    _, problems = validate_experiments(d)
+    assert any("not-a-test" in p for p in problems), problems
+
+
+def test_experiment_requires_not_satisfied_in_arm_fails(tmp_path):
+    mitigations = dict(real_mitigations_by_id())
+    mitigations["L2"] = {**mitigations["L2"], "requires": ["L3"]}
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT)
+    _, problems = validate_experiments(d, mitigations)
+    assert any("requires" in p and "L3" in p for p in problems), problems
+
+
+def test_experiment_conflicts_violated_in_arm_fails(tmp_path):
+    mitigations = dict(real_mitigations_by_id())
+    mitigations["L2"] = {**mitigations["L2"], "conflicts": ["L1"]}
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT)
+    _, problems = validate_experiments(d, mitigations)
+    assert any("conflicts" in p and "L1" in p for p in problems), problems
+
+
+def test_experiment_vars_key_set_by_injection_switch_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
+        "vars:\n  spe_eval_sink: true", "vars:\n  spe_inject_trs_description: true"
+    ))
+    _, problems = validate_experiments(d)
+    assert any("spe_inject_trs_description" in p and "registry-preflight" in p for p in problems), problems
+
+
+def test_experiment_vars_key_set_by_mitigation_on_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
+        "vars:\n  spe_eval_sink: true", "vars:\n  spe_harden_trs_readonly: true"
+    ))
+    _, problems = validate_experiments(d)
+    assert any("spe_harden_trs_readonly" in p and "L1" in p for p in problems), problems
+
+
+def test_experiment_vars_key_set_by_parameter_fails(tmp_path):
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
+        "vars:\n  spe_eval_sink: true", "vars:\n  spe_samples: [HG002]"
+    ))
+    _, problems = validate_experiments(d)
+    assert any("spe_samples" in p for p in problems), problems
 
 
 def test_path_missing_frontmatter_key_fails(tmp_path):

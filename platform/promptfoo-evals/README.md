@@ -43,22 +43,32 @@ failure there is logged and raised). Restored volumes, containers and what is le
 `isolation.VOLUMES`, `CONTAINERS`, `NOT_RESTORED`.
 
 `create.yml` does not wipe the volumes, so a rebuild in place over a run that was never restored (an aborted one,
-say) would snapshot that run's state as the new build's. `beforeEach` writes
-`<hand-off>/stack_dirty.json` (`{"generated_at": …}`) before each test; a full restore no test follows (`afterAll`,
-`isolation.py restore`) or a snapshot removes it. With no snapshot of this build and a marker from another build,
-`beforeAll` and `isolation.py snapshot` refuse: rebuild from a clean stack (`destroy.yml`, then `create.yml`), or
-set `SPE_ISOLATION_ACCEPT_DIRTY=1` to snapshot anyway.
+say) would snapshot that run's state as the new build's. `beforeEach` writes `<hand-off>/stack_dirty.json`
+(`{"key": …}`, the full snapshot key below) before each test; a full restore no test follows (`afterAll`,
+`isolation.py restore`) or a snapshot removes it. With no snapshot of this build (or arm) and a marker from
+another one, `beforeAll` and `isolation.py snapshot` refuse: rebuild from a clean stack (`destroy.yml`, then
+`create.yml`), or set `SPE_ISOLATION_ACCEPT_DIRTY=1` to snapshot anyway.
 
-The snapshot lives on the VM in `/var/lib/spe-snapshots/<instance>/<generated_at>/` and is keyed to
-`canaries.json`: a re-provisioned instance (every level of the de.NBI VM shares `output/denbi-agui-01/`) takes a
-new one and deletes the old. Restore times are kept in `<hand-off>/restore_times.json`; their median goes into
-`hardening.json` as `restore_seconds`. The image used for tar is `alpine:3.20` (`SPE_SNAPSHOT_IMAGE` overrides
-it, e.g. with `redis:6.2.6-alpine`, already on the VM, if the VM cannot pull).
+The snapshot lives on the VM in `/var/lib/spe-snapshots/<instance>/<key>/`, keyed to `canaries.json`'s
+`generated_at` plus the arm's mitigation set, sorted (`hardening.json`'s `mitigations`, decision 9): `<stamp>`
+for an empty set (today's single-arm builds, and older hand-offs with no `mitigations` field), `<stamp>+<id1>
++<id2>` otherwise. Snapshotting one key replaces only that key's own directory, so a re-provisioned instance
+(every level of the de.NBI VM shares `output/denbi-agui-01/`) deletes only its own build's old snapshot and two
+arms of the same build keep their own, each restoring from only its own (`isolation.snapshot_key`). Restore times
+are kept in `<hand-off>/restore_times.json`; their median goes into `hardening.json` as `restore_seconds`. The
+image used for tar is `alpine:3.20` (`SPE_SNAPSHOT_IMAGE` overrides it, e.g. with `redis:6.2.6-alpine`, already on
+the VM, if the VM cannot pull).
 
 By hand, from this directory with `SPE_HANDOFF_DIR` set: `python3 isolation.py exists` (exit 0/1),
 `python3 isolation.py snapshot`, `python3 isolation.py restore` (prints the seconds), and
 `python3 isolation.py sh <<'EOF' … EOF` (a shell script on the VM, through `hosts.yml`'s SSH prefix).
 No model calls; each restore stops the workflow stack and the sandbox for about a minute.
+
+**Progress, while a run is going.** With `SPE_EVAL_PROGRESS=<path>` set, `beforeAll` appends
+`{"total": <test count>}` to that file before anything else (promptfoo does not forward the CLI `--repeat` into
+the suite the hook sees, so this is the suite's test count, not tests × repeat), and each `afterEach` appends
+`{"done": <k>, "test": <description or id>, "pass": <bool>, "error": <str|null>}`. `spe-eval status` reads the
+file's last line. A write failure is logged and swallowed: it never fails a test.
 
 ## Controls suite (no model)
 

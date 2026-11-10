@@ -27,7 +27,7 @@ container it would need the Docker socket and the hand-off mounted, which decisi
 ## `spe-eval`
 
 ```
-spe-eval run [--repeat N] [--allow-paid]   both arms of the workspace's experiment; refuses without one
+spe-eval run [--repeat N]                  both arms of the workspace's experiment; refuses without one
 spe-eval arm baseline|mitigated            apply one arm (spe-apply all with its mitigation values), no run
 spe-eval status                            the lock, the current arm, the last run's result lines
 ```
@@ -35,18 +35,18 @@ spe-eval status                            the lock, the current arm, the last r
 `run`, for an experiment:
 
 1. **Lock** `~/spe-eval/lock`; refuse if held. `spe-apply` refuses while it is held (decision 11).
-2. **Cost guard.** If the instance's agent provider is `anthropic`, refuse unless `--allow-paid` (decision 11).
-3. **Baseline arm.** `spe-apply all` with extra `-e` values (`spe-apply` today passes extra arguments only in its
+2. **Baseline arm.** `spe-apply all` with extra `-e` values (`spe-apply` today passes extra arguments only in its
    `ansible` form; `all` and `stack` learn to pass them too) with the base mitigations' `on` and the mitigation under test's `off`;
    rewrite the VM hand-off's `hardening.json` for this arm; wait until the stack answers.
-4. **Run** `run.sh` with reports in `reports/<experiment>/<arm>/` (its checks, the controls suite and its gate, then the agent suite) with the experiment's
+3. **Run** `run.sh` with reports in `reports/<experiment>/<arm>/` (its checks, the controls suite and its gate, then the agent suite) with the experiment's
    tests plus the utility group, `--repeat N --no-cache`, `PROMPTFOO_CONFIG_DIR=~/spe-eval/promptfoo` (the viewer's
    database), and an eval description `<experiment> baseline [<mitigation ids>] <model>`.
-5. **Mitigated arm.** The same with the mitigation under test `on`; run again, described `… mitigated …`.
-6. **Return** to the arm the workspace was built with (its `spe_mitigations`), release the lock, print where the
+4. **Mitigated arm.** The same with the mitigation under test `on`; run again, described `… mitigated …`.
+5. **Return** to the arm the workspace was built with (its `spe_mitigations`), release the lock, print where the
    results are: the Evaluations app.
 
-`repeat` defaults to 1 for an experiment (a participant's iteration); the ladder's 3 or 5 is a flag away.
+`repeat` defaults to 1 for an experiment (a participant's iteration); the ladder's 3 or 5 is a flag away. The run
+uses whatever model the workspace's agent is configured with, paid or not; `spe-eval` puts no guard on the provider.
 
 **An arm is its mitigation set, not a level.** `run.sh` today names a run by `hardening.json`'s level, and
 `handoff.check_hardening` requires that level to count the ladder switches from L1 without a gap. Both stay true for

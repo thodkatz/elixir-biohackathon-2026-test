@@ -19,7 +19,7 @@ is listed in `NOT_RESTORED` with its reason.
 
 `promptfoo view` can start evals (`POST /api/eval/job`, the eval creator's Run button), replay a test with edited
 input (`POST /api/eval/replay`) and change stored results. A run from the viewer would bypass `spe-eval`: no
-checks, no gate, no lock, no cost guard. A small proxy in front of it (the service's entry point) forwards `GET`
+checks, no gate, no lock. A small proxy in front of it (the service's entry point) forwards `GET`
 and the few writes the reading UI needs, and answers 403 to everything else. Which writes the reading UI needs is
 settled by the plan with a test against 0.125.1's routes (`dist/src/server/index.js`): the default is to refuse.
 Without keys a run would fail anyway; the proxy makes it refuse plainly instead.

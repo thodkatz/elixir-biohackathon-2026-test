@@ -6,7 +6,7 @@
 |---|---|---|---|
 | 1 | **The catalogue as files**: `paths/` (P1–P4, template), `mitigations/` (L1–L3, L4–L5 planned), `validate.py` over all three, `matrix.CATALOGUE` read from files, `tests/experiments/` | 2, 3, 4 | no |
 | 2 | **The form**: `experiment` and `mitigations` parameters, the merge into `ansible_vars`, `requires`/`conflicts` in `create.yml`, `hardening.json` `mitigations`, ladder testbeds | 1, 5, 6 | one de.NBI build (`ladder-l2`) |
-| 3 | **`spe-eval`**: VM-local hand-off, local `isolation`, per-arm snapshots, the two arms, `run.sh`'s suite argument and gate for mitigations, lock, cost guard, archive | 7–11, 13 | de.NBI, a `--repeat 1` run |
+| 3 | **`spe-eval`**: VM-local hand-off, local `isolation`, per-arm snapshots, the two arms, `run.sh`'s suite argument and gate for mitigations, lock, archive | 7–11, 13 | de.NBI, a `--repeat 1` run |
 | 4 | **The viewer and apps**: `evals-view`, the read-only proxy, Run evaluation, Evaluations; the early output | 14–16 | de.NBI |
 | 5 | **Eval runs apart in canary hits**: provider mark, run-log `source`, the watcher and pages | 12 | de.NBI |
 | 6 | **Contribution**: `check_experiment.py`, PR template, `CONTRIBUTING.md`, the workspace guide's section; a worked example experiment beyond the ladder (e.g. a TRS guard) built with it | 17 | de.NBI |

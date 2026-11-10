@@ -14,7 +14,7 @@
 |---|---|---|
 | **`promptfoo view` on the VM behind a Coder app** | promptfoo's own UI: results table, outputs, tool calls, side-by-side evals; a normal `coder_app`, owner-only; its run endpoints must be blocked | **chosen** |
 | A results page of our own in the report service | full control, the ladder matrix possible; a second UI to build and keep | not now; the matrix stays a command (04) |
-| `promptfoo view`'s own Run button as the trigger | no `spe-eval` to build; but it runs a bare suite: no checks, no controls gate, no lock, no cost guard, no arms | rejected (04, *Read-only*) |
+| `promptfoo view`'s own Run button as the trigger | no `spe-eval` to build; but it runs a bare suite: no checks, no controls gate, no lock, no arms | rejected (04, *Read-only*) |
 
 ## How options grow
 

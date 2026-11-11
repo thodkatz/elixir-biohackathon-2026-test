@@ -559,8 +559,10 @@ def check_mitigations_catalog(mitigations: list[Mitigation]) -> list[str]:
 
 def validate_mitigations_catalog(mitigations_dir: Path, path_ids: set[str], probe_ids: set[str],
                                   group_vars: dict) -> tuple[list[Mitigation], list[str]]:
-    """Load and check every <id>.yml. Returns (valid mitigations, problems), as validate_catalog does."""
-    files = sorted(mitigations_dir.glob("*.yml"))
+    """Load and check every <id>.yml, except TEMPLATE.yml (a copy-and-fill-in document, not a
+    mitigation to validate; `mitigations/TEMPLATE.yml`). Returns (valid mitigations, problems), as
+    validate_catalog does."""
+    files = sorted(p for p in mitigations_dir.glob("*.yml") if p.stem != "TEMPLATE")
     if not files:
         return [], [f"no *.yml files found in '{mitigations_dir}'"]
 
@@ -798,10 +800,11 @@ def check_experiments_catalog(entries: list[ExperimentEntry], experiments_dir: P
 def validate_experiments_catalog(experiments_dir: Path, threat_ids: set[str], path_ids: set[str],
                                   mitigations: dict[str, dict], fixtures: list[dict], test_ids: set[str],
                                   reserved_vars: set[str]) -> tuple[list[ExperimentEntry], list[str]]:
-    """Load and check every experiments/*.yml. Returns (valid entries, problems), as validate_catalog
-    does. Unlike the other catalogs, an empty or absent directory is not itself a problem: callers
-    check `experiments_dir.is_dir()` first (experiments are optional)."""
-    files = sorted(experiments_dir.glob("*.yml"))
+    """Load and check every experiments/*.yml, except TEMPLATE.yml (a copy-and-fill-in document, not
+    an experiment to validate; `experiments/TEMPLATE.yml`). Returns (valid entries, problems), as
+    validate_catalog does. Unlike the other catalogs, an empty or absent directory is not itself a
+    problem: callers check `experiments_dir.is_dir()` first (experiments are optional)."""
+    files = sorted(p for p in experiments_dir.glob("*.yml") if p.stem != "TEMPLATE")
     entries: list[ExperimentEntry] = []
     problems: list[str] = []
     for path in files:

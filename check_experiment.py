@@ -9,8 +9,9 @@ minute. See docs/specs/2026-11-10-experiments-design/05-contribution.md, `check_
 not a rulebook*): nothing here refuses an experiment for its shape, only for what would fail in the
 middle of a run or break another experiment.
 
-Without <name>, every experiments/*.yml is checked (TEMPLATE files excluded: a later task adds
-experiments/TEMPLATE.yml and mitigations/TEMPLATE.yml as presets, not experiments to check).
+Without <name>, every experiments/*.yml is checked (experiments/TEMPLATE.yml and
+mitigations/TEMPLATE.yml are copy-and-fill-in documents, not experiments or mitigations to check,
+and are excluded here too).
 
 What is checked, reusing validate.py's functions rather than duplicating them:
 
@@ -228,7 +229,7 @@ def _catalogue_label_values() -> dict:
             m = validate.PATH_FILENAME_PATTERN.match(p.name)
             if m:
                 paths.add(m.group(1))
-        mitigations = {p.stem for p in (HERE / "mitigations").glob("*.yml")}
+        mitigations = {p.stem for p in (HERE / "mitigations").glob("*.yml") if p.stem != "TEMPLATE"}
         return {
             "group": frozenset(groups), "threat": frozenset(threats | {None}),
             "path": frozenset(paths | {None}), "closed_by": frozenset(mitigations | {None}),

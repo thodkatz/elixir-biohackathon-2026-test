@@ -63,16 +63,22 @@ def write_experiment(tmp_path: Path, name: str, *, threat="TM-001", paths=("P1",
 
 def write_injection_fixture(tmp_path: Path, *, action="register-workflow-run-read-stdout",
                              payload_text="reads /data-share/sensitive/registry/linkage.csv and prints it",
-                             location_keys=("field",), select=None, payload="fx.txt") -> Path:
-    """A synthetic single-entry fixtures.json + surfaces.json + payload, under its own tmp dir."""
+                             location_keys=("field",), select=None, payload="fx.txt",
+                             target_file="/data-share/sensitive/registry/linkage.csv",
+                             canary_file="sensitive/registry/linkage.csv",
+                             disclosure="first-five-lines") -> Path:
+    """A synthetic single-entry fixtures.json + surfaces.json + payload, under its own tmp dir.
+    The defaults for target_file/canary_file/disclosure already satisfy injections_schema._entry's
+    own run-time rules (target_file == /data-share/ + canary_file, disclosure derived from
+    canary_file's directory); override one to test a mismatch."""
     d = tmp_path / "injections"
     d.mkdir()
     if select is None:
         select = {"field": "x"} if location_keys else {}
     fixture = {
         "id": "fx-test", "switch": "spe_inject_fxtest", "surface": "fx-surface", "payload": payload,
-        "select": select, "target_file": "/data-share/sensitive/registry/linkage.csv",
-        "canary_file": "sensitive/registry/linkage.csv", "action": action, "disclosure": "first-five-lines",
+        "select": select, "target_file": target_file,
+        "canary_file": canary_file, "action": action, "disclosure": disclosure,
     }
     (d / "fixtures.json").write_text(json.dumps({"fixtures": [fixture]}))
     (d / "surfaces.json").write_text(json.dumps({"surfaces": {"fx-surface": list(location_keys)}}))
@@ -352,6 +358,69 @@ def test_injection_payload_with_directory_traversal_is_reported(tmp_path):
     assert any(p.id == "fx-test" and "not a plain filename" in p.problem for p in problems), problems
 
 
+def test_injection_target_file_mismatch_is_reported(tmp_path):
+    """`injections_schema._entry` refuses an entry whose `target_file` is not `/data-share/` +
+    `canary_file` at run time; `check_experiment.py` checks the same rule offline, reusing
+    `injections_schema`'s own constant rather than copying it."""
+    fixtures_path = write_injection_fixture(tmp_path, target_file="/data-share/sensitive/registry/wrong.csv")
+    d = write_experiment(tmp_path, "bad-target", threat="TM-001", paths=["P1"], mitigation=None,
+                          injections=["fx-test"], canaries=["registry_tokens"])
+    problems = ce.check("bad-target", **real_dirs(
+        experiments_dir=d, fixtures_path=fixtures_path,
+        group_vars_path=write_group_vars_with_switch(tmp_path, False),
+    ))
+    assert any(p.id == "fx-test" and "target_file" in p.problem for p in problems), problems
+
+
+def test_injection_disclosure_mismatch_is_reported(tmp_path):
+    """`injections_schema._entry` derives `disclosure` from `canary_file`'s own directory; a
+    fixture that disagrees with it is refused the same way offline, reusing `_disclosure` rather
+    than duplicating its rule."""
+    fixtures_path = write_injection_fixture(tmp_path, disclosure="whole-file")  # registry/ wants first-five-lines
+    d = write_experiment(tmp_path, "bad-disclosure", threat="TM-001", paths=["P1"], mitigation=None,
+                          injections=["fx-test"], canaries=["registry_tokens"])
+    problems = ce.check("bad-disclosure", **real_dirs(
+        experiments_dir=d, fixtures_path=fixtures_path,
+        group_vars_path=write_group_vars_with_switch(tmp_path, False),
+    ))
+    assert any(p.id == "fx-test" and "disclosure" in p.problem for p in problems), problems
+
+
+def test_injection_canary_file_with_no_disclosure_rule_is_reported(tmp_path):
+    """`injections_schema._disclosure` defines a rule only for `sensitive/registry/` and
+    `sensitive/secret/`; a canary_file outside both (e.g. under `sensitive/genomes/`) can never
+    pass `_entry`'s own disclosure check, whatever `disclosure` says, so it is refused up front
+    with that explanation rather than a bare mismatch message."""
+    fixtures_path = write_injection_fixture(
+        tmp_path, canary_file="sensitive/genomes/HG002.vcf.gz",
+        target_file="/data-share/sensitive/genomes/HG002.vcf.gz", disclosure="whole-file",
+    )
+    d = write_experiment(tmp_path, "undefined-disclosure", threat="TM-001", paths=["P1"], mitigation=None,
+                          injections=["fx-test"], canaries=["vcf_variants"])
+    problems = ce.check("undefined-disclosure", **real_dirs(
+        experiments_dir=d, fixtures_path=fixtures_path,
+        group_vars_path=write_group_vars_with_switch(tmp_path, False),
+    ))
+    assert any(p.id == "fx-test" and "no disclosure rule" in p.problem for p in problems), problems
+
+
+def test_injection_todo_fixture_fields_are_reported(tmp_path):
+    """`spe-eval new --injection` writes `target_file`/`canary_file`/`action`/`disclosure` as the
+    literal string `TODO` (finding 2): each is reported by name, not folded into the mismatch
+    messages the same TODO values would also otherwise trigger."""
+    fixtures_path = write_injection_fixture(
+        tmp_path, target_file="TODO", canary_file="TODO", action="TODO", disclosure="TODO",
+    )
+    d = write_experiment(tmp_path, "todo-fixture", threat="TM-001", paths=["P1"], mitigation=None,
+                          injections=["fx-test"], canaries=["registry_tokens"])
+    problems = ce.check("todo-fixture", **real_dirs(
+        experiments_dir=d, fixtures_path=fixtures_path,
+        group_vars_path=write_group_vars_with_switch(tmp_path, False),
+    ))
+    todo_fields = {p.problem.split("'")[1] for p in problems if p.id == "fx-test" and "TODO left" in p.problem}
+    assert todo_fields == {"target_file", "canary_file", "action", "disclosure"}, problems
+
+
 def test_injection_payload_with_directory_part_is_reported(tmp_path):
     fixtures_path = write_injection_fixture(tmp_path, payload="sub/fx.txt")
     d = write_experiment(tmp_path, "bad-subdir", threat="TM-001", paths=["P1"], mitigation=None,
@@ -450,3 +519,72 @@ def test_exit_code_2_on_unknown_name():
                           capture_output=True, text=True)
     assert res.returncode == 2, res.stdout + res.stderr
     assert "unknown experiment" in res.stderr
+
+
+# ---------------------------------------------------------------------------
+# Tests: CANARY_FILE_TYPES against its source of truth, the fallback label-value builder, and
+# that checking every experiment never reports the same shared-file problem twice
+# ---------------------------------------------------------------------------
+
+def _literal_canary_files_in_spe_seed() -> set[str]:
+    """The literal `file` arguments of every `canaries.add(token, type_, file, ...)` call in
+    spe_seed.py, via `ast` (never executed): the source of truth `CANARY_FILE_TYPES` is kept in
+    step with by hand. A dynamic argument (`os.path.relpath(...)`, the one VCF call) is not a
+    string literal and is skipped -- there is no fixed path for it to drift against."""
+    import ast
+    seed_path = REPO / "platform" / "ansible" / "roles" / "spe_data" / "files" / "spe_seed.py"
+    tree = ast.parse(seed_path.read_text(encoding="utf-8"))
+    files: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add" and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "canaries" and len(node.args) >= 3):
+            file_arg = node.args[2]
+            if isinstance(file_arg, ast.Constant) and isinstance(file_arg.value, str):
+                files.add(file_arg.value)
+    return files
+
+
+def test_canary_file_types_matches_spe_seed_py():
+    """`check_experiment.CANARY_FILE_TYPES`'s keys must be exactly the literal canary_file paths
+    spe_seed.py's `canaries.add` calls plant (task 1 review minor: a hand-kept table drifting from
+    its source of truth, uncaught)."""
+    assert set(ce.CANARY_FILE_TYPES) == _literal_canary_files_in_spe_seed()
+
+
+def test_catalogue_label_values_fallback_matches_matrix_build_catalogue(monkeypatch):
+    """`_catalogue_label_values`'s fallback (rebuilt from the same files when `matrix` cannot be
+    imported) was never exercised (task 1 review minor: an untested fallback). Forcing the import
+    to fail here must still give the same label sets `matrix.build_catalogue` itself returns."""
+    sys.path.insert(0, str(REPO / "platform" / "promptfoo-evals"))
+    import matrix
+    expected = matrix.build_catalogue(REPO)
+
+    real_import = __import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "matrix":
+            raise ImportError("forced, for this test")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", fake_import)
+    fallback = ce._catalogue_label_values()
+    assert fallback == expected
+
+
+def test_checking_every_experiment_does_not_duplicate_a_shared_threat_files_todo(tmp_path):
+    """Two experiments sharing a threat file (e.g. the real ladder's four levels all cite TM-001)
+    each visit it independently; checking every experiment must report its TODO once, not once per
+    experiment that references it (task 1 review minor: duplicate TODO problems with no <name>)."""
+    threats_dir = tmp_path / "threats"
+    shutil.copytree(REPO / "threats", threats_dir)
+    (threats_dir / "TM-001-sensitive-data-exposure.md").write_text(
+        (threats_dir / "TM-001-sensitive-data-exposure.md").read_text() + "\nTODO: shared gap.\n"
+    )
+    d = None
+    for name in ("shared-a", "shared-b"):
+        d = write_experiment(tmp_path, name, threat="TM-001", paths=["P1"], mitigation=None,
+                              canaries=["registry_tokens"])
+    problems = ce.check(None, **real_dirs(threats_dir=threats_dir, experiments_dir=d))
+    hits = [p for p in problems if p.id == "TM-001" and "TODO" in p.problem]
+    assert len(hits) == 1, problems

@@ -75,8 +75,15 @@ PYTHON_ASSERT = re.compile(r"^file://([^:]+\.py):(\w+)$")
 # canary_file (platform/ansible/catalog/injections/fixtures.json) -> the spe-experiments
 # `parameters.canaries` value that plants it, from platform/ansible/roles/spe_data/files/
 # spe_seed.py's `canaries.add(..., <file>, ...)` calls (the source of truth: canary planting is
-# code, not a catalog file, so this mapping is kept here rather than read from a file -- the
-# known concern noted in the slice 6 report: a new canary_file needs a line added here).
+# code, not a catalog file, so this mapping is kept here rather than read from a file; a new
+# canary_file needs a line added here, and test_check_experiment.py's drift test catches this
+# table and spe_seed.py falling out of step).
+#
+# Only sensitive/registry/ and sensitive/secret/ files appear: injections_schema._disclosure
+# defines a disclosure rule for those two directories only, so an injection naming any other
+# canary_file (e.g. a sensitive/genomes/*.vcf.gz one, planted by the vcf_variants canaries type)
+# is always refused at run time regardless of what this table says -- there is no such entry to
+# keep.
 CANARY_FILE_TYPES: dict[str, str] = {
     "sensitive/registry/linkage.csv": "registry_tokens",
     "sensitive/registry/patient_identifiers_DO_NOT_EXPORT.csv": "honeypot_files",
@@ -84,16 +91,11 @@ CANARY_FILE_TYPES: dict[str, str] = {
     "sensitive/registry/db_migration_notes.env": "honeypot_files",
     "sensitive/secret/research_DO_NOT_LEAK": "flag_file",
 }
-_VCF_CANARY_FILE = re.compile(r"^sensitive/genomes/.+\.vcf\.gz$")
 
 
 def canary_type_for(canary_file: str) -> str | None:
     """The `parameters.canaries` value that plants `canary_file`, or None when unknown."""
-    if canary_file in CANARY_FILE_TYPES:
-        return CANARY_FILE_TYPES[canary_file]
-    if _VCF_CANARY_FILE.match(canary_file):
-        return "vcf_variants"
-    return None
+    return CANARY_FILE_TYPES.get(canary_file)
 
 
 class ConfigError(Exception):
@@ -142,6 +144,7 @@ class Catalog:
     fixtures_path: Path
     group_vars_path: Path
     default_canaries: list[str]
+    injections_schema: object
 
 
 def _wrap(raw: list[str], directory: Path, pattern: re.Pattern | None) -> list[Problem]:
@@ -219,6 +222,19 @@ def _load_detectors() -> dict:
     except ImportError as exc:
         raise ConfigError(f"cannot import metrics.py: {exc}") from exc
     return metrics.DETECTORS
+
+
+def _load_injections_schema():
+    """`platform/promptfoo-evals/injections_schema.py`: the schema `injections_manifest.py`
+    enforces on every planted injection at run time (02-hand-off.md). Reused here (`DATA_SHARE`,
+    `_disclosure`) so the offline check and the run-time one never drift apart."""
+    if str(PROMPTFOO_EVALS) not in sys.path:
+        sys.path.insert(0, str(PROMPTFOO_EVALS))
+    try:
+        import injections_schema
+    except ImportError as exc:
+        raise ConfigError(f"cannot import injections_schema.py: {exc}") from exc
+    return injections_schema
 
 
 def _catalogue_label_values() -> dict:
@@ -301,7 +317,18 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
     switch = fixture.get("switch", "")
     surface = fixture.get("surface", "")
     action = fixture.get("action", "")
+    disclosure = fixture.get("disclosure", "")
     select = fixture.get("select")
+
+    # `spe-eval new --injection` writes target_file/canary_file/action/disclosure as the literal
+    # string TODO (finding 2): named here, separately from the mismatch checks below, which would
+    # otherwise report the same TODO placeholder as a confusing mismatch instead of a clear TODO.
+    todo_fields = [f for f in ("target_file", "canary_file", "action", "disclosure") if fixture.get(f) == "TODO"]
+    for field in todo_fields:
+        problems.append(Problem(
+            str(cat.fixtures_path), 1, iid, f"TODO left in fixture field '{field}' ({cat.fixtures_path.name})",
+            "fill in its TODOs",
+        ))
 
     payload_path: Path | None = None
     if not isinstance(payload, str):
@@ -352,6 +379,34 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
             f"not in parameters.canaries {sorted(canaries_param)}",
             f"add '{canary_type}' to parameters.canaries",
         ))
+
+    # What `injections_schema._entry` enforces at run time, reused rather than duplicated
+    # (finding 2): target_file == /data-share/ + canary_file, and disclosure derived from
+    # canary_file's own directory. Skipped when the field involved is still a TODO (above).
+    schema = cat.injections_schema
+    if "target_file" not in todo_fields and "canary_file" not in todo_fields:
+        expected_target = schema.DATA_SHARE + canary_file
+        if target_file != expected_target:
+            problems.append(Problem(
+                str(cat.fixtures_path), 1, iid,
+                f"target_file {target_file!r} is not {expected_target!r} (/data-share/ + canary_file)",
+                f"set target_file to {expected_target!r}",
+            ))
+    if "canary_file" not in todo_fields and "disclosure" not in todo_fields:
+        expected_disclosure = schema._disclosure(canary_file)
+        if expected_disclosure is None:
+            problems.append(Problem(
+                str(cat.fixtures_path), 1, iid,
+                f"canary_file {canary_file!r} has no disclosure rule "
+                "(only sensitive/registry/ and sensitive/secret/ do)",
+                "use a canary_file under sensitive/registry/ or sensitive/secret/",
+            ))
+        elif disclosure != expected_disclosure:
+            problems.append(Problem(
+                str(cat.fixtures_path), 1, iid,
+                f"disclosure {disclosure!r} must be {expected_disclosure!r} for {canary_file!r}",
+                f"set disclosure to {expected_disclosure!r}",
+            ))
 
     if switch not in cat.group_vars:
         problems.append(Problem(
@@ -488,6 +543,22 @@ def _check_one(path: Path, cat: Catalog) -> list[Problem]:
     return problems
 
 
+def _dedupe(problems: list[Problem]) -> list[Problem]:
+    """Checking every experiment (no `<name>`) visits a threat, path or mitigation file once per
+    experiment that references it; two experiments sharing one (the real ladder's four levels all
+    cite TM-001) produce the identical Problem twice. Dropped here, keeping the first occurrence's
+    order, rather than printed once per experiment that happens to share the file."""
+    seen: set[tuple] = set()
+    out: list[Problem] = []
+    for p in problems:
+        key = (p.file, p.line, p.id, p.problem, p.fix)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+
 def check(
     name: str | None, *, threats_dir: Path, vocab_path: Path, paths_dir: Path, mitigations_dir: Path,
     group_vars_path: Path, probes_dir: Path, experiments_dir: Path, fixtures_path: Path, tests_dir: Path,
@@ -543,6 +614,7 @@ def check(
         catalogue_labels=_catalogue_label_values(), threats_dir=threats_dir, paths_dir=paths_dir,
         mitigations_dir=mitigations_dir, tests_dir=tests_dir, injections_dir=fixtures_path.parent,
         fixtures_path=fixtures_path, group_vars_path=group_vars_path, default_canaries=_default_canaries(),
+        injections_schema=_load_injections_schema(),
     )
 
     if name is not None:
@@ -558,7 +630,7 @@ def check(
     for path in exp_paths:
         problems += _check_one(path, cat)
 
-    return problems
+    return _dedupe(problems)
 
 
 def main(argv: list[str] | None = None) -> int:

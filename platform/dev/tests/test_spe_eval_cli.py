@@ -707,9 +707,10 @@ def test_new_refuses_a_bad_name(new_repo):
 
 def test_new_refuses_the_reserved_template_name(new_repo):
     _repo, run = new_repo
-    p = run("new", "TEMPLATE")
-    assert p.returncode == 2
-    assert "not a valid experiment name" in p.stderr
+    for name in ("template", "TEMPLATE"):  # lowercase passes the name pattern: only the reserved rule refuses it
+        p = run("new", name)
+        assert p.returncode == 2
+        assert "not a valid experiment name" in p.stderr
 
 
 def test_new_refuses_an_existing_name(new_repo):

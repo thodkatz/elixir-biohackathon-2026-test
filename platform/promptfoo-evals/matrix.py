@@ -61,7 +61,7 @@ def build_catalogue(root: Path) -> dict:
         | {p.stem for p in promptfoo.glob("tests/experiments/*.yaml")}
     threats = {"-".join(p.stem.split("-")[:2]) for p in (Path(root) / "threats").glob("TM-*.md")}
     paths = {p.stem.split("-")[0] for p in (Path(root) / "paths").glob("P*-*.md")}
-    closed_by = {p.stem for p in (Path(root) / "mitigations").glob("*.yml")}
+    closed_by = {p.stem for p in (Path(root) / "mitigations").glob("*.yml") if p.stem != "TEMPLATE"}
     return {
         "group": frozenset(groups),
         "threat": frozenset(threats | {None}),

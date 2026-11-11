@@ -44,9 +44,11 @@ out not to help is a result too.
    command's own output says how).
 3. **Try it live**: `spe-eval arm <name> mitigated` to apply your build (`baseline` for a
    one-arm experiment), then chat with the agent; `spe-eval run` to measure both arms, read with
-   `spe-eval results`.
-4. **Check**: `python3 check_experiment.py <name>`. Run it after every edit (`spe-eval test` does
-   this plus the evaluation suite's own offline tests); it must exit 0 before you push.
+   `spe-eval results` or in **Evaluations**.
+4. **Check**: `python3 check_experiment.py <name>` (PyYAML installed on the VM already; elsewhere,
+   `uv run --with pyyaml python check_experiment.py <name>` needs no install). Run it after every
+   edit (`spe-eval test <name>` does this plus the evaluation suite's own offline tests); it must
+   exit 0 before you push.
 5. **Build it fresh**, to confirm a clean build or try a change that only takes effect at
    creation: push `experiment/<name>`; a workspace from the branch template `spe-x-<name>`
    already offers your new mitigation and experiment on its form.
@@ -55,8 +57,26 @@ out not to help is a result too.
    output. Once it is merged, your experiment and mitigation appear on the `spe-experiments`
    form for everyone within minutes.
 
-Every step above has a command (`spe-eval --help`, or `platform/instance/workspace/AGENTS.md`'s
-*Experiments* section for a coding agent, lists them all with their output).
+The portal follows upstream's own `main` and makes branch templates from upstream branches only,
+so step 5 needs push access there and step 6 is an upstream pull request.
+
+## The commands
+
+Every step above is one command, non-interactive, printing no secrets: exit 0 on success, 1 when
+the thing it checked failed (a refused gate, a failed run, a failing test or checker problem), 2 on
+a usage or configuration error. `spe-eval --help` prints this same table.
+
+| Step | Command | What it does |
+|---|---|---|
+| Start | `spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--injection <surface>] [--from <experiment>]` | writes every slot's file with `TODO`s, deriving the mitigation id, its switch and the test file's name from `<name>` |
+| Check | `check_experiment.py [<name>] [--json]` | offline, under a minute: whether the experiment will run and fits the catalog, without judging its shape; without `<name>`, every experiment |
+| Test offline | `spe-eval test [<name>]` | the evaluation suite's own offline unit tests, then the checker, on the named experiment (default: the build's own) |
+| Try | `spe-eval arm [<name>] baseline\|mitigated` | applies one arm and waits for the stack to answer |
+| Run | `spe-eval run [<name>] [--repeat N] [--detach]` | measures every arm: the baseline, then the mitigated arm if there is one |
+| Watch | `spe-eval status [--json]`, `spe-eval wait [--timeout S]` | the lock and the run in progress; `wait` blocks until it ends |
+| List | `spe-eval runs [--json]` | every kept run, newest first |
+| Read | `spe-eval results [--run <id>] [--json] [--test <id>]` | the latest run, or the one named: both arms, side by side |
+| Share | `spe-eval pr-body [<name>] [--run <id>]` | the PR title and body, filled in from the files and the run |
 
 ## What the checker checks
 

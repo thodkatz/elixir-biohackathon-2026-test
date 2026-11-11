@@ -93,7 +93,8 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
    `spe_mitigate_<name>` switch (added to `group_vars/all.yml`), `tests/experiments/<name>.yaml`, and a threat or
    path file from its template when the id is new. Success prints `spe-eval new <name>: wrote` and each path, then
    what to fill in and delete, and exits 0; an invalid or reserved `<name>`, one already in `experiments/`, or an
-   unknown `--from` exits 2. Example, run from a scratch copy of the catalog:
+   unknown `--from` exits 2. Example, run from a scratch copy of the catalog (each written path is printed
+   absolute, in this workspace under `~/sperange`; shown here relative for width):
 
    ```
    $ spe-eval new trs-guard --threat TM-003 --path P2
@@ -105,7 +106,7 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
    attack only, delete the mitigation file above, its spe_mitigate_* switch in group_vars/all.yml, and set
    mitigation: null in the experiment file.
    Add a line for trs-guard to experiments/README.md once it is ready.
-   Next: spe-eval test, or python3 check_experiment.py trs-guard
+   Next: spe-eval test trs-guard, or python3 check_experiment.py trs-guard
    ```
 
 2. **Check offline, after every edit**: `python3 check_experiment.py <name>` (every problem as
@@ -113,15 +114,15 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
    and fits the catalog -- ids resolve, no file it names still carries a `TODO`, each mitigation's `off` matches
    the Ansible defaults -- without judging what the contribution should contain. It exits 0 with nothing wrong
    (`OK: <name> checked, no problems found`), 1 with problems printed, 2 on a usage or configuration error.
-   `spe-eval test` runs this (the build's own experiment, or every one outside a `spe-experiments` build) after
-   the evaluation suite's own offline unit tests, and is 1 if either fails, 2 if either could not run at all:
+   `spe-eval test [<name>]` runs this (the named experiment -- the one you are writing, the usual case in this
+   workflow -- else the build's own, or every one outside a `spe-experiments` build) after the evaluation
+   suite's own offline unit tests, and is 1 if either fails, 2 if either could not run at all:
 
    ```
    $ python3 check_experiment.py trs-guard
-   experiments/trs-guard.yml:1: trs-guard: TODO left in the experiment file (trs-guard.yml): fill in its TODOs
+   experiments/trs-guard.yml:6: trs-guard: TODO left in the experiment file (trs-guard.yml): fill in its TODOs
    mitigations/trs-guard.yml:2: trs-guard: TODO left in the mitigation file (trs-guard.yml): fill in its TODOs
-   platform/promptfoo-evals/tests/experiments/trs-guard.yaml:2: trs-guard: TODO left in the tests file
-   (trs-guard.yaml): fill in its TODOs
+   platform/promptfoo-evals/tests/experiments/trs-guard.yaml:3: trs-guard: TODO left in the tests file (trs-guard.yaml): fill in its TODOs
    $ echo $?
    1
    ```
@@ -184,8 +185,9 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
 8. **Share**: `spe-eval pr-body [<name>] [--run <id>]` runs the checker, then prints a title line
    (`title: Experiment: <name>`), a blank line, and the pull request body filled in from the files, the named
    run's counts, and the checker's own output, leaving out the *Attack* or *Mitigation* line when the experiment
-   fills neither; always exits 0 (a run that does not exist yet is a *Result* placeholder, not a failure) unless
-   `<name>` or `--run` itself is wrong (exit 2):
+   fills neither; exits 0 even with no run yet (a *Result* placeholder, not a failure), 2 for an unknown `<name>`
+   or `--run`, for no name given outside a `spe-experiments` build, or if the checker itself exits 2 (a
+   configuration error, not a problem it found):
 
    ````
    $ spe-eval pr-body trs-guard
@@ -196,7 +198,7 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
    **Threat:** TM-003: Indirect Prompt Injection Through Ingested Content
    **Paths:** P2: Agent-written workflow code
    **Attack:** a prompt test (`tests/experiments/trs-guard.yaml`)
-   **Mitigation:** `trs-guard` (`spe_mitigate_trs_guard`): <what it changes, where>
+   **Mitigation:** `trs-guard` (`spe_mitigate_trs_guard`): TODO: what this mitigation changes, and where, when it is on.
    **Base:** none (the stock build, no mitigation on)
    **Experiment file:** `experiments/trs-guard.yml`
 
@@ -209,15 +211,15 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
    ### Checks
    `python3 check_experiment.py trs-guard`:
    ```
-   experiments/trs-guard.yml:1: trs-guard: TODO left in the experiment file (trs-guard.yml): fill in its TODOs
+   experiments/trs-guard.yml:6: trs-guard: TODO left in the experiment file (trs-guard.yml): fill in its TODOs
    mitigations/trs-guard.yml:2: trs-guard: TODO left in the mitigation file (trs-guard.yml): fill in its TODOs
-   platform/promptfoo-evals/tests/experiments/trs-guard.yaml:2: trs-guard: TODO left in the tests file
-   (trs-guard.yaml): fill in its TODOs
+   platform/promptfoo-evals/tests/experiments/trs-guard.yaml:3: trs-guard: TODO left in the tests file (trs-guard.yaml): fill in its TODOs
    ```
    ````
 
-   (the checker's own output is quoted verbatim, whatever it is -- here the same unfilled skeleton from step 1,
-   so every line still names a `TODO`). Paste the body into the pull request, or pipe it to
+   (the *Mitigation* line and the *Checks* block are both quoted verbatim from the files and the checker,
+   whatever they say -- here the same unfilled skeleton from step 1, so the mitigation's own `description` is
+   still its own `TODO` placeholder too). Paste the body into the pull request, or pipe it to
    `gh pr create --title … --body-file -` (`spe-eval pr-body --help` shows the split). The reasoning belongs in
    *Idea and rationale*; the lasting explanation belongs in the experiment's own
    `description` and in the threat and path files it names (`CONTRIBUTING.md` says the same). *Result* is
@@ -236,11 +238,17 @@ Writing a mitigation is the one step the commands above cannot do for you. `miti
 the reference, in its parts:
 
 - **The Ansible change, in the SPE agent's own path** (Traefik and WES, never an installer): with
-  `spe_harden_trs_readonly` on, `platform/ansible/roles/workflow_stack/templates/compose.install.yaml.j2` adds a
-  `trs-deny` Traefik router that refuses every non-`GET`/`HEAD` request to `/ga4gh/trs` (an always-false
+  `spe_harden_trs_readonly` on, `platform/ansible/roles/workflow_stack/templates/compose.install.yaml.j2` gives
+  TRS a `trs-deny` Traefik router that refuses every non-`GET`/`HEAD` request to `/ga4gh/trs` (an always-false
   `ipwhitelist`), alongside the plain `trs` router that still answers `GET`/`HEAD`, plus a separate `admin`
-  entrypoint on `127.0.0.1` only (for an operator, not the agent) and a `wes-guard` sidecar in front of WESkit
-  that forwards `GET`/`HEAD` straight through and refuses every write.
+  entrypoint on `127.0.0.1` only (for an operator, not the agent). On WES, the same switch routes every
+  non-`GET`/`HEAD` request to a new `wes-guard` sidecar (`GET`/`HEAD` still go straight to WESkit); `wes-guard`
+  (`platform/ansible/roles/workflow_stack/files/wes_guard.py`) refuses only a `workflow_attachment` part and a
+  `workflow_url` that is not a TRS URI of this stack's own TRS, and forwards every other request -- a run of an
+  installed tool, which is what the agent actually needs -- to WESkit unchanged: it is not "refuse every write",
+  the lesson a sidecar that only forwards *writes* would otherwise teach. WESkit's own config
+  (`templates/weskit_config.yaml.j2:112`) additionally turns off the API's own override of a workflow's
+  `engine-environment` parameter, a second layer in front of the same risk.
 - **The Jinja guard on its switch**, so the stack is unchanged with the mitigation off: every block above is
   wrapped in `{% if spe_harden_trs_readonly %} ... {% endif %}` in that same template, and the role's own
   `platform/ansible/roles/workflow_stack/tasks/main.yml` copies the `wes-guard` script and renders WESkit's
@@ -251,11 +259,13 @@ the reference, in its parts:
   `$TRS_BASE/tools/spe-probe-invalid`; open (mitigation off) it reaches the filer and fails validation (400/422);
   closed (on) it is refused before the filer (403/405).
 - **The two `curl` checks**, after `spe-eval arm <name> mitigated`, in the shape the SPE agent's own runbook
-  gives it (one must now be refused, one must still work):
+  gives it (one must now be refused, one must still work; `-w` prints the status code, as the probe itself
+  does):
 
   ```
-  $ curl -sS -X PUT "$TRS_BASE/tools/spe-probe-invalid" -H 'Content-Type: application/json' -d '{"x": true}'
-  ... 403 (or 405): refused before the filer
+  $ curl -sS -o /dev/null -w '%{http_code}\n' -X PUT "$TRS_BASE/tools/spe-probe-invalid" \
+      -H 'Content-Type: application/json' -d '{"spe_probe_invalid": true}'
+  403   # (or 405): refused before the filer
   $ curl -sS "$TRS_BASE/tools"
   [...]   # the listing still answers: GET is unaffected
   ```
@@ -271,7 +281,8 @@ checks to run by hand before trusting `spe-eval run`'s own numbers.
   `tests/experiments/<name>.yaml`, its branch `experiment/<name>`, its branch template `spe-x-<name>`.
 - **Commit and push `experiment/<name>` as you go**, after each working step: stop destroys this VM (the
   archive saves unpushed work too, but a pushed branch is what others can build from).
-- **One check before every push**: `check_experiment.py <name>` exits 0.
+- **One check before every push, reported to the person**: `check_experiment.py <name>` exits 0, and you say
+  what it printed before pushing.
 - **Tell the person before `spe-eval run`**: it takes the workspace over (see step 4), and chats are reset.
 - **A mitigation is a switch that defaults off.** A build with none selected must behave exactly as it does
   today; never flip a default on to make a mitigation's effect easier to show.

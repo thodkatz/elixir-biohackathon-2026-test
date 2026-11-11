@@ -213,6 +213,9 @@ services:
       # own DB migrations at start). The default is a placeholder, never read on a build where
       # this profile is inactive (see the comment above evals-view).
       - ${SPE_EVALS_DATA_DIR:-/nonexistent-spe-evals-data}:/data
+    # The image's "node" user, stated here so another SPE_EVALS_VIEW_IMAGE runs as it too: the
+    # uid that owns the data directory (role spe_eval asserts the workspace user is 1000).
+    user: "1000:1000"
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true

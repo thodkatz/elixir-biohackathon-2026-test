@@ -70,6 +70,11 @@ def test_evals_promptfoo_shares_evals_views_network_namespace_instead():
     assert "networks" not in COMPOSE["services"]["evals-promptfoo"]
 
 
+def test_evals_promptfoo_runs_as_uid_1000_whatever_the_image():
+    # The data directory's owner (role spe_eval asserts the workspace user is uid 1000).
+    assert COMPOSE["services"]["evals-promptfoo"]["user"] == "1000:1000"
+
+
 def test_neither_service_has_an_env_file_or_a_key_looking_variable():
     for name in ("evals-view", "evals-promptfoo"):
         svc = COMPOSE["services"][name]

@@ -1057,10 +1057,13 @@ def write_unfinished_arm(arm_dir: Path, *, state: str, experiment="", mitigation
     }))
 
 
-def _row(test_id: str, group: str, *, threat=None, path=None, closed_by=None, components) -> dict:
+def _row(test_id: str, group: str, *, threat=None, path=None, closed_by=None, components=(), error=False) -> dict:
     """One `agent.json` result row (matrix.py's own shape). `components` is a list of
-    `(passed, metric_or_None, reason_or_None)`."""
-    return {
+    `(passed, metric_or_None, reason_or_None)`. `error=True` (a run that could not be graded --
+    the model API down, a hand-off problem) gives it matrix.py's own error shape
+    (`_is_error`: no `gradingResult` dict, `failureReason: 2`, `response.error`): it counts
+    towards `runs`, never towards `failures` (matrix.py `_tests`)."""
+    row = {
         "testCase": {"vars": {}, "metadata": {"id": test_id, "group": group, "threat": threat, "path": path,
                                                 "closed_by": closed_by}},
         "gradingResult": {
@@ -1072,6 +1075,9 @@ def _row(test_id: str, group: str, *, threat=None, path=None, closed_by=None, co
         },
         "response": {},
     }
+    if error:
+        row = {**row, "gradingResult": None, "failureReason": 2, "response": {"error": "simulated run error"}}
+    return row
 
 
 @pytest.fixture
@@ -1173,6 +1179,76 @@ def test_results_verdict_compares_rates_not_raw_counts(eval_home):
     assert sw["baseline"] == {"runs": 2, "errors": 0, "passed": 0, "failures": {"injection.followed": 2}}
     assert sw["mitigated"] == {"runs": 1, "errors": 0, "passed": 0, "failures": {"injection.followed": 1}}
     assert sw["verdict"] == {"injection.followed": "unchanged"}
+
+
+def test_results_verdict_divides_by_graded_runs_not_all_runs(eval_home):
+    # task 3 review (re-review), Important: matrix._tests counts an errored row in "runs" but
+    # never in "failures", so dividing by "runs" understates the rate. Baseline: 2/2 graded runs
+    # fail (rate 1.0). Mitigated: 2 runs, 1 errors, 1 of the 1 graded run fails (rate 1.0) --
+    # dividing by "runs" (2) would wrongly give 0.5 and read "narrowed"; dividing by graded runs
+    # (runs - errors = 1) gives the same 1.0 rate as baseline: unchanged.
+    home, run = eval_home
+    reports = home / "spe-eval" / "reports" / "graded-test" / "20261113T100000Z"
+    write_arm_report(reports / "baseline", agent_rows=[
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+             components=[(False, "injection.followed", "leak")]),
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+             components=[(False, "injection.followed", "leak")]),
+    ])
+    write_arm_report(reports / "mitigated", mitigations=["L1"], agent_rows=[
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+             components=[(False, "injection.followed", "still leaks")]),
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1", error=True),
+    ])
+
+    p = run("results", "--run", "20261113T100000Z", "--json")
+    assert p.returncode == 0, p.stdout + p.stderr
+    data = json.loads(p.stdout)
+    sw = data["tests"]["summarise-workflows"]
+    assert sw["baseline"] == {"runs": 2, "errors": 0, "passed": 0, "failures": {"injection.followed": 2}}
+    assert sw["mitigated"] == {"runs": 2, "errors": 1, "passed": 0, "failures": {"injection.followed": 1}}
+    assert sw["verdict"] == {"injection.followed": "unchanged"}
+
+
+def test_results_verdict_is_no_data_when_an_arm_has_zero_graded_runs(eval_home):
+    # task 3 review (re-review), Important: a mitigated arm whose every run errored (e.g. the
+    # model API was down) has zero graded runs; its "failures" is then {} for every metric, which
+    # must never read as "closed" just because nothing failed -- there was nothing to grade.
+    home, run = eval_home
+    reports = home / "spe-eval" / "reports" / "graded-test" / "20261113T110000Z"
+    write_arm_report(reports / "baseline", agent_rows=[
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+             components=[(False, "injection.followed", "leak")]),
+    ])
+    write_arm_report(reports / "mitigated", mitigations=["L1"], agent_rows=[
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1", error=True),
+    ])
+
+    p = run("results", "--run", "20261113T110000Z", "--json")
+    assert p.returncode == 0, p.stdout + p.stderr
+    data = json.loads(p.stdout)
+    sw = data["tests"]["summarise-workflows"]
+    assert sw["mitigated"] == {"runs": 1, "errors": 1, "passed": 0, "failures": {}}
+    assert sw["verdict"] == {"injection.followed": "no data"}
+
+    text_p = run("results", "--run", "20261113T110000Z")
+    assert text_p.returncode == 0, text_p.stdout + text_p.stderr
+    assert "no data" in text_p.stdout
+    assert "-> closed" not in text_p.stdout  # ("closed_by" in the test's own label line is fine)
+
+
+def test_results_ok_arm_with_unreadable_report_gets_a_clear_message(eval_home):
+    # task 3 review (re-review), Minor: "ok (no counts yet)" reads as a contradiction -- an "ok"
+    # arm whose report cannot be read (rare: a corrupted or partially copied report) needs
+    # wording that does not contradict its own state.
+    home, run = eval_home
+    reports = home / "spe-eval" / "reports" / "contrib-test" / "20261113T120000Z"
+    write_unfinished_arm(reports / "baseline", state="ok", experiment="contrib-test")
+
+    p = run("results", "--run", "20261113T120000Z")
+    assert p.returncode == 1, p.stdout
+    assert "ok (no counts yet)" not in p.stderr
+    assert "could not be read" in p.stderr
 
 
 def test_results_one_arm_gives_baseline_counts_and_no_verdict(eval_home):

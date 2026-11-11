@@ -875,12 +875,11 @@ def new_experiment(repo_root: Path, name: str, *, threat: str | None = None, pat
 # `matrix.py counts()` is the ladder's own reading of one report directory (hardening.json,
 # controls.json, agent.json, run.json, injections.json): labels, probe ids, test metadata,
 # per-metric failure counts, never an answer or a token. It refuses a hardening record whose
-# `injections` is "mixed" (06's matrix has no column for it), but an experiment's own arm can
-# plant only some of the catalogue's fixtures (01, *Attacks*) and so gets exactly that record
-# (platform/ansible/roles/handoff/tasks/hardening.yml). `arm_counts` is `counts()` for one arm
-# directory, tolerant of "mixed": every other branch is counts() unchanged (same MatrixError), so
-# the ladder's own refusal (06's matrix) is never touched; only this one extra case is handled,
-# by calling matrix's own small building blocks directly instead of its `counts()` entry point.
+# `injections` is "mixed" by default (06's matrix has no column for it), but an experiment's own
+# arm can plant only some of the catalogue's fixtures (01, *Attacks*) and so gets exactly that
+# record (platform/ansible/roles/handoff/tasks/hardening.yml). `arm_counts` is `counts()` for one
+# arm directory, with its own opt-in `allow_mixed=True` (task 3 review, Important 3): the ladder's
+# own calls keep the default refusal, untouched.
 
 def arm_counts(arm_dir: Path) -> dict:
     """`matrix.py counts(arm_dir, allow_mixed=True)`: one arm's report directory, read whether its
@@ -893,19 +892,25 @@ def arm_counts(arm_dir: Path) -> dict:
 
 def verdict_for(baseline: dict, mitigated: dict) -> dict[str, str]:
     """One word per metric either arm's `failures` names (07, *Read*), comparing failure *rates*
-    (failures / runs), not raw counts (task 3 review, Minor 1): two arms normally share one
-    repeat, where a rate and a raw count agree, but an errored test or a stopped arm can leave
-    them with different `runs`, and a raw count then reads a same *rate* (e.g. 2/2 vs. 1/1, both
-    100%) as "narrowed" when nothing actually changed. "closed" (baseline failed, mitigated does
-    not), "narrowed" (mitigated's rate is lower, but still above zero), "unchanged" (same rate,
-    including 0 and 0), "worse" (mitigated's rate is higher). `baseline`/`mitigated` are
-    `build_results`'s own per-arm test dicts (`"runs"`, `"failures"`)."""
-    b_runs = baseline["runs"] or 1  # a test with 0 runs never reaches here (no row at all: "runs" is always >= 1)
-    m_runs = mitigated["runs"] or 1
+    over *graded* runs (`failures / (runs - errors)`), not raw counts and not all runs (task 3
+    review, Minor 1, and the re-review's Important): `matrix._tests` counts an errored row in
+    `runs` but never in `failures` (nothing to judge pass or fail), so dividing by `runs` understates
+    the rate the moment an arm has any errors -- an arm whose every run errored would then divide
+    an empty `failures` by a positive `runs` and read every metric as "closed", when in fact
+    nothing was graded at all. "closed" (baseline's rate > 0, mitigated's is 0), "narrowed"
+    (mitigated's rate is lower, but still above zero), "unchanged" (same rate, including 0 and
+    0), "worse" (mitigated's rate is higher), "no data" (either arm has zero graded runs: no rate
+    can be compared, so no verdict word claims one). `baseline`/`mitigated` are `build_results`'s
+    own per-arm test dicts (`"runs"`, `"errors"`, `"failures"`)."""
+    b_graded = baseline["runs"] - baseline["errors"]
+    m_graded = mitigated["runs"] - mitigated["errors"]
+    metrics = sorted(set(baseline["failures"]) | set(mitigated["failures"]))
+    if b_graded <= 0 or m_graded <= 0:
+        return {metric: "no data" for metric in metrics}
     verdicts: dict[str, str] = {}
-    for metric in sorted(set(baseline["failures"]) | set(mitigated["failures"])):
-        b_rate = baseline["failures"].get(metric, 0) / b_runs
-        m_rate = mitigated["failures"].get(metric, 0) / m_runs
+    for metric in metrics:
+        b_rate = baseline["failures"].get(metric, 0) / b_graded
+        m_rate = mitigated["failures"].get(metric, 0) / m_graded
         if m_rate == 0 and b_rate > 0:
             verdicts[metric] = "closed"
         elif m_rate < b_rate:
@@ -976,11 +981,21 @@ def build_results(entry: dict, home: Path | None = None) -> dict:
             "utility": utility, "tests": tests}
 
 
+def _unusable_arm_phrase(state: str) -> str:
+    """`<state> (no counts yet)`, except for `"ok"` (task 3 review, re-review, Minor): an arm's
+    `run.json` can say `"ok"` while its report is unreadable (rare -- a corrupted or only
+    partially copied report), and "ok (no counts yet)" reads as a contradiction; this says
+    plainly that the state and the report disagree."""
+    if state == "ok":
+        return "ok, but its report could not be read"
+    return f"{state} (no counts yet)"
+
+
 def unusable_run_message(results: dict) -> str:
-    """"run <id> is not ready to read (<arm>: <state>, ...)" -- `results`'s own exit-1 message
+    """"run <id> is not ready to read (<arm>: <phrase>, ...)" -- `results`'s own exit-1 message
     (07: "no run: exit 1 with a clear message") when `results["usable_arms"]` is empty: a run
     that exists but has nothing usable yet (every arm still running, or none finished `"ok"`)."""
-    states = ", ".join(f"{arm}: {state}" for arm, state in sorted(results["unusable"].items()))
+    states = ", ".join(f"{arm}: {_unusable_arm_phrase(state)}" for arm, state in sorted(results["unusable"].items()))
     return f"run {results['run']} is not ready to read ({states})" if states \
         else f"run {results['run']} has nothing to read"
 
@@ -990,7 +1005,7 @@ def _results_body_lines(results: dict) -> list[str]:
     arm's state, the usable arms' utility outcome, then every leak-metric test's baseline/
     mitigated failure counts and verdict."""
     arms = results["usable_arms"]
-    lines = [f"{arm}: {state} (no counts yet)" for arm, state in sorted(results["unusable"].items())]
+    lines = [f"{arm}: {_unusable_arm_phrase(state)}" for arm, state in sorted(results["unusable"].items())]
     if not arms:
         return lines
     lines.append("Utility tests: " + ", ".join(

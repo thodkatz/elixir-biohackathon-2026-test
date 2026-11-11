@@ -669,7 +669,7 @@ def test_after_all_restore_failure_is_loud_and_raised(hooked, hdir, monkeypatch,
 
 def test_before_all_refuses_a_snapshot_over_an_earlier_builds_dirty_stack(hooked, hdir, monkeypatch):
     _dirty(hdir, "2026-01-01T000000Z")
-    with pytest.raises(isolation.IsolationError, match="not restored before this rebuild.*ACCEPT_DIRTY") as exc:
+    with pytest.raises(isolation.IsolationError, match="not restored before this rebuild.*SPE_ISOLATION_ACCEPT_DIRTY=1") as exc:
         isolation.extension_hook("beforeAll", {"suite": {}})
     # task 5 review, Minor: "destroy.yml, then create.yml" is a controller remedy a workspace has
     # no destroy.yml for; the message must also name a workspace one.

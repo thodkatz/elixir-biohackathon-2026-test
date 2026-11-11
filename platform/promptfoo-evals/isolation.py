@@ -496,7 +496,7 @@ def refuse_dirty_rebuild(directory: Path) -> None:
     raise IsolationError(f"the run of the previous build or arm ({left}) was not restored before this rebuild, so "
                          "a snapshot now would hold its state: restore before rebuilding next time, or rebuild "
                          "from a clean stack -- on the controller, destroy.yml then create.yml; in a workspace "
-                         "(no destroy.yml here), a new workspace; set {ACCEPT_DIRTY}=1 to snapshot anyway")
+                         f"(no destroy.yml here), a new workspace; set {ACCEPT_DIRTY}=1 to snapshot anyway")
 
 
 def guarded_snapshot(directory: Path) -> None:

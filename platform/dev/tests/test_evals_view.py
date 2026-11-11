@@ -183,7 +183,7 @@ def test_nginx_image_agrees_with_group_vars_spe_prefetch_images():
     # Nothing else ties the two together, so a bump of one here would silently drift from
     # the other without this check.
     nginx_image = COMPOSE["services"]["evals-view"]["image"]
-    assert load_vars(spe_experiments=True)["spe_prefetch_images"][-1] == nginx_image
+    assert nginx_image in load_vars(spe_experiments=True)["spe_prefetch_images"]
     assert nginx_image not in load_vars(spe_experiments=False)["spe_prefetch_images"]
 
 

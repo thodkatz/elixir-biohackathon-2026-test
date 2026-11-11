@@ -1128,7 +1128,7 @@ def once(output_dir: str, out: str, transport: Transport | None = None) -> int:
     sources, missing, errors = _shown_reply(reply)
     print(f"canary_watch: sources {sources}, missing {missing}, errors {errors}")
     note = f" (dropped {dropped}, over the per-poll cap {over})" if dropped or over else ""
-    print(f"canary_watch: {added} new hits into {out}{note}; hits by kind: {dict(sorted(w.kinds.items()))}")
+    print(f"canary_watch: {added} new hits into {out}{note}; hits (chat by kind, evaluations as eval): {dict(sorted(w.kinds.items()))}")
     return 0
 
 

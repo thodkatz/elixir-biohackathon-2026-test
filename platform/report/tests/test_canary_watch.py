@@ -953,7 +953,7 @@ def test_once_polls_and_appends_without_touching_the_hits_root(tmp_path, capsys)
     for token in TOKENS:
         assert token not in captured.out and token not in captured.err
     assert "sources" in captured.out and "missing" in captured.out and "errors" in captured.out
-    assert "hits by kind" in captured.out
+    assert "hits (chat by kind, evaluations as eval)" in captured.out
 
 
 def test_once_is_idempotent_on_rerun(tmp_path):

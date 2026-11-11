@@ -87,7 +87,8 @@ offset of that workspace starts again from 0.
 (`ControlMaster`), with the user, address and key the output directory's `hosts.yml` and `ssh_key` give, as the
 archive playbook connects. It runs the reader: `ssh <target> sudo -n python3 - <offsets>` with the reader's source
 on stdin. The reader opens each source read-only, returns the complete lines past the byte offsets it was
-given, at most 1 MiB per poll, and each file's current size (a file shorter than its offset was replaced: read
+given, at most 1 MiB per poll (`spe-eval`'s windows first, on a budget of their own, so a receiver line is
+never judged against windows not yet read), and each file's current size (a file shorter than its offset was replaced: read
 from 0). A partial last line (no newline yet) is left for the next poll. Offsets, and for each journal the
 offset of the open run's `run_start`, are kept per workspace and source in a state file next to the hits file,
 so a watcher restart re-reads an open run from its start and neither loses nor repeats hits (the dedup key,

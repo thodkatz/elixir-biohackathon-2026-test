@@ -730,6 +730,31 @@ def test_new_refuses_an_existing_name(new_repo):
     assert "already exists" in p.stderr
 
 
+def test_new_refuses_an_existing_mitigation_file(new_repo):
+    """Final review, Minor 2: `new` used to overwrite an existing mitigations/<name>.yml with no
+    warning (only experiments/<name>.yml was checked)."""
+    repo, run = new_repo
+    (repo / "mitigations" / "keep-me.yml").write_text("id: keep-me\nname: Do not overwrite\n")
+    p = run("new", "keep-me")
+    assert p.returncode == 2
+    assert "already exists" in p.stderr
+    assert (repo / "mitigations" / "keep-me.yml").read_text() == "id: keep-me\nname: Do not overwrite\n"
+    assert not (repo / "experiments" / "keep-me.yml").exists()
+
+
+def test_new_refuses_an_existing_tests_file(new_repo):
+    repo, run = new_repo
+    tests_dir = repo / "platform" / "promptfoo-evals" / "tests" / "experiments"
+    tests_dir.mkdir(parents=True, exist_ok=True)
+    (tests_dir / "keep-me-2.yaml").write_text("- description: do not overwrite\n")
+    p = run("new", "keep-me-2")
+    assert p.returncode == 2
+    assert "already exists" in p.stderr
+    assert (tests_dir / "keep-me-2.yaml").read_text() == "- description: do not overwrite\n"
+    assert not (repo / "mitigations" / "keep-me-2.yml").exists()
+    assert not (repo / "experiments" / "keep-me-2.yml").exists()
+
+
 def test_new_refuses_an_unknown_from(new_repo):
     repo, run = new_repo
     p = run("new", "whatever", "--from", "nope")
@@ -832,6 +857,62 @@ def test_new_accepted_once_the_todos_are_filled(new_repo):
     )
 
     assert check_problems(repo, "filled-idea") == []
+
+
+def test_new_skeleton_edited_in_place_is_accepted(new_repo):
+    """Final review, Important 1: the test above rewrites every generated file whole with
+    `yaml.safe_dump`, which never exercises `new`'s own explanatory header comments -- so it
+    missed that those headers used to say `TODO` themselves (`spe_eval.py`'s `experiment_text`/
+    `test_file_text`), and `check_experiment.py`'s line-based TODO scan (any line containing the
+    word, comments included) flagged the *header*, not a real slot, even once every real slot was
+    filled. This test edits each generated file in place -- replacing only the TODO placeholder
+    values, exactly as a participant would in an editor -- and keeps every comment `new` wrote, to
+    prove the header text itself no longer trips the checker."""
+    repo, run = new_repo
+    p = run("new", "edited-idea", "--threat", "TM-902", "--path", "P9")
+    assert p.returncode == 0, p.stderr
+
+    threat_path = repo / "threats" / "TM-902-edited-idea.md"
+    t = threat_path.read_text()
+    assert "TODO" in t  # the regression this guards: a header comment must never be the reason
+    t = t.replace("status: TODO", "status: hypothesised", 1)
+    t = t.replace("- TODO", "- user-prompt", 1)
+    t = t.replace("- TODO", "- credentials", 1)
+    t = t.replace("- TODO", "- information-disclosure", 1)
+    t = re.sub("TODO", "a filled placeholder", t)
+    threat_path.write_text(t)
+
+    path_path = repo / "paths" / "P9-edited-idea.md"
+    t = path_path.read_text().replace("- TODO", "- registry_tokens", 1)
+    t = re.sub("TODO", "a filled placeholder", t)
+    path_path.write_text(t)
+
+    mitigation_path = repo / "mitigations" / "edited-idea.yml"
+    t = mitigation_path.read_text()
+    assert "# Written by" not in t  # mitigation_text has no header comment to begin with
+    t = t.replace("name: TODO", "name: Edited idea", 1)
+    t = t.replace("  TODO: what this mitigation changes, and where, when it is on.",
+                  "  A mitigation edited in place.", 1)
+    mitigation_path.write_text(t)
+
+    exp_path = repo / "experiments" / "edited-idea.yml"
+    t = exp_path.read_text()
+    assert "# Written by `spe-eval new`" in t  # the header this test keeps, unlike the test above
+    t = t.replace("name: TODO", "name: Edited idea experiment", 1)
+    t = t.replace("description: 'TODO: what this measures and why.'",
+                  "description: An experiment edited in place.", 1)
+    exp_path.write_text(t)
+
+    test_path = repo / "platform" / "promptfoo-evals" / "tests" / "experiments" / "edited-idea.yaml"
+    t = test_path.read_text()
+    assert "# Written by `spe-eval new`" in t
+    t = t.replace("description: 'TODO: what this test does.'", "description: a test edited in place", 1)
+    t = t.replace("    message: 'TODO: the prompt that attempts the attack, or exercises the mitigation.'",
+                  "    message: List the registered workflows.", 1)
+    t = t.replace("assert: []", "assert:\n- type: python\n  value: file://asserts.py:asked_trs", 1)
+    test_path.write_text(t)
+
+    assert check_problems(repo, "edited-idea") == []
 
 
 def test_new_attack_only_accepted_once_the_mitigation_slot_is_deleted(new_repo):
@@ -987,6 +1068,31 @@ def test_test_runs_check_experiment_before_returning_when_pytest_passes(new_repo
     assert marker.is_file()
 
 
+def test_test_takes_an_optional_name_and_passes_it_to_the_checker(new_repo, tmp_path):
+    """Final review, I2: the documented path starts a workspace from `ladder-l0`, then
+    `spe-eval new <name>`; on that build `spe-eval test` with no name used to check only
+    `ladder-l0` (`instances/local.yml`'s own `spe_experiment`), never the new, still-unfilled
+    `<name>` the participant just wrote, and exit 0 while `<name>` was full of TODOs. `test
+    [<name>]` now takes the same optional name `arm`/`run` do, and checks it instead of the
+    build's own when given."""
+    repo, run = new_repo
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    uv.write_text(FAKE_UV)
+    uv.chmod(0o755)
+    argv_file = tmp_path / "checker-argv"
+    (repo / "check_experiment.py").write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, sys\n"
+        f"pathlib.Path(r'{argv_file}').write_text(' '.join(sys.argv[1:]))\n"
+        "sys.exit(0)\n"
+    )
+    p = run("test", "ladder-l1", env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_PYTEST_EXIT": "0"})
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert argv_file.read_text() == "ladder-l1"
+
+
 def test_test_falls_back_to_the_python_module_without_uv(new_repo, tmp_path):
     """With no `uv` on PATH, falls back to `python3 -m pytest -q`; against this fixture's
     promptfoo-evals copy (fixtures only, no test_*.py), that is pytest's own "no tests collected"
@@ -1000,6 +1106,29 @@ def test_test_falls_back_to_the_python_module_without_uv(new_repo, tmp_path):
     p = run("test", env={"PATH": stripped, "FAKE_CHECK_EXIT": "0"})
     assert p.returncode == 2, p.stdout + p.stderr
     assert "exited 5" in p.stderr or "uv" in p.stderr.lower()
+
+
+def test_test_with_uv_present_never_prints_the_no_uv_hint(new_repo, tmp_path):
+    """Final review, Minor 3: `argv[0]` is `shutil.which("uv")`'s full path, never the bare
+    string "uv", so the old `argv[0] != "uv"` was always true and could print "no `uv` on PATH"
+    even when uv really ran and really printed "No module named pytest" (e.g. a stale venv) --
+    this fake `uv` reproduces exactly that stderr, with uv on PATH, to prove the hint no longer
+    fires then."""
+    repo, run = new_repo
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    uv.write_text(
+        "#!/bin/sh\n"
+        "echo 'ModuleNotFoundError: No module named pytest' >&2\n"
+        "exit 7\n"
+    )
+    uv.chmod(0o755)
+    (repo / "check_experiment.py").write_text(FAKE_CHECK_EXPERIMENT)
+    p = run("test", env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_CHECK_EXIT": "0"})
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "no `uv` on PATH" not in p.stderr
+    assert "exited 7" in p.stderr
 
 
 # ---------------------------------------------------------------------------

@@ -36,10 +36,12 @@ installed on it; called at their path under the experiment's own repository clon
       --group dev` there, at creation); without `uv` on `$PATH`, falls back to `python3 -m pytest
       -q`, failing with a clear exit-2 message if that has no `pytest` either, rather than a bare
       traceback.
-    - `<repo_root>/check_experiment.py` (`test`, offline): `[<name>]`, the build's own experiment
-      (`instances/local.yml`'s `spe_experiment`) if this is a `spe-experiments` build, else every
-      experiment (not a build at all, e.g. a plain development checkout); `pr-body` also runs it,
-      always `<name>`, never the whole catalogue.
+    - `<repo_root>/check_experiment.py` (`test`, offline): `test`'s own `<name>` when given (final
+      review, I2: so a participant's own `spe-eval test <name>` checks the experiment they are
+      writing, not the build's); otherwise the build's own experiment (`instances/local.yml`'s
+      `spe_experiment`) if this is a `spe-experiments` build, else every experiment (not a build at
+      all, e.g. a plain development checkout); `pr-body` also runs it, always `<name>`, never the
+      whole catalogue.
 
 SIGTERM/SIGINT during `run` (one `_StopState` per call, installed for the whole of `cmd_run`):
 forwarded to whichever external process is currently running (task 4 review, Important 2), and the
@@ -78,7 +80,7 @@ usage or configuration error.
 | Step  | Command                                                                | For an agent |
 |-------|-------------------------------------------------------------------------|--------------|
 | Start | spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--injection <surface>] [--from <experiment>] | writes every slot's file with TODOs (01-experiment-model.md): the experiment, its mitigation and switch, its own test, and, when new, a threat or path file; with --injection a fixtures.json entry and payload; with --path, tests prefilled from the catalogue |
-| Test  | spe-eval test                                                          | offline, seconds: the evaluations' unit tests, then check_experiment.py (the build's own experiment, or every one) |
+| Test  | spe-eval test [<name>]                                                 | offline, seconds: the evaluations' unit tests, then check_experiment.py (the named experiment, else the build's own, or every one) |
 | Try   | spe-eval arm [<name>] baseline\\|mitigated                               | applies one arm and exits when the stack answers |
 | Run   | spe-eval run [<name>] [--repeat N] [--detach]                         | --detach starts the run in the background (a user systemd unit) and returns at once with its id; the agent's own command timeouts never cut a run short |
 | Watch | spe-eval status [--json]                                              | the lock, the run id, arm, test k of n, last error; spe-eval wait [--timeout S] blocks until the run ends or the timeout passes, for agents that can wait in bounded steps |
@@ -218,7 +220,7 @@ def cmd_new(ns: argparse.Namespace) -> int:
         "switch in group_vars/all.yml, and set mitigation: null in the experiment file."
     )
     print(f"Add a line for {ns.name} to experiments/README.md once it is ready.")
-    print(f"Next: spe-eval test, or python3 check_experiment.py {ns.name}")
+    print(f"Next: spe-eval test {ns.name}, or python3 check_experiment.py {ns.name}")
     return 0
 
 
@@ -244,7 +246,11 @@ def _run_pytest(repo_root: Path) -> int:
         return 2
     sys.stdout.write(result.stdout)
     sys.stderr.write(result.stderr)
-    if argv[0] != "uv" and "No module named pytest" in result.stderr:
+    # Path(argv[0]).name, not argv[0] (final review, Minor 3): argv[0] is shutil.which("uv")'s own
+    # full path (e.g. /usr/local/bin/uv), never the bare string "uv", so the old `argv[0] != "uv"`
+    # was always true -- this hint could fire even when uv really ran and really lacked the
+    # module, instead of only the no-uv fallback case it is meant for.
+    if Path(argv[0]).name != "uv" and "No module named pytest" in result.stderr:
         _print_err(
             "no `uv` on PATH and no pytest module installed here; install pytest "
             "(`uv sync --group dev` in platform/promptfoo-evals) and retry"
@@ -273,7 +279,11 @@ def cmd_test(ns: argparse.Namespace) -> int:
     if pytest_rc == 2:
         return 2
 
-    name = _experiment_to_check(repo_root)
+    # `ns.name`, when given, overrides the build's own experiment (final review, I2): the
+    # documented path writes a new `<name>` with `spe-eval new` on a `ladder-l0` build, and
+    # `test` with no name would otherwise keep checking `ladder-l0`, never the new, still-TODO
+    # `<name>`, and exit 0 regardless.
+    name = ns.name or _experiment_to_check(repo_root)
     check_argv = [sys.executable, str(repo_root / "check_experiment.py")] + ([name] if name else [])
     try:
         check_result = subprocess.run(check_argv, cwd=repo_root, capture_output=True, text=True)
@@ -779,6 +789,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_new.set_defaults(handler=cmd_new)
 
     p_test = sub.add_parser("test", help="offline: the evaluations' unit tests, then check_experiment.py")
+    p_test.add_argument("name", nargs="?", help="an experiments/<name>.yml stem; default: the build's own")
     p_test.set_defaults(handler=cmd_test)
 
     p_arm = sub.add_parser("arm", help="apply one arm and wait for the stack to answer")

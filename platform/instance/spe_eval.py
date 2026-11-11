@@ -566,13 +566,15 @@ def mitigation_text(name: str, switch: str) -> str:
     means): `id`/`on`/`off` are already filled in from `name`; every other slot is a literal
     `TODO` for the participant to fill, or -- for an attack-only idea -- to delete, along with
     this file and the switch's own line in `group_vars/all.yml` (05-contribution.md, *A skeleton*).
-    """
+    Every comment here is wording only, never the word `TODO` itself (final review, Important 1):
+    `closes: []` is already a real, valid value (a control that narrows rather than closes), so a
+    hint comment next to it must not read as a placeholder still to fill."""
     return (
         f"id: {name}\n"
         "name: TODO\n"
         "description: >\n"
         "  TODO: what this mitigation changes, and where, when it is on.\n"
-        "closes: []  # TODO: path ids (P<n>, paths/) this closes when on; stays [] for a control "
+        "closes: []  # path ids (P<n>, paths/) this closes when on; stays [] for a control "
         "that narrows (then list its probes below)\n"
         f'"on": {{{switch}: true}}\n'
         f'"off": {{{switch}: false}}\n'
@@ -667,8 +669,8 @@ def test_file_text(name: str, *, threat: str | None, path: str | None, closed_by
     header = (
         "# Written by `spe-eval new` (07-agent-friendly.md, *Start*). Add at least one assertion "
         "under `assert`\n"
-        "# (see platform/promptfoo-evals/tests/utility.yaml for examples), and fill in every "
-        "other TODO.\n"
+        "# (see platform/promptfoo-evals/tests/utility.yaml for examples), and replace every "
+        "remaining placeholder value.\n"
     )
     return header + yaml.safe_dump(data, sort_keys=False)
 
@@ -694,8 +696,8 @@ def experiment_text(name: str, *, threat: str, paths: list[str], mitigation: str
     }
     data.update(extra_top or {})
     header = (
-        "# Written by `spe-eval new` (07-agent-friendly.md, *Start*); every TODO is a slot to "
-        "fill, or -- if\n"
+        "# Written by `spe-eval new` (07-agent-friendly.md, *Start*); every placeholder value is "
+        "a slot to fill, or -- if\n"
         "# this idea does not need it -- to delete along with its own file (05-contribution.md,\n"
         "# *A skeleton, not a rulebook*: an attack-only idea deletes mitigations/<name>.yml and "
         "its\n"
@@ -773,6 +775,15 @@ def new_experiment(repo_root: Path, name: str, *, threat: str | None = None, pat
     exp_path = repo_root / "experiments" / f"{name}.yml"
     if exp_path.exists():
         raise ConfigError(f"{exp_path}: an experiment named {name!r} already exists")
+    # Checked here too, not only the experiment file (final review, Minor 2): `new` used to
+    # overwrite an existing mitigations/<name>.yml or tests/experiments/<name>.yaml with no
+    # warning, e.g. a name that collides with someone else's file still waiting to be renamed.
+    mitigation_path_check = repo_root / "mitigations" / f"{name}.yml"
+    if mitigation_path_check.exists():
+        raise ConfigError(f"{mitigation_path_check}: already exists")
+    test_path_check = repo_root / "platform" / "promptfoo-evals" / "tests" / "experiments" / f"{name}.yaml"
+    if test_path_check.exists():
+        raise ConfigError(f"{test_path_check}: already exists")
 
     base: list[str] = []
     extra_parameters: dict = {}

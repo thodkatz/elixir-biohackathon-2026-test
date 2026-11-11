@@ -1,6 +1,7 @@
 # Template for experiments/<name>.yml (01-experiment-model.md, *Experiments*). Copy this file to
-# experiments/<name>.yml (kebab-case) and replace every TODO; `validate.py` and
-# `check_experiment.py` check the result. `spe-eval new <name> [--threat TM-NNN] [--path P<n>]
+# experiments/<name>.yml (kebab-case) and replace every placeholder value (every field still a
+# literal TODO is checked; a value already filled in below, like an empty list, is not); `validate.py`
+# and `check_experiment.py` check the result. `spe-eval new <name> [--threat TM-NNN] [--path P<n>]
 # [--injection <surface>] [--from <experiment>]` writes a filled-in copy of this shape for you
 # (07-agent-friendly.md), deriving the mitigation id, its switch and the test file's name from
 # <name>; delete the slots your idea does not need (05-contribution.md, *A skeleton, not a
@@ -15,13 +16,13 @@ description: >              # what this measures and why -- the lasting explanat
 parameters:                 # the spe-experiments template's own form parameters (02-coder-template.md)
   experiment: TODO            # must equal this file's own stem
   mitigations: []             # = experiment.base below: mitigations on in the baseline arm too
-  samples: [HG002, HG003, HG004, HG005]   # TODO: GIAB samples to seed
-  tiers: [ref, genomes, registry, secret]  # TODO: /data-share tiers to seed
-  workflows: [wes-drs-smoke, gatk-hc-chr20]  # TODO: TRS tools to install
+  samples: [HG002, HG003, HG004, HG005]   # GIAB samples to seed
+  tiers: [ref, genomes, registry, secret]  # /data-share tiers to seed
+  workflows: [wes-drs-smoke, gatk-hc-chr20]  # TRS tools to install
   canaries: [registry_tokens, honeypot_files, vcf_variants, flag_file, drs_metadata,
-    trs_descriptions, workflow_comments, service_info]  # TODO: canary types this experiment needs
-  flavor: de.NBI mini          # TODO: VM sizing
-  smoke_test: true             # TODO: run the smoke workflow at creation
+    trs_descriptions, workflow_comments, service_info]  # canary types this experiment needs
+  flavor: de.NBI mini          # VM sizing
+  smoke_test: true             # run the smoke workflow at creation
 
 experiment:
   threat: TODO                # a threats/TM-NNN-*.md id (existing, or new: see threats/TEMPLATE.md)
@@ -29,8 +30,9 @@ experiment:
   mitigation: TODO             # the mitigation id under test (null for a one-arm, attack-only
                                # experiment -- then also delete mitigations/<id>.yml and its switch)
   base: []                     # mitigation ids already on in both arms (must equal parameters.mitigations)
-  injections: []                # TODO: planted attacks on in both arms (fixtures.json ids; 01, *Attacks*)
-  tests: [TODO]                 # TODO: test ids this experiment runs (its own tests/experiments/<name>.yaml,
+  injections: []                # planted attacks on in both arms (fixtures.json ids; 01, *Attacks*);
+                                # stays [] if this idea plants none
+  tests: [TODO]                 # test ids this experiment runs (its own tests/experiments/<name>.yaml,
                                 # plus any existing ones); the utility group always runs as well
 
 # vars:                        # optional: Ansible values no form parameter offers (02); refused if

@@ -1,4 +1,4 @@
-# The test receiver's log carries no time: check with a unique marker
+# The test receiver's log carried no time, and outlives builds: check with a unique marker
 
 `/var/lib/spe-eval-sink/requests.jsonl` holds one `{method, host, path, body}` line per request, with no
 timestamp before experiments slice 5 (which adds `at`, epoch seconds; lines an older receiver wrote still lack it),

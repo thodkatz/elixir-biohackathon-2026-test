@@ -30,16 +30,18 @@ alongside the websocket upgrade on `GET /socket.io/`. Every other request gets 4
 (`dist/src/server/index.js`) and its web app bundle: the default is to refuse. `platform/dev/tests/test_evals_view.py`
 runs nginx in front of a stub upstream and checks every one of 0.125.1's routes against it — every non-GET route
 gets 403 (socket.io's POST excepted), every GET route 200 — with the route list checked against `node_modules`
-when it is present. The proxy forwards the normalized `$uri`, not the client's raw request path, so an encoded
-path (`..%2F`) cannot reach a write route by way of `/socket.io/`'s allowance. The proxy is configuration of an
-existing reverse proxy (an allow-list of methods and paths), not code of our own. Without keys a run would fail
-anyway; the proxy makes it refuse plainly instead.
+when it is present. The proxy forwards the client's request path as sent, still encoded, never a decoded copy: a
+decoded `%0D%0A` or `%20` would land in the request line to promptfoo as a real line break or space and smuggle a
+second request (a write) behind the first. Since nginx chooses what to allow from the decoded path but promptfoo
+routes on the raw one, socket.io's allowance holds only for a raw path of exactly `/socket.io/` (plus a query), so
+an encoded traversal (`/api/redteam/..%2F..%2Fsocket.io%2F`) that decodes to `/socket.io/` is refused rather than
+reaching a write route. The tests cover both, with a stub that records every request it receives. The proxy is
+configuration of an existing reverse proxy (an allow-list of methods and paths), not code of our own. Without keys
+a run would fail anyway; the proxy makes it refuse plainly instead.
 
-`evals-view` (above) is a stock `nginx:1.29-alpine` image, configuration only (`evals-view/nginx.conf`); it owns
-the network namespace, and `evals-promptfoo` shares it rather than joining the `evals` network itself, so its
-port (15500) is reachable only through this proxy, never directly. Two containers rather than one because the
-proxy is a stock image and not our code, `promptfoo view` needs Node, which that image does not have, and
-sharing one network namespace keeps promptfoo's own port off every network (clarification 3).
+The proxy is `evals-view` (above), a stock `nginx:1.29-alpine` image with configuration only
+(`evals-view/nginx.conf`); `promptfoo view` needs Node, which that image lacks, hence the second container, whose
+port (15500) the shared network namespace keeps reachable only through the proxy (clarification 3).
 
 ## The app
 

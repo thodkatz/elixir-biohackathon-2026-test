@@ -45,6 +45,8 @@ Numbered, append-only: why the design changed after approval.
    namespace keeps promptfoo's own port off every network, reachable only through the proxy in front of it. Also
    settled: the allow-list the proxy enforces (04, *Read-only*) is GET/HEAD everywhere plus socket.io's own
    `POST /socket.io/` and its websocket upgrade, checked by `platform/dev/tests/test_evals_view.py` against
-   0.125.1's own routes. *Amends:* 04 (*Read-only*, rewritten), the README's decision 14 (named the wrong compose
+   0.125.1's own routes; the proxy forwards the raw request path and allows `/socket.io/` only for exactly that raw
+   path, since forwarding nginx's decoded path let an encoded CR/LF smuggle a second request (a write) to promptfoo
+   (the PR's final review). *Amends:* 04 (*Read-only*, rewritten), the README's decision 14 (named the wrong compose
    service: `promptfoo view` is `evals-promptfoo`, behind the `evals-view` proxy, not the other way round).
    *Status:* folded.

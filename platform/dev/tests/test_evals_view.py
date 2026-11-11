@@ -16,9 +16,11 @@ server only emits, it handles no client event, so both its GET -- plain and the 
 upgrade -- and its long-polling POST are let through). nginx proxies a stub upstream (listening
 on 15500, the same port promptfoo binds to, inside one shared network namespace, as
 `evals-promptfoo`'s `network_mode: "service:evals-view"` does in compose.yml) that answers 200
-to anything, so what is under test is nginx's method/path allow-list, not promptfoo itself; the
-real image was also checked once by hand against actual promptfoo (see the task's own report).
+to anything and records every byte each connection carried, so what is under test is nginx's
+method/path allow-list and what it actually puts on the wire to promptfoo, not promptfoo itself;
+the real image was also checked once by hand against actual promptfoo (see the task's own report).
 """
+import json
 import os
 import re
 import shutil
@@ -255,10 +257,42 @@ NON_GET_ROUTES = [(method, concretize(path)) for method, path in ROUTE_PATTERNS 
 
 pytestmark_proxy = pytest.mark.skipif(DOCKER is None, reason="needs docker")
 NGINX_IMAGE = "nginx:1.29-alpine"
-# A stub upstream that answers 200 to any method and path, pinned by tag; already used to check
-# the real image by hand (the task's own report). Its -port flag puts it on 15500, the same port
+# The stub upstream: a pinned stock Python image running STUB_SERVER below on 15500, the port
 # promptfoo binds to and nginx.conf's upstream names, so nginx.conf needs no change for the test.
-STUB_IMAGE = "traefik/whoami:v1.10"
+# Not an off-the-shelf echo server (traefik/whoami was): those parse and answer only the first
+# request on a connection, so a second request smuggled behind it (fix round 2, Critical 1)
+# would never show. This one answers 200 once, echoing the first request's head as its body,
+# then keeps reading until nginx closes, and logs the whole connection's bytes as one JSON line.
+STUB_IMAGE = "python:3.13-alpine"
+STUB_SERVER = r"""
+import json, socket, threading
+def serve(conn):
+    conn.settimeout(2)
+    data = b""
+    try:
+        while b"\r\n\r\n" not in data:
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+        head = data.split(b"\r\n\r\n", 1)[0]
+        body = b"" if head.startswith(b"HEAD ") else head
+        conn.sendall(b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/plain\r\n"
+                     b"Content-Length: %d\r\n\r\n" % len(head) + body)
+        while chunk := conn.recv(65536):
+            data += chunk
+    except OSError:
+        pass
+    finally:
+        conn.close()
+        print(json.dumps(data.decode("latin-1")), flush=True)
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", 15500))
+s.listen(64)
+while True:
+    threading.Thread(target=serve, args=(s.accept()[0],), daemon=True).start()
+"""
 
 
 def _run(*args):
@@ -280,7 +314,8 @@ def proxy():
              "-v", f"{EVALS_VIEW / 'nginx.conf'}:/etc/nginx/nginx.conf:ro",
              NGINX_IMAGE)
         _run("run", "-d", "--name", stub_name, "--network", f"container:{nginx_name}",
-             STUB_IMAGE, "-port", "15500")
+             "--cap-drop", "ALL", "--read-only", "--user", "65534:65534",
+             STUB_IMAGE, "python", "-c", STUB_SERVER)
         port = subprocess.run(["docker", "port", nginx_name, "8080/tcp"], check=True,
                                capture_output=True, text=True).stdout.strip().rsplit(":", 1)[1]
         base = f"http://127.0.0.1:{port}"
@@ -293,13 +328,13 @@ def proxy():
                 if time.monotonic() > deadline:
                     raise
                 time.sleep(0.5)
-        yield base
+        yield base, stub_name
     finally:
         subprocess.run(["docker", "rm", "-f", nginx_name, stub_name], capture_output=True, text=True)
 
 
-def request(base: str, method: str, path: str, headers: dict | None = None) -> tuple[int, str]:
-    req = urllib.request.Request(base + path, method=method, headers=headers or {})
+def request(proxy, method: str, path: str, headers: dict | None = None) -> tuple[int, str]:
+    req = urllib.request.Request(proxy[0] + path, method=method, headers=headers or {})
     try:
         resp = urllib.request.urlopen(req, timeout=5)
         return resp.status, resp.read().decode("utf-8", "replace")
@@ -307,20 +342,36 @@ def request(base: str, method: str, path: str, headers: dict | None = None) -> t
         return e.code, e.read().decode("utf-8", "replace")
 
 
-def status(base: str, method: str, path: str) -> int:
-    return request(base, method, path)[0]
+def status(proxy, method: str, path: str) -> int:
+    return request(proxy, method, path)[0]
 
 
 def upstream_path(body: str) -> str | None:
-    """traefik/whoami echoes the request line it actually received as the first word pair of
-    its body: the path nginx forwarded, however the client phrased the one it sent (fix round
-    1, Important 2 -- the whole point of these bypass tests is to see this, not just the
-    status, since the always-200 stub alone cannot show a mismatch)."""
+    """The stub echoes the head of the request it actually received as its body, request line
+    first: the path nginx forwarded, however the client phrased the one it sent (fix round 1,
+    Important 2 -- the whole point of these bypass tests is to see this, not just the status,
+    since the always-200 stub alone cannot show a mismatch)."""
     for line in body.splitlines():
         parts = line.split(" ")
         if len(parts) >= 2 and parts[0] in ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"):
             return parts[1]
     return None
+
+
+REQUEST_LINE_RE = re.compile(r"^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|CONNECT|TRACE) ", re.M)
+
+
+def upstream_connections(proxy, marker: str) -> list[str]:
+    """Every connection the stub logged whose bytes contain `marker`, waiting briefly for it:
+    the stub logs a connection only once nginx has closed it."""
+    deadline = time.monotonic() + 5
+    while True:
+        logs = subprocess.run(["docker", "logs", proxy[1]], check=True, capture_output=True,
+                              text=True).stdout
+        found = [raw for raw in map(json.loads, logs.splitlines()) if marker in raw]
+        if found or time.monotonic() > deadline:
+            return found
+        time.sleep(0.2)
 
 
 @pytestmark_proxy
@@ -366,26 +417,62 @@ def test_socket_io_still_refuses_every_other_method(proxy):
 
 
 # Fix round 1, Important 2: nginx picks a location (and so which methods it allows) from the
-# decoded, dot-segment-resolved URI, but `proxy_pass http://upstream;` with no URI forwards the
-# client's raw, undecoded one -- so a request that *normalizes* to exactly /socket.io/ (where
-# POST is allowed) could, forwarded raw, dispatch to one of promptfoo's own param routes
-# instead (e.g. redteamRouter's "/:taskId", whose param swallows a traversal). Forwarding
-# $uri$is_args$args (nginx.conf) closes this: whatever path nginx decided on is exactly what
-# reaches promptfoo, so each case below must either be refused outright or land only on the
-# literal, harmless /socket.io/ -- never anywhere else.
+# decoded, dot-segment-resolved URI, but forwards the client's raw, undecoded one -- so a request
+# that *normalizes* into /socket.io/ (where POST is allowed) could, forwarded raw, dispatch to
+# one of promptfoo's own param routes instead (e.g. redteamRouter's "/:taskId", whose param
+# swallows a traversal). nginx.conf's `/socket.io/` location therefore also requires the raw
+# request URI to be exactly /socket.io/ plus a query; every case below must be refused.
 BYPASS_CASES = [
     ("POST", "/api/redteam/..%2F..%2Fsocket.io%2F", None),
     ("POST", "/socket.io/../api/eval/job", None),
     ("POST", "//socket.io/", None),
     ("POST", "/socket.io/%2E%2E/api/eval/job", None),
     ("POST", "/api/eval/job", {"X-HTTP-Method-Override": "GET"}),
+    ("POST", "/api/eval/x/results/..%2F..%2F..%2F..%2Fsocket.io/rating", None),
 ]
 
 
 @pytestmark_proxy
 @pytest.mark.parametrize("method,path,headers", BYPASS_CASES,
                           ids=["redteam-encoded-traversal", "socket-io-dotdot", "double-slash",
-                               "socket-io-encoded-dotdot", "method-override-header"])
-def test_encoded_path_bypasses_are_refused_or_land_only_on_socket_io(proxy, method, path, headers):
+                               "socket-io-encoded-dotdot", "method-override-header",
+                               "rating-encoded-traversal"])
+def test_encoded_path_bypasses_are_refused(proxy, method, path, headers):
     code, body = request(proxy, method, path, headers)
-    assert code == 403 or upstream_path(body) == "/socket.io/"
+    assert code == 403, f"reached upstream as {upstream_path(body)!r}"
+
+
+# Fix round 2, Critical 1: forwarding nginx's *decoded* path (`proxy_pass http://promptfoo$uri`)
+# put %0D%0A and %20 into the upstream request line as real CR/LF and spaces, so one client
+# request became two upstream requests -- a GET carrying a smuggled POST /api/eval/job, past the
+# allow-list. Each case must either be refused, or reach promptfoo as exactly one request whose
+# path is the client's own raw (still encoded) path, byte for byte. The %MARKER% placeholder makes
+# each case's upstream connection findable in the stub's log.
+SMUGGLE_CRLF = "%20HTTP/1.1%0D%0AHost:%20x%0D%0A%0D%0APOST%20/api/eval/job-%MARKER%"
+SMUGGLING_CASES = [
+    ("GET", "/a" + SMUGGLE_CRLF),
+    ("GET", "/api/results" + SMUGGLE_CRLF + "%20HTTP/1.1%0D%0AContent-Length:%2020%0D%0A%0D%0A"),
+    ("POST", "/socket.io/" + SMUGGLE_CRLF),
+    ("GET", "/socket.io/" + SMUGGLE_CRLF),
+    ("GET", "/a%0Ab-%MARKER%"),
+    ("GET", "/a%20b-%MARKER%"),
+    ("GET", "/a%20/api/eval/job-%MARKER%"),
+]
+
+
+@pytestmark_proxy
+@pytest.mark.parametrize("method,path", SMUGGLING_CASES,
+                          ids=["get-crlf", "get-crlf-content-length", "socket-io-post-crlf",
+                               "socket-io-get-crlf", "get-lf", "get-space", "get-space-path"])
+def test_no_request_is_smuggled_into_the_upstream_connection(proxy, method, path):
+    marker = uuid.uuid4().hex
+    path = path.replace("%MARKER%", marker)
+    code, _ = request(proxy, method, path)
+    connections = upstream_connections(proxy, marker)
+    if code == 403:
+        assert connections == []
+        return
+    assert len(connections) == 1
+    request_lines = [line for line in connections[0].split("\r\n") if REQUEST_LINE_RE.match(line)]
+    assert len(request_lines) == 1, request_lines
+    assert re.fullmatch(re.escape(f"{method} {path}") + r" HTTP/1\.[01]", request_lines[0])

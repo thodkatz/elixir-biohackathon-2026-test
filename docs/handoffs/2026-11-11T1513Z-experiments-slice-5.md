@@ -37,6 +37,6 @@ and the template's Canary hits app. Slice 5 needs de.NBI (standing OK: one insta
   - Prune the build cache first (`denbi-disk-full.md`).
   - Restore the VM from main's `instances/denbi.yml` afterwards.
 - **Results already on the VM:** the viewer's database `~/spe-eval/promptfoo` on denbi-agui-01 holds 14 ladder
-  evals from slice 3. `curl 127.0.0.1:8200/api/results` lists them without a new run.
-- **Deferred:** the viewer's egress (some GET routes call out) is in `BACKLOG.md`, *Unscheduled*. Minors 4, 5, 8,
-  9 and 11–14 from #92's ledger were judged not worth a change. #92's body lists them.
+  evals from slice 3. On an experiments build, `curl 127.0.0.1:8200/api/results` lists them without a new run.
+- **Deferred:** the viewer's egress (some GET routes call out) is in `BACKLOG.md`, *Unscheduled*. Minors 5, 8, 9
+  and 11–14 from #92's ledger were judged not worth a change (minor 4 was fixed, `d86b804`). #92's body lists them.

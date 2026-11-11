@@ -382,6 +382,36 @@ def test_two_mitigations_setting_the_same_on_key_fail_naming_both_files(tmp_path
     assert overlap, problems
 
 
+def test_three_mitigations_setting_the_same_on_key_name_all_three(tmp_path):
+    """Final review, I4b: the previous version kept only the first-seen owner of a contested key,
+    so a third mitigation setting it was never named alongside the second -- the message named
+    only two of the three files involved."""
+    mitigations_dir = tmp_path / "mitigations"
+    shutil.copytree(REPO / "mitigations", mitigations_dir)
+    (mitigations_dir / "trs-guard.yml").write_text(
+        "id: trs-guard\n"
+        "name: TRS guard (duplicate of L1's switch, for the test)\n"
+        "description: Sets the same Ansible key as L1.\n"
+        "closes: []\n"
+        '"on": {spe_harden_trs_readonly: true}\n'
+        '"off": {spe_harden_trs_readonly: false}\n'
+    )
+    (mitigations_dir / "trs-guard-2.yml").write_text(
+        "id: trs-guard-2\n"
+        "name: A second mitigation also setting L1's key, for the test\n"
+        "description: Sets the same Ansible key as L1 and trs-guard.\n"
+        "closes: []\n"
+        '"on": {spe_harden_trs_readonly: true}\n'
+        '"off": {spe_harden_trs_readonly: false}\n'
+    )
+    _, problems = validate.validate_mitigations_catalog(
+        mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
+    )
+    overlap = [p for p in problems if "spe_harden_trs_readonly" in p and "L1.yml" in p
+               and "trs-guard.yml" in p and "trs-guard-2.yml" in p]
+    assert overlap, problems
+
+
 def test_two_mitigations_setting_the_same_on_key_pass_when_conflicts_declares_the_pair(tmp_path):
     mitigations_dir = tmp_path / "mitigations"
     shutil.copytree(REPO / "mitigations", mitigations_dir)

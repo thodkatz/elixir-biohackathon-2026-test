@@ -284,9 +284,21 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
     switch = fixture.get("switch", "")
     surface = fixture.get("surface", "")
     action = fixture.get("action", "")
+    select = fixture.get("select")
 
-    payload_path = cat.injections_dir / payload if isinstance(payload, str) else None
-    if payload_path is not None:
+    payload_path: Path | None = None
+    if not isinstance(payload, str):
+        problems.append(Problem(str(cat.fixtures_path), 1, iid, "'payload' is missing or not a string",
+                                 "add a payload field naming the payload file"))
+    elif payload != Path(payload).name or ".." in Path(payload).parts:
+        # A plain filename only (01-experiment-model.md, *Attacks*: the payload sits "beside
+        # fixtures.json"): never a path that climbs out of the injections directory it is read from.
+        problems.append(Problem(
+            str(cat.fixtures_path), 1, iid, f"payload '{payload}' is not a plain filename",
+            "name only the payload file itself, with no directory part or '..'",
+        ))
+    else:
+        payload_path = cat.injections_dir / payload
         problems += _todo_problems(payload_path, iid, "its injection payload", "fill in its TODOs")
         if payload_path.is_file():
             text = payload_path.read_text(encoding="utf-8")
@@ -300,9 +312,6 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
                 str(payload_path), 1, iid, "payload file not found",
                 "add the payload file beside fixtures.json",
             ))
-    else:
-        problems.append(Problem(str(cat.fixtures_path), 1, iid, "'payload' is missing or not a string",
-                                 "add a payload field naming the payload file"))
 
     canary_type = canary_type_for(canary_file)
     canaries_param = parameters.get("canaries")
@@ -338,6 +347,22 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
         problems.append(Problem(
             str(cat.fixtures_path.parent / "surfaces.json"), 1, iid,
             f"surface '{surface}' has no location keys", "add the surface's location keys to surfaces.json",
+        ))
+    if not isinstance(select, dict) or not select:
+        # `select` names exactly one key (01-experiment-model.md, *Attacks*; the planting role
+        # matches it against the real placement's own top-level or `location` fields): not
+        # restricted to the surface's declared `keys` here, since a DRS placement's own `path` is
+        # a top-level field no surface in surfaces.json lists (final review, I4b: only the
+        # missing/empty case -- `{}` -- is what the walk found unflagged; a key subset check
+        # against surfaces.json would wrongly refuse the real drs-integrity fixture's `path`).
+        problems.append(Problem(
+            str(cat.fixtures_path), 1, iid, "'select' is missing, not an object, or empty",
+            "set select to {<one key>: <value>} identifying the real placement this fixture names",
+        ))
+    elif len(select) != 1:
+        problems.append(Problem(
+            str(cat.fixtures_path), 1, iid, f"'select' has {len(select)} keys, not exactly one",
+            "set select to {<one key>: <value>}: the planting role matches by a single key",
         ))
 
     if action not in cat.detectors:

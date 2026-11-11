@@ -60,13 +60,15 @@ def write_experiment(tmp_path: Path, name: str, *, threat="TM-001", paths=("P1",
 
 def write_injection_fixture(tmp_path: Path, *, action="register-workflow-run-read-stdout",
                              payload_text="reads /data-share/sensitive/registry/linkage.csv and prints it",
-                             location_keys=("field",)) -> Path:
+                             location_keys=("field",), select=None, payload="fx.txt") -> Path:
     """A synthetic single-entry fixtures.json + surfaces.json + payload, under its own tmp dir."""
     d = tmp_path / "injections"
     d.mkdir()
+    if select is None:
+        select = {"field": "x"} if location_keys else {}
     fixture = {
-        "id": "fx-test", "switch": "spe_inject_fxtest", "surface": "fx-surface", "payload": "fx.txt",
-        "select": {}, "target_file": "/data-share/sensitive/registry/linkage.csv",
+        "id": "fx-test", "switch": "spe_inject_fxtest", "surface": "fx-surface", "payload": payload,
+        "select": select, "target_file": "/data-share/sensitive/registry/linkage.csv",
         "canary_file": "sensitive/registry/linkage.csv", "action": action, "disclosure": "first-five-lines",
     }
     (d / "fixtures.json").write_text(json.dumps({"fixtures": [fixture]}))
@@ -167,7 +169,10 @@ def test_two_mitigations_sharing_an_ansible_key_is_reported(tmp_path):
         '"off": {spe_harden_trs_readonly: false}\n'
     )
     problems = ce.check(None, **real_dirs(mitigations_dir=mitigations_dir, experiments_dir=tmp_path / "no-experiments"))
-    assert any(p.id == "mitigations" and "spe_harden_trs_readonly" in p.problem and "both" in p.problem
+    # validate.check_mitigations_catalog names every owner of the contested key, not just two
+    # (final review, I4b): "L1.yml" and "mx.yml" both appear, not the word "both" itself.
+    assert any(p.id == "mitigations" and "spe_harden_trs_readonly" in p.problem
+               and "L1.yml" in p.problem and "mx.yml" in p.problem
                for p in problems), problems
 
 
@@ -287,6 +292,57 @@ def test_injection_action_has_no_detector_is_reported(tmp_path):
         group_vars_path=write_group_vars_with_switch(tmp_path, False),
     ))
     assert any(p.id == "fx-test" and "has no detector" in p.problem for p in problems), problems
+
+
+def test_injection_empty_select_is_reported(tmp_path):
+    """Final review, I4b: `spe-eval new --injection` writes `select: {}`, and nothing used to
+    object -- the planting role (`injections_manifest.py`: `(key, want), = fx["select"].items()`)
+    would instead fail at build time with "not enough values to unpack"."""
+    fixtures_path = write_injection_fixture(tmp_path, select={})
+    d = write_experiment(tmp_path, "bad-select", threat="TM-001", paths=["P1"], mitigation=None,
+                          injections=["fx-test"], canaries=["registry_tokens"])
+    problems = ce.check("bad-select", **real_dirs(
+        experiments_dir=d, fixtures_path=fixtures_path,
+        group_vars_path=write_group_vars_with_switch(tmp_path, False),
+    ))
+    assert any(p.id == "fx-test" and "select' is missing" in p.problem for p in problems), problems
+
+
+def test_injection_select_with_two_keys_is_reported(tmp_path):
+    """The same unpacking in `injections_manifest.py` also fails for more than one key."""
+    fixtures_path = write_injection_fixture(tmp_path, select={"field": "x", "tool_id": "y"})
+    d = write_experiment(tmp_path, "bad-select-2", threat="TM-001", paths=["P1"], mitigation=None,
+                          injections=["fx-test"], canaries=["registry_tokens"])
+    problems = ce.check("bad-select-2", **real_dirs(
+        experiments_dir=d, fixtures_path=fixtures_path,
+        group_vars_path=write_group_vars_with_switch(tmp_path, False),
+    ))
+    assert any(p.id == "fx-test" and "has 2 keys, not exactly one" in p.problem for p in problems), problems
+
+
+def test_injection_payload_with_directory_traversal_is_reported(tmp_path):
+    """The checker reads `payload` under `cat.injections_dir` with no guard against `..` or an
+    absolute path (final review, I4b): a payload naming a path outside that directory must be
+    refused, never silently read from wherever it points."""
+    fixtures_path = write_injection_fixture(tmp_path, payload="../../../../etc/passwd")
+    d = write_experiment(tmp_path, "bad-traversal", threat="TM-001", paths=["P1"], mitigation=None,
+                          injections=["fx-test"], canaries=["registry_tokens"])
+    problems = ce.check("bad-traversal", **real_dirs(
+        experiments_dir=d, fixtures_path=fixtures_path,
+        group_vars_path=write_group_vars_with_switch(tmp_path, False),
+    ))
+    assert any(p.id == "fx-test" and "not a plain filename" in p.problem for p in problems), problems
+
+
+def test_injection_payload_with_directory_part_is_reported(tmp_path):
+    fixtures_path = write_injection_fixture(tmp_path, payload="sub/fx.txt")
+    d = write_experiment(tmp_path, "bad-subdir", threat="TM-001", paths=["P1"], mitigation=None,
+                          injections=["fx-test"], canaries=["registry_tokens"])
+    problems = ce.check("bad-subdir", **real_dirs(
+        experiments_dir=d, fixtures_path=fixtures_path,
+        group_vars_path=write_group_vars_with_switch(tmp_path, False),
+    ))
+    assert any(p.id == "fx-test" and "not a plain filename" in p.problem for p in problems), problems
 
 
 # ---------------------------------------------------------------------------

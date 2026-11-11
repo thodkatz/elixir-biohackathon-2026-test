@@ -525,13 +525,17 @@ def check_mitigation(mitigation: Mitigation, path_ids: set[str], mitigation_ids:
 
 def check_mitigations_catalog(mitigations: list[Mitigation]) -> list[str]:
     """Cross-mitigation checks: duplicate ids, one owner per 'on' Ansible key,
-    unless the pair declares the overlap in 'conflicts' (either direction)."""
+    unless every pair sharing it declares the overlap in 'conflicts' (either direction).
+
+    Every mitigation that sets a contested key is named in its error (final review, I4b): the
+    previous version kept only the first-seen owner, so a key set by three or more mitigations
+    reported it against that first owner alone, never naming the others to each other."""
     errors = []
     ids_seen: dict[str, str] = {}
     conflicts_by_id = {
         m.meta.get("id"): set(m.meta.get("conflicts") or []) for m in mitigations
     }
-    owners: dict[str, tuple[str, str]] = {}  # Ansible key -> (mitigation id, filename)
+    owners: dict[str, list[tuple[str, str]]] = {}  # Ansible key -> every (mitigation id, filename) setting it
     for m in mitigations:
         entry_id = m.meta.get("id")
         if entry_id in ids_seen:
@@ -542,18 +546,19 @@ def check_mitigations_catalog(mitigations: list[Mitigation]) -> list[str]:
         on = m.meta.get("on")
         if isinstance(on, dict):
             for key in on:
-                if key not in owners:
-                    owners[key] = (entry_id, m.path.name)
-                    continue
-                other_id, other_name = owners[key]
-                if other_id == entry_id:
-                    continue
-                declared = (
-                    entry_id in conflicts_by_id.get(other_id, set())
-                    or other_id in conflicts_by_id.get(entry_id, set())
-                )
-                if not declared:
-                    errors.append(f"Ansible key '{key}' is set in both {other_name} and {m.path.name}")
+                owners.setdefault(key, []).append((entry_id, m.path.name))
+
+    def declared(a_id: str, b_id: str) -> bool:
+        return a_id in conflicts_by_id.get(b_id, set()) or b_id in conflicts_by_id.get(a_id, set())
+
+    for key, who in owners.items():
+        if len(who) < 2:
+            continue
+        undeclared = {name for i, (a_id, name) in enumerate(who)
+                      if any(not declared(a_id, b_id) for j, (b_id, _) in enumerate(who) if j != i)}
+        if undeclared:
+            errors.append(f"Ansible key '{key}' is set with no declared conflict in: "
+                           + ", ".join(sorted(undeclared)))
     return errors
 
 

@@ -115,6 +115,15 @@ def test_mixed_injections_is_refused_by_counts(tmp_path):
         matrix.counts(level_dir(tmp_path, 0, injections="mixed"))
 
 
+def test_mixed_injections_is_accepted_with_allow_mixed(tmp_path):
+    # task 3 review, Important 3: an experiment's arm (spe_eval.arm_counts) needs counts() to read
+    # a "mixed" hardening record too -- the opt-in keyword keeps the ladder's own default refusal
+    # (tested above) exactly as it is.
+    c = matrix.counts(level_dir(tmp_path, 0, injections="mixed"), allow_mixed=True)
+    assert c["injections"] == "mixed"
+    assert c["payloads"] == {e["id"]: e["payload_sha256"] for e in manifest(*FIXTURE_IDS)["injections"]}
+
+
 def test_mixed_models_are_refused(tmp_path):
     l0 = matrix.counts(level_dir(tmp_path, 0))
     l1 = matrix.counts(level_dir(tmp_path, 1, model="claude-haiku-5-5"))

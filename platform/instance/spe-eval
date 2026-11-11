@@ -665,17 +665,26 @@ def cmd_results(ns: argparse.Namespace) -> int:
     if isinstance(entry, spe_eval.ConfigError):
         _print_err(str(entry))
         return 1
-    try:
-        results = spe_eval.build_results(entry, home)
-    except spe_eval.ConfigError as e:
-        _print_err(str(e))
-        return 2
+    # build_results never raises any more (task 3 review, Important 1): an arm that is still
+    # running, or ended anything but "ok", is reported as unusable rather than crashing; "no arm
+    # usable at all" is exit 1 here, the same "no run to read" case as _entry_for_results above.
+    results = spe_eval.build_results(entry, home)
+    if not results["usable_arms"]:
+        _print_err(spe_eval.unusable_run_message(results))
+        return 1
+
+    # Computed before any printing (task 3 review, Important 2): with --json, the reasons join
+    # the one JSON document rather than following it as separate text, which would make stdout
+    # unparseable.
+    reasons = spe_eval.test_reasons(entry, ns.test, home) if ns.test else None
     if ns.json:
+        if reasons is not None:
+            results = {**results, "reasons": {"test": ns.test, "by_arm": reasons}}
         print(json.dumps(results))
-    else:
-        sys.stdout.write(spe_eval.format_results_text(results))
-    if ns.test:
-        reasons = spe_eval.test_reasons(entry, ns.test, home)
+        return 0
+
+    sys.stdout.write(spe_eval.format_results_text(results))
+    if reasons is not None:
         if not reasons:
             print(f"no assertion reasons recorded for {ns.test}")
         else:
@@ -691,12 +700,16 @@ def cmd_results(ns: argparse.Namespace) -> int:
 
 def _check_experiment(repo_root: Path, name: str) -> tuple[int, str]:
     """`check_experiment.py <name>` (never the whole catalogue: `pr-body` is one experiment's own
-    contribution), returning its exit code and the text to quote under *Checks*."""
+    contribution), returning its exit code and the text to quote under *Checks*. It is specified
+    to finish in under a minute (check_experiment.py's own docstring); a generous 90s timeout
+    keeps `pr-body` from hanging an agent if it ever does not (task 3 review, Minor 3)."""
     argv = [sys.executable, str(repo_root / "check_experiment.py"), name]
     try:
-        result = subprocess.run(argv, cwd=repo_root, capture_output=True, text=True)
+        result = subprocess.run(argv, cwd=repo_root, capture_output=True, text=True, timeout=90)
     except OSError as e:
         raise spe_eval.ConfigError(f"could not run check_experiment.py: {e}") from None
+    except subprocess.TimeoutExpired:
+        raise spe_eval.ConfigError("check_experiment.py did not finish within 90s") from None
     output = (result.stdout + result.stderr).strip() or "OK: no problems found"
     return result.returncode, output
 
@@ -802,12 +815,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="print a PR title and body for <name> from its files and its latest run",
         description="Prints the title on its own first line (\"title: <title>\"), a blank line, then the PR "
                      "body (the template filled in from the experiment's files, its latest run -- or the one "
-                     "named by --run -- and check_experiment.py's own output). Split the output for "
+                     "named by --run -- and check_experiment.py's own output). Split for "
                      "`gh pr create --title <title> --body-file -`, e.g.:\n"
-                     "    out=$(spe-eval pr-body <name>)\n"
-                     "    title=${out#title: }; title=${title%%$'\\n'*}\n"
-                     "    body=$(printf '%s\\n' \"$out\" | tail -n +3)\n"
-                     "    gh pr create --title \"$title\" --body-file <(printf '%s\\n' \"$body\")",
+                     "    title=$(spe-eval pr-body <name> | sed -n '1s/^title: //p')\n"
+                     "    spe-eval pr-body <name> | tail -n +3 | gh pr create --title \"$title\" --body-file -",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p_pr_body.add_argument("name", nargs="?", help="an experiments/<name>.yml stem; default: the build's own")
     p_pr_body.add_argument("--run", metavar="ID", help="a run id (spe-eval runs); default: <name>'s newest")

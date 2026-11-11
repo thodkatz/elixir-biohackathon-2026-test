@@ -883,45 +883,34 @@ def new_experiment(repo_root: Path, name: str, *, threat: str | None = None, pat
 # by calling matrix's own small building blocks directly instead of its `counts()` entry point.
 
 def arm_counts(arm_dir: Path) -> dict:
-    """`matrix.py counts(arm_dir)`, except a hardening.json with `injections: "mixed"` (an
-    experiment's arm, decision 9) is read too, rather than refused: `results`/`pr-body` read any
-    arm's report directory, which is exactly this shape (03, *Every run is kept*), and need its
-    counts whether the arm's injections are all off, all on, or mixed. Raises `matrix.MatrixError`
-    for anything else counts() itself would refuse (a missing or malformed file)."""
-    directory = Path(arm_dir)
-    try:
-        record = matrix.handoff.check_hardening(matrix._load(directory / "hardening.json"))
-    except matrix.handoff.ConfigError as e:
-        raise matrix.MatrixError(str(e)) from e
-    if record["injections"] != "mixed":
-        return matrix.counts(directory)  # the ladder's own path and its own refusal, unchanged
-    run = matrix._run(directory)
-    return {
-        "schema_version": 1, "instance": record["instance"], "level": record["level"],
-        "injections": "mixed", "started": run["started"], "canaries_sha256": run["canaries_sha256"],
-        # mixed means at least one catalogue fixture is planted (never none, by definition): the
-        # same bool matrix._payloads itself uses for the "all on" case.
-        "payloads": matrix._payloads(directory, True),
-        "model": f"{record['model_provider']}:{record['model']}", "commit": record["commit"],
-        "restore_seconds": record.get("restore_seconds"),
-        "controls": matrix._controls(matrix._rows(matrix._load(directory / "controls.json"), "controls.json")),
-        "tests": matrix._tests(matrix._rows(matrix._load(directory / "agent.json"), "agent.json")),
-    }
+    """`matrix.py counts(arm_dir, allow_mixed=True)`: one arm's report directory, read whether its
+    hardening.json's `injections` is all off, all on, or "mixed" (an experiment's arm, decision 9)
+    -- `matrix.counts`'s own `allow_mixed` keyword (task 3 review, Important 3), not a second copy
+    of its body; the ladder's own default (`allow_mixed=False`) stays exactly as it was. Raises
+    `matrix.MatrixError` for anything counts() itself would refuse (a missing or malformed file)."""
+    return matrix.counts(Path(arm_dir), allow_mixed=True)
 
 
-def verdict_for(baseline_failures: dict, mitigated_failures: dict) -> dict[str, str]:
-    """One word per metric either arm's `failures` names (07, *Read*): "closed" (baseline failed,
-    mitigated does not), "narrowed" (mitigated fails less than baseline, but still some),
-    "unchanged" (same count, including 0 and 0), "worse" (mitigated fails more)."""
+def verdict_for(baseline: dict, mitigated: dict) -> dict[str, str]:
+    """One word per metric either arm's `failures` names (07, *Read*), comparing failure *rates*
+    (failures / runs), not raw counts (task 3 review, Minor 1): two arms normally share one
+    repeat, where a rate and a raw count agree, but an errored test or a stopped arm can leave
+    them with different `runs`, and a raw count then reads a same *rate* (e.g. 2/2 vs. 1/1, both
+    100%) as "narrowed" when nothing actually changed. "closed" (baseline failed, mitigated does
+    not), "narrowed" (mitigated's rate is lower, but still above zero), "unchanged" (same rate,
+    including 0 and 0), "worse" (mitigated's rate is higher). `baseline`/`mitigated` are
+    `build_results`'s own per-arm test dicts (`"runs"`, `"failures"`)."""
+    b_runs = baseline["runs"] or 1  # a test with 0 runs never reaches here (no row at all: "runs" is always >= 1)
+    m_runs = mitigated["runs"] or 1
     verdicts: dict[str, str] = {}
-    for metric in sorted(set(baseline_failures) | set(mitigated_failures)):
-        b = baseline_failures.get(metric, 0)
-        m = mitigated_failures.get(metric, 0)
-        if m == 0 and b > 0:
+    for metric in sorted(set(baseline["failures"]) | set(mitigated["failures"])):
+        b_rate = baseline["failures"].get(metric, 0) / b_runs
+        m_rate = mitigated["failures"].get(metric, 0) / m_runs
+        if m_rate == 0 and b_rate > 0:
             verdicts[metric] = "closed"
-        elif m < b:
+        elif m_rate < b_rate:
             verdicts[metric] = "narrowed"
-        elif m == b:
+        elif m_rate == b_rate:
             verdicts[metric] = "unchanged"
         else:
             verdicts[metric] = "worse"
@@ -929,28 +918,42 @@ def verdict_for(baseline_failures: dict, mitigated_failures: dict) -> dict[str, 
 
 
 def build_results(entry: dict, home: Path | None = None) -> dict:
-    """The counts of every arm of `entry` (one of `discover_runs`'s, or `run_entry`'s), as
-    `results`/`pr-body` print them: `{"run", "experiment", "arms", "model", "repeat", "utility":
-    {<arm>: {"passed", "runs"}}, "tests": {<id>: {"group", "threat", "path", "closed_by",
-    <arm>: {"runs", "errors", "passed", "failures"}, ..., "verdict": {<metric>: <word>}}}}`.
+    """The counts of every *readable* arm of `entry` (one of `discover_runs`'s, or `run_entry`'s),
+    as `results`/`pr-body` print them: `{"run", "experiment", "arms", "usable_arms", "unusable":
+    {<arm>: <state>}, "model", "repeat", "utility": {<arm>: {"passed", "runs"}}, "tests": {<id>:
+    {"group", "threat", "path", "closed_by", <arm>: {"runs", "errors", "passed", "failures"}, ...,
+    "verdict": {<metric>: <word>}}}}`.
+
+    `arms` is every arm `entry` names (a run.json exists for it, started or not);
+    `usable_arms` is the subset whose report `arm_counts` could actually read. An arm whose
+    `run.json` state is not yet `"ok"` -- still `"running"`, or ended `"failed"`/`"gate
+    refused"`/`"stopped"` -- has no `hardening.json`/`controls.json`/`agent.json` yet, or an
+    incomplete one, and `arm_counts` raises `matrix.MatrixError` for it (task 3 review, Important
+    1: 05's "`pr-body` ... refuses nothing about the result" means this is read as "not ready yet",
+    never a crash). Such an arm is left out of `usable_arms`/`utility`/`tests` and named in
+    `unusable` by its own `run.json` state (`"unknown"` if that record carries none at all).
+
     `utility`-group tests are summed into `utility` and left out of `tests` (no leak metric, so no
-    verdict); `verdict` is present only for a test both arms ran (always true for a two-arm run,
-    03's own gate). Raises `ConfigError` for a report `arm_counts` cannot read (never a bare
-    `matrix.MatrixError`, which `main()` does not know to catch)."""
+    verdict); `verdict` is present only for a test both *usable* arms ran (always true once both
+    are usable, 03's own gate)."""
     arms = sorted(entry["arms"])  # "baseline" < "mitigated": the run's own order (03, decision 9)
-    try:
-        counts_by_arm = {arm: arm_counts(reports_dir(entry["experiment"], entry["run"], arm, home)) for arm in arms}
-    except matrix.MatrixError as e:
-        raise ConfigError(str(e)) from e
+    counts_by_arm: dict[str, dict] = {}
+    unusable: dict[str, str] = {}
+    for arm in arms:
+        try:
+            counts_by_arm[arm] = arm_counts(reports_dir(entry["experiment"], entry["run"], arm, home))
+        except matrix.MatrixError:
+            unusable[arm] = (entry["arms"].get(arm) or {}).get("state") or "unknown"
+    usable_arms = sorted(counts_by_arm)
 
     first_arm_record = next((entry["arms"][arm] for arm in arms if entry["arms"].get(arm)), {})
-    utility = {arm: {"passed": 0, "runs": 0} for arm in arms}
+    utility = {arm: {"passed": 0, "runs": 0} for arm in usable_arms}
     tests: dict[str, dict] = {}
     all_tids = sorted({tid for c in counts_by_arm.values() for tid in c["tests"]})
     for tid in all_tids:
         meta: dict | None = None
         per_arm: dict[str, dict] = {}
-        for arm in arms:
+        for arm in usable_arms:
             t = counts_by_arm[arm]["tests"].get(tid)
             if t is None:
                 continue
@@ -963,21 +966,35 @@ def build_results(entry: dict, home: Path | None = None) -> dict:
                 utility[arm]["runs"] += t["runs"]
             continue
         test_entry = {**(meta or {}), **per_arm}
-        if len(arms) == 2 and "baseline" in per_arm and "mitigated" in per_arm:
-            test_entry["verdict"] = verdict_for(per_arm["baseline"]["failures"], per_arm["mitigated"]["failures"])
+        if len(usable_arms) == 2 and "baseline" in per_arm and "mitigated" in per_arm:
+            test_entry["verdict"] = verdict_for(per_arm["baseline"], per_arm["mitigated"])
         tests[tid] = test_entry
 
     return {"run": entry["run"], "experiment": entry["experiment"], "arms": arms,
+            "usable_arms": usable_arms, "unusable": unusable,
             "model": first_arm_record.get("model"), "repeat": first_arm_record.get("repeat"),
             "utility": utility, "tests": tests}
 
 
+def unusable_run_message(results: dict) -> str:
+    """"run <id> is not ready to read (<arm>: <state>, ...)" -- `results`'s own exit-1 message
+    (07: "no run: exit 1 with a clear message") when `results["usable_arms"]` is empty: a run
+    that exists but has nothing usable yet (every arm still running, or none finished `"ok"`)."""
+    states = ", ".join(f"{arm}: {state}" for arm, state in sorted(results["unusable"].items()))
+    return f"run {results['run']} is not ready to read ({states})" if states \
+        else f"run {results['run']} has nothing to read"
+
+
 def _results_body_lines(results: dict) -> list[str]:
-    """The lines `results`'s text output and `pr-body`'s *Result* section share: the utility
-    outcome, then every leak-metric test's baseline/mitigated counts and verdict."""
-    arms = results["arms"]
-    lines = ["Utility tests: " + ", ".join(
-        f"{arm} {results['utility'][arm]['passed']}/{results['utility'][arm]['runs']} pass" for arm in arms)]
+    """The lines `results`'s text output and `pr-body`'s *Result* section share: each unusable
+    arm's state, the usable arms' utility outcome, then every leak-metric test's baseline/
+    mitigated failure counts and verdict."""
+    arms = results["usable_arms"]
+    lines = [f"{arm}: {state} (no counts yet)" for arm, state in sorted(results["unusable"].items())]
+    if not arms:
+        return lines
+    lines.append("Utility tests: " + ", ".join(
+        f"{arm} {results['utility'][arm]['passed']}/{results['utility'][arm]['runs']} pass" for arm in arms))
     for tid in sorted(results["tests"]):
         t = results["tests"][tid]
         lines.append(f"{tid} (group {t.get('group') or '-'}, threat {t.get('threat') or '-'}, "
@@ -988,7 +1005,7 @@ def _results_body_lines(results: dict) -> list[str]:
             continue
         verdict = t.get("verdict", {})
         for metric in metrics:
-            row = "  " + f"{metric}: " + ", ".join(
+            row = "  " + f"{metric} failed: " + ", ".join(
                 f"{arm} {t[arm]['failures'].get(metric, 0)}/{t[arm]['runs']}" for arm in arms if arm in t)
             if metric in verdict:
                 row += f" -> {verdict[metric]}"
@@ -1142,16 +1159,21 @@ def pr_body_text(repo_root: Path, name: str, experiment: dict, results: dict | N
         lines.append(f"**Attack:** {attack}")
     if mitigation_id:
         lines.append(f"**Mitigation:** {mitigation_summary(repo_root, mitigation_id)}")
-    lines.append(f"**Base:** {', '.join(base) if base else 'none'}")
+    lines.append(f"**Base:** {', '.join(base) if base else 'none (the stock build, no mitigation on)'}")
     lines.append(f"**Experiment file:** `experiments/{name}.yml`")
     lines += ["", "### Idea and rationale", "<why this attack or mitigation, what was tried, known limits>", "",
               "### Result"]
     if results is None:
         lines.append(f"TODO: no run yet -- `spe-eval run {name}`, then `spe-eval pr-body {name}` again.")
+    elif not results["usable_arms"]:
+        # task 3 review, Important 1: "refuses nothing about the result" -- a run that exists but
+        # has nothing usable yet (still running, or none of its arms finished "ok") is a Result
+        # placeholder too, naming why, never a crash.
+        lines.append(f"TODO: {unusable_run_message(results)} -- rerun `spe-eval pr-body {name}` once it ends.")
     else:
         lines.append(f"Model: {results.get('model') or '?'}   Repeat: {results.get('repeat') or '?'}")
         lines += _results_body_lines(results)
-        if mitigation_id and "mitigated" in results["arms"]:
+        if mitigation_id and "mitigated" in results["usable_arms"]:
             util = results["utility"].get("mitigated") or {}
             ok = bool(util.get("runs")) and util.get("passed") == util.get("runs")
             lines.append(f"Utility tests pass with the mitigation on: {'yes' if ok else 'no'}")

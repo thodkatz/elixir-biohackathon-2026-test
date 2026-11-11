@@ -32,6 +32,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from ansible_render import GOLDEN, load_vars, render
+
 PLATFORM = Path(__file__).resolve().parents[2]
 INSTANCE = PLATFORM / "instance"
 EVALS_VIEW = INSTANCE / "evals-view"
@@ -119,6 +121,68 @@ def test_compose_loads_without_any_spe_evals_variable(tmp_path):
         env={**os.environ, **env_vars}, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_compose_loads_with_the_experiments_env_and_the_evals_profile_active(tmp_path):
+    # Companion to the test above: a real spe_experiments build's three SPE_EVALS_* values (not
+    # the placeholder defaults), profile evals active -- both services must validate completely.
+    if DOCKER is None:
+        pytest.skip("needs docker")
+    golden_env = (GOLDEN / "frontend.env.experiments").read_text()
+    env_vars = dict(line.split("=", 1) for line in golden_env.splitlines() if line and not line.startswith("#"))
+    for name in ("webui.env", "chat-ui.env", "agent.env", "terminal.env"):
+        (tmp_path / name).write_text("")
+    env_vars["SPE_EVALS_DATA_DIR"] = str(tmp_path / "evals-data")  # a real path; need not pre-exist for config
+    result = subprocess.run(
+        ["docker", "compose", "-f", str(INSTANCE / "compose.yml"), "--project-directory", str(tmp_path),
+         "config", "-q"],
+        env={**os.environ, **env_vars}, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+# --- (a2) task 2: frontend.env.j2 (role sandbox) under spe_experiments -----------------------
+# The golden-env style other switches use (test_eval_sink.py, test_harden_egress.py): render the
+# real Ansible template offline (ansible_render.py) and compare against a committed fixture, so a
+# change here is visible in the diff. frontend.env.L0 (off) must stay byte-identical; a new
+# fixture, frontend.env.experiments, covers spe_experiments: true (no existing golden did).
+
+
+def test_frontend_env_off_renders_todays_env_unchanged():
+    assert render("sandbox", "frontend.env.j2") == (GOLDEN / "frontend.env.L0").read_text()
+
+
+def test_frontend_env_on_experiments_adds_the_evals_profile_and_the_three_vars():
+    env = render("sandbox", "frontend.env.j2", spe_experiments=True)
+    assert env == (GOLDEN / "frontend.env.experiments").read_text()
+    lines = env.splitlines()
+    assert "COMPOSE_PROFILES=openwebui,agui,ui,evals" in lines
+    assert "SPE_EVALS_PORT=8200" in lines
+    assert "SPE_EVALS_VIEW_IMAGE=spe-evals-view:local" in lines
+    assert "SPE_EVALS_DATA_DIR=/home/ubuntu/spe-eval/promptfoo" in lines
+
+
+def test_evals_data_dir_follows_spe_eval_dir_not_a_second_literal():
+    # Same derivation spe_eval.py's spe_eval_home() uses (platform/ansible/README.md, "Experiments"):
+    # a different spe_ssh_user moves both spe_eval_dir and SPE_EVALS_DATA_DIR together.
+    env = render("sandbox", "frontend.env.j2", spe_experiments=True, spe_ssh_user="alice")
+    assert "SPE_EVALS_DATA_DIR=/home/alice/spe-eval/promptfoo" in env.splitlines()
+
+
+def test_without_experiments_no_evals_variable_appears():
+    env = render("sandbox", "frontend.env.j2")
+    assert "SPE_EVALS" not in env
+    assert ",evals" not in env and "evals," not in env
+
+
+def test_nginx_image_agrees_with_group_vars_spe_prefetch_images():
+    # group_vars/all.yml repeats evals-view's nginx tag as a literal in spe_prefetch_images
+    # (role prefetch pulls it ahead of the first up), since nothing there reads compose.yml.
+    # Nothing else ties the two together, so a bump of one here would silently drift from
+    # the other without this check.
+    nginx_image = COMPOSE["services"]["evals-view"]["image"]
+    assert load_vars(spe_experiments=True)["spe_prefetch_images"][-1] == nginx_image
+    assert nginx_image not in load_vars(spe_experiments=False)["spe_prefetch_images"]
 
 
 # --- (b) the proxy, against promptfoo 0.125.1's own routes -----------------------------------

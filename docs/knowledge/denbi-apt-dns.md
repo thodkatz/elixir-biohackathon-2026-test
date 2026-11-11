@@ -16,3 +16,16 @@ Two sessions running it at once add `E: Could not get lock /var/lib/apt/lists/lo
   instead. Run probes with `timeout`, and kill a leftover one with `sudo kill <pid>` (`pgrep -a apt-get`).
 - The failing run changes nothing on the VM (`changed=0` in its recap): `base` runs before any role that rewrites
   the stack.
+
+**Workaround that works** (2026-11-11, still failing hours later): the resolver (10.57.196.4/.5) times out only on
+`*.ubuntu.com`, and outside DNS (`@1.1.1.1`) is blocked, but most archive IPs answer over HTTP. Only
+`185.125.190.93–95` (the nova mirror's own) time out. Pin the names in `/etc/hosts` with a marked block, then remove
+it once the build is done:
+```bash
+ssh agent-service-1 'printf "%s\n" "# spe-dns-workaround begin" \
+  "91.189.91.81 nova.clouds.archive.ubuntu.com archive.ubuntu.com" "91.189.91.82 security.ubuntu.com" \
+  "# spe-dns-workaround end" | sudo tee -a /etc/hosts'
+# afterwards:
+ssh agent-service-1 "sudo sed -i '/# spe-dns-workaround begin/,/# spe-dns-workaround end/d' /etc/hosts"
+```
+Check a pinned IP first: `curl -m 10 --resolve nova.clouds.archive.ubuntu.com:80:<ip> http://nova.clouds.archive.ubuntu.com/ubuntu/dists/noble/InRelease`.

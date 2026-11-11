@@ -11,7 +11,8 @@ task list in the PR body, worked with `superpowers:subagent-driven-development`.
 - The `spe_eval` role gates it on `spe_experiments` and asserts uid 1000.
 - The **Evaluations** Coder app is on `spe-experiments` only.
 - `test_evals_view.py` checks the proxy's rules against 0.125.1's own routes (clarification 3).
-- Checked on de.NBI: `#92`'s body lists the acceptance results.
+- Decisions 14–15 checked on a portal-less de.NBI build (#92's body has the results); 16 only statically, its live
+  check in `BACKLOG.md`.
 
 ## Next
 

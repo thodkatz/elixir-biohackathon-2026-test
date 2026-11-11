@@ -172,15 +172,18 @@ def check_creation_time(experiment: dict, local_vars: dict, repo_root: Path | No
     return sorted(set(mismatches))
 
 
-def check_build_matches(experiment: dict, local_vars: dict, repo_root: Path | None = None) -> None:
-    """Raises `ConfigError` naming every key `check_creation_time` finds differing, saying to
-    build fresh from the branch template (decision 7); returns normally when they all match."""
+def check_build_matches(experiment: dict, local_vars: dict, repo_root: Path | None = None,
+                        name: str = "<name>") -> None:
+    """Raises `ConfigError` naming every key `check_creation_time` finds differing, and the next
+    step: push `experiment/<name>`, the person builds a fresh workspace from `spe-x-<name>`
+    (decision 7); returns normally when they all match."""
     mismatches = check_creation_time(experiment, local_vars, repo_root)
     if mismatches:
         raise ConfigError(
             "this build does not match the experiment's creation-time settings: "
             + ", ".join(mismatches)
-            + " differ; build a fresh workspace from its branch template (05, step 5)")
+            + f" differ, and only a new workspace sets them: commit and push experiment/{name}, then"
+            f" ask the person to build a workspace from the template spe-x-{name} and continue there")
 
 
 # --- arms (decision 9) ----------------------------------------------------------------------

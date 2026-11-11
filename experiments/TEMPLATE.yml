@@ -28,12 +28,15 @@ experiment:
   threat: TODO                # a threats/TM-NNN-*.md id (existing, or new: see threats/TEMPLATE.md)
   paths: [TODO]                # paths/P<n>-*.md ids this measures (existing, or new: paths/TEMPLATE.md)
   mitigation: TODO             # the mitigation id under test (null for a one-arm, attack-only
-                               # experiment -- then also delete mitigations/<id>.yml and its switch)
+                               # experiment -- then also delete mitigations/<id>.yml and its switch,
+                               # and set the test's own metadata.closed_by: null)
   base: []                     # mitigation ids already on in both arms (must equal parameters.mitigations)
   injections: []                # planted attacks on in both arms (fixtures.json ids; 01, *Attacks*);
                                 # stays [] if this idea plants none
   tests: [TODO]                 # test ids this experiment runs (its own tests/experiments/<name>.yaml,
-                                # plus any existing ones); the utility group always runs as well
+                                # plus any existing ones); the utility group always runs as well -- a
+                                # mitigation-only idea with no new attack deletes its own tests file
+                                # and removes this file's own stem from this list
 
 # vars:                        # optional: Ansible values no form parameter offers (02); refused if
 #   spe_frontends: [agui]      # it collides with a mitigation's `on`, an injection's `switch`, or a

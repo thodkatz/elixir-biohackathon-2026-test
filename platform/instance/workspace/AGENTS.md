@@ -103,8 +103,9 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
      platform/promptfoo-evals/tests/experiments/trs-guard.yaml
      experiments/trs-guard.yml
    Fill in every TODO (check_experiment.py names each one); delete a slot this idea does not need -- for an
-   attack only, delete the mitigation file above, its spe_mitigate_* switch in group_vars/all.yml, and set
-   mitigation: null in the experiment file.
+   attack only, delete the mitigation file above, its spe_mitigate_* switch in group_vars/all.yml, set
+   mitigation: null in the experiment file, and set the test's own metadata.closed_by: null; for a
+   mitigation only, delete the tests file above and remove 'trs-guard' from tests in the experiment file.
    Add a line for trs-guard to experiments/README.md once it is ready.
    Next: spe-eval test trs-guard, or python3 check_experiment.py trs-guard
    ```

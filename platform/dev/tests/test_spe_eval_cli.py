@@ -839,6 +839,18 @@ def test_new_writes_every_slot_and_check_experiment_refuses_the_todos(new_repo):
     assert check_problems(repo, "my-idea")  # refused: every slot still has a TODO
 
 
+def test_new_prints_both_delete_a_slot_cases(new_repo):
+    """The printed steps must be complete for both ways a contribution can skip a slot (review
+    finding 1): attack-only also needs the test's own metadata.closed_by: null, and mitigation-
+    only needs its own name removed from `tests`, not only its tests file deleted."""
+    _repo, run = new_repo
+    p = run("new", "message-check")
+    assert p.returncode == 0, p.stderr
+    assert "closed_by: null" in p.stdout
+    assert "mitigation only" in p.stdout
+    assert "tests" in p.stdout
+
+
 def test_new_accepted_once_the_todos_are_filled(new_repo):
     repo, run = new_repo
     p = run("new", "filled-idea", "--threat", "TM-901", "--path", "P8")
@@ -964,6 +976,36 @@ def test_new_attack_only_accepted_once_the_mitigation_slot_is_deleted(new_repo):
 
     assert check_problems(repo, "attack-idea") == []
     assert not (repo / "mitigations" / "attack-idea.yml").exists()
+
+
+def test_new_mitigation_only_accepted_once_the_tests_slot_is_deleted(new_repo):
+    """The mitigation-only mirror of the attack-only test above: the idea contributes no new
+    attack, only a mitigation measured against an existing one, so it deletes its own generated
+    tests file and removes its own name from `experiment.tests`, following only `new`'s printed
+    steps (no extra, undocumented edit)."""
+    repo, run = new_repo
+    p = run("new", "mitigation-idea", "--threat", "TM-001", "--path", "P1")
+    assert p.returncode == 0, p.stderr
+
+    test_path = repo / "platform" / "promptfoo-evals" / "tests" / "experiments" / "mitigation-idea.yaml"
+    test_path.unlink()  # the slot this idea does not need
+
+    exp_path = repo / "experiments" / "mitigation-idea.yml"
+    data = yaml.safe_load(exp_path.read_text())
+    assert "mitigation-idea" in data["experiment"]["tests"]
+    data["experiment"]["tests"].remove("mitigation-idea")
+    data["name"] = "Mitigation idea"
+    data["description"] = "A mitigation-only idea."
+    exp_path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    mitigation_path = repo / "mitigations" / "mitigation-idea.yml"
+    mdata = yaml.safe_load(mitigation_path.read_text())
+    mdata["name"] = "Mitigation idea"
+    mdata["description"] = "A mitigation that narrows an existing attack."
+    mitigation_path.write_text(yaml.safe_dump(mdata, sort_keys=False))
+
+    assert check_problems(repo, "mitigation-idea") == []
+    assert not test_path.exists()
 
 
 def test_new_path_prefills_tests_from_the_catalogue(new_repo):

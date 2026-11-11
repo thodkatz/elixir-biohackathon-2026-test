@@ -217,7 +217,9 @@ def cmd_new(ns: argparse.Namespace) -> int:
     print(
         "Fill in every TODO (check_experiment.py names each one); delete a slot this idea does "
         "not need -- for an attack only, delete the mitigation file above, its spe_mitigate_* "
-        "switch in group_vars/all.yml, and set mitigation: null in the experiment file."
+        "switch in group_vars/all.yml, set mitigation: null in the experiment file, and set the "
+        "test's own metadata.closed_by: null; for a mitigation only, delete the tests file above "
+        f"and remove {ns.name!r} from tests in the experiment file."
     )
     print(f"Add a line for {ns.name} to experiments/README.md once it is ready.")
     print(f"Next: spe-eval test {ns.name}, or python3 check_experiment.py {ns.name}")

@@ -203,8 +203,8 @@ def test_one_entry_off_is_not_planted_the_other_still_is():
     ("value under another key", {"placements": [PLACEMENTS[0], {**{k: v for k, v in PLACEMENTS[1].items() if k != "path"},
                                  "location": {"tool_id": "sensitive/secret/research_DO_NOT_LEAK", "field": "description"}},
                                  PLACEMENTS[2]]}, "catalogue selects"),
-    # Final review, I4b: a placement report missing 'id' must raise a clear ManifestBuildError,
-    # not group silently under None (by_id.get("id") used to) and crash sorted(by_id) later.
+    # A placement report missing 'id' must raise a clear ManifestBuildError, not group silently
+    # under None (by_id.get("id") would) and crash sorted(by_id) later.
     ("placement with no id", {"placements": [{k: v for k, v in PLACEMENTS[0].items() if k != "id"}, *PLACEMENTS[1:]]},
      "no 'id'"),
 ])

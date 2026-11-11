@@ -37,10 +37,10 @@ def experiments_section() -> str:
 
 
 def _word_present(word: str, text: str) -> bool:
-    """`word` appears in `text` with no letter, digit, underscore or hyphen touching either end
-    (task 4 review, Minor 8): a plain substring match lets a shorter name hide behind a longer
-    one that merely starts the same way ('run' inside 'runs', 'ladder' inside 'ladder-l0'), and a
-    bare `\\b` does not catch the hyphen case (a word boundary sits on both sides of it already)."""
+    """`word` appears in `text` with no letter, digit, underscore or hyphen touching either end: a
+    plain substring match lets a shorter name hide behind a longer one that merely starts the same
+    way ('run' inside 'runs', 'ladder' inside 'ladder-l0'), and a bare `\\b` does not catch the
+    hyphen case (a word boundary sits on both sides of it already)."""
     return re.search(rf"(?<![\w-]){re.escape(word)}(?![\w-])", text) is not None
 
 

@@ -15,8 +15,8 @@ location (never `SPE_REPO_DIR`, same as `validate`/`injections_schema`, its docs
 (`TM-003`, `P1`, `L1`, the real `injection`/`utility` test ids) avoids having to fork the catalogue
 just for these tests.
 
-The health wait (task 4 review, Critical 1) probes a real `http.server` on `127.0.0.1`, not a
-fake `spe-apply status` line: the real script prints the `/healthz` response *body*
+The health wait probes a real `http.server` on `127.0.0.1`, not a fake `spe-apply status` line:
+the real script prints the `/healthz` response *body*
 (`{"status": "ok", ...}`), not a bare status code, so a fake that invented `agent /healthz: 200`
 was asserting a contract the real script does not have.
 
@@ -79,9 +79,9 @@ fi
 exit "$code"
 """
 
-# Starts, in the background, logs its call and returns at once (as the real systemd-run does:
-# task 4 review, Important 3 needs the *child* to take the lock asynchronously so --detach's own
-# poll loop has something real to wait for). Unless FAKE_SYSTEMD_RUN_NO_ACQUIRE is set, the
+# Starts, in the background, logs its call and returns at once (as the real systemd-run does: the
+# *child* takes the lock asynchronously so --detach's own poll loop has something real to wait
+# for). Unless FAKE_SYSTEMD_RUN_NO_ACQUIRE is set, the
 # background subshell takes the lock file's flock itself (mirroring spe_eval.Lock's own format:
 # the token alone, written once the flock succeeds) and holds it for FAKE_SYSTEMD_RUN_HOLD
 # seconds, simulating the detached `spe-eval run` child actually running.
@@ -104,8 +104,8 @@ mkdir -p "$(dirname "$lock_file")"
 # unlike an inline "&" background job): otherwise, since those are `subprocess.run(capture_output=
 # True)`'s own pipes, the backgrounded subshell inheriting them keeps the write end open for its
 # whole FAKE_SYSTEMD_RUN_HOLD, so the *caller's* subprocess.run does not return until the hold is
-# already over -- by which time a holder() that checks the real flock (task 5 review, Important
-# 4a) correctly finds it already released, instead of "still running".
+# already over -- by which time a holder() that checks the real flock correctly finds it already
+# released, instead of "still running".
 (
   exec 9>"$lock_file"
   flock 9
@@ -246,7 +246,7 @@ def test_arm_one_arm_experiment_applies_and_waits(setup):
 
 
 def test_arm_exits_1_when_the_stack_never_answers(setup):
-    # task 4 review, Critical 1: a real (never-ready) health server, not a fake spe-apply line.
+    # A real (never-ready) health server, not a fake spe-apply line.
     run, _popen, _calls, _repo, _home, _logs = setup
     unhealthy = _HealthServer(503, b'{"status": "starting", "reason": "still loading"}')
     try:
@@ -259,7 +259,7 @@ def test_arm_exits_1_when_the_stack_never_answers(setup):
 
 def test_arm_unknown_arm_name_is_a_configuration_error(setup):
     # one-arm has baseline only: "mitigated" raises ValueError (arm_mitigations), mapped to exit 2
-    # by main() (task 3 review, minor 2).
+    # by main().
     run, _popen, _calls, _repo, _home, _logs = setup
     p = run("arm", "one-arm", "mitigated")
     assert p.returncode == 2, p.stdout
@@ -281,9 +281,9 @@ def test_arm_refuses_while_locked(setup):
 # --- run ---------------------------------------------------------------------------------------
 
 def test_run_json_keeps_canaries_sha256_from_run_sh(setup):
-    # task 5 review, Important 3: spe-eval's own run.json write (state/ended/gate_notes), in
-    # cmd_run's `finally`, must merge into the run.json run.sh already wrote on success rather
-    # than overwrite it outright, or matrix.counts/replay.py never find canaries_sha256 again.
+    # spe-eval's own run.json write (state/ended/gate_notes), in cmd_run's `finally`, must merge
+    # into the run.json run.sh already wrote on success rather than overwrite it outright, or
+    # matrix.counts/replay.py never find canaries_sha256 again.
     run, _popen, _calls, _repo, home, _logs = setup
     p = run("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261110T190000Z"})
     assert p.returncode == 0, p.stderr
@@ -349,8 +349,8 @@ def test_run_existing_reports_dir_is_refused(setup):
 
 @pytest.mark.parametrize("repeat", ["0", "-1", "x"])
 def test_run_bad_repeat_is_rejected_up_front(setup, repeat):
-    # task 5 review, Minor: run.sh's own usage check only runs after a full `spe-apply all`,
-    # marking the arm `failed`; argparse must catch a bad --repeat before any of that.
+    # run.sh's own usage check only runs after a full `spe-apply all`, marking the arm `failed`;
+    # argparse must catch a bad --repeat before any of that.
     run, _popen, calls, _repo, _home, logs = setup
     p = run("run", "one-arm", "--repeat", repeat)
     assert p.returncode == 2, p.stdout
@@ -370,8 +370,8 @@ def test_run_refuses_while_another_run_holds_the_lock(setup):
 
 
 def test_run_sigterm_mid_run_sh_marks_stopped_and_still_cleans_up(setup):
-    # task 4 review, Important 2: a stop mid-run.sh still writes a terminal run.json, the
-    # windows.jsonl line, and still returns to the build's own arm, all before the lock frees.
+    # A stop mid-run.sh still writes a terminal run.json, the windows.jsonl line, and still
+    # returns to the build's own arm, all before the lock frees.
     run, popen, calls, _repo, home, logs = setup
     proc = popen("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261111T100000Z", "FAKE_RUN_SH_SLEEP": "2"})
     try:
@@ -415,7 +415,7 @@ def test_run_detach_prints_the_run_id_and_returns_at_once(setup):
 
 
 def test_run_detach_validates_before_starting_the_unit(setup):
-    # task 4 review, Important 3: a typo'd experiment never reaches systemd-run.
+    # A typo'd experiment never reaches systemd-run.
     run, _popen, calls, _repo, _home, logs = setup
     p = run("run", "no-such-experiment", "--detach")
     assert p.returncode == 2, p.stdout
@@ -436,8 +436,8 @@ def test_run_detach_refuses_while_locked(setup):
 
 
 def test_run_detach_waits_for_the_child_to_hold_the_lock(setup):
-    # task 4 review, Important 3: --detach does not return until the (simulated) child has
-    # actually taken the lock, so a `wait` right after sees a run in progress, not "no run".
+    # --detach does not return until the (simulated) child has actually taken the lock, so a
+    # `wait` right after sees a run in progress, not "no run".
     run, _popen, _calls, _repo, home, _logs = setup
     p = run("run", "one-arm", "--detach", env={"FAKE_SYSTEMD_RUN_HOLD": "2"})
     assert p.returncode == 0, p.stderr
@@ -455,8 +455,8 @@ def test_run_detach_exits_1_if_the_child_never_takes_the_lock(setup):
 
 
 def test_run_detach_defaults_the_user_bus_when_unset(setup, tmp_path):
-    # task 5 review, Important 4b: the Coder agent is a system unit with no PAM session, so its
-    # shells have neither XDG_RUNTIME_DIR nor DBUS_SESSION_BUS_ADDRESS; systemd-run --user then
+    # The Coder agent is a system unit with no PAM session, so its shells have neither
+    # XDG_RUNTIME_DIR nor DBUS_SESSION_BUS_ADDRESS; systemd-run --user then
     # fails to connect to the bus. spe-eval must default both, from /run/user/<uid>, rather than
     # pass them through unset.
     run, _popen, _calls, _repo, _home, logs = setup
@@ -511,8 +511,8 @@ def test_status_json_with_no_run_yet(setup):
 
 
 def test_status_while_held_by_arm_leaves_run_arm_state_null(setup):
-    # task 4 review, minor 6: a holder with no report of its own (here, `arm`) must not be shown
-    # next to some earlier run's details.
+    # A holder with no report of its own (here, `arm`) must not be shown next to some earlier
+    # run's details.
     run, popen, _calls, _repo, home, _logs = setup
     prior = run("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261111T120000Z"})
     assert prior.returncode == 0, prior.stderr
@@ -573,9 +573,9 @@ def test_wait_with_no_run_at_all(setup):
 
 
 def test_wait_when_lock_already_free_judges_the_newest_run(setup):
-    # task 4 review, Important 3: wait must not exit 0 unconditionally just because the lock
-    # happens to be free when it is called -- `run --detach && wait` racing past the run's own
-    # end must still see that run's real outcome.
+    # wait must not exit 0 unconditionally just because the lock happens to be free when it is
+    # called -- `run --detach && wait` racing past the run's own end must still see that run's
+    # real outcome.
     run, _popen, _calls, _repo, _home, _logs = setup
     first = run("run", "one-arm", env={"SPE_EVAL_RUN_ID": "20261111T130000Z", "FAKE_RUN_SH_EXIT": "3"})
     assert first.returncode == 1, first.stderr
@@ -585,17 +585,17 @@ def test_wait_when_lock_already_free_judges_the_newest_run(setup):
 
 
 def test_wait_for_an_arm_holder_with_no_report_exits_0(setup):
-    # task 4 review, minor 7: no report is not evidence of a failed *run* when the holder was an
-    # `arm` (which keeps none by design). A never-ready health server keeps the lock held for
-    # SPE_EVAL_HEALTH_TIMEOUT so `wait` reliably calls in while it is still held.
+    # No report is not evidence of a failed *run* when the holder was an `arm` (which keeps none
+    # by design). A never-ready health server keeps the lock held for SPE_EVAL_HEALTH_TIMEOUT so
+    # `wait` reliably calls in while it is still held.
     #
-    # Whole-branch review, the flaky test: the fixture's default 0.3s timeout raced `wait`'s own
-    # process start (a fresh Python interpreter importing yaml/validate/injections_schema before
-    # it ever calls holder()), which under CPU load can take longer than 0.3s -- `wait` would then
-    # find the lock already free and report "no run has happened yet" instead. Give the holder a
-    # long hold (~4s, well past that startup cost even under load) and `wait` a bounded timeout
-    # above it (10s), so the real race is between "wait sees the run in progress" and a generous
-    # deadline, not between two near-equal durations.
+    # The fixture's default 0.3s timeout raced `wait`'s own process start (a fresh Python
+    # interpreter importing yaml/validate/injections_schema before it ever calls holder()), which
+    # under CPU load can take longer than 0.3s -- `wait` would then find the lock already free and
+    # report "no run has happened yet" instead. Give the holder a long hold (~4s, well past that
+    # startup cost even under load) and `wait` a bounded timeout above it (10s), so the real race
+    # is between "wait sees the run in progress" and a generous deadline, not between two
+    # near-equal durations.
     run, popen, _calls, _repo, home, _logs = setup
     unhealthy = _HealthServer(503, b'{"status": "starting"}')
     try:
@@ -754,8 +754,8 @@ def test_new_refuses_an_existing_name(new_repo):
 
 
 def test_new_refuses_an_existing_mitigation_file(new_repo):
-    """Final review, Minor 2: `new` used to overwrite an existing mitigations/<name>.yml with no
-    warning (only experiments/<name>.yml was checked)."""
+    """`new` must not overwrite an existing mitigations/<name>.yml with no warning (checking only
+    experiments/<name>.yml is not enough)."""
     repo, run = new_repo
     (repo / "mitigations" / "keep-me.yml").write_text("id: keep-me\nname: Do not overwrite\n")
     p = run("new", "keep-me")
@@ -840,9 +840,9 @@ def test_new_writes_every_slot_and_check_experiment_refuses_the_todos(new_repo):
 
 
 def test_new_prints_both_delete_a_slot_cases(new_repo):
-    """The printed steps must be complete for both ways a contribution can skip a slot (review
-    finding 1): attack-only also needs the test's own metadata.closed_by: null, and mitigation-
-    only needs its own name removed from `tests`, not only its tests file deleted."""
+    """The printed steps must be complete for both ways a contribution can skip a slot:
+    attack-only also needs the test's own metadata.closed_by: null, and mitigation-only needs its
+    own name removed from `tests`, not only its tests file deleted."""
     _repo, run = new_repo
     p = run("new", "message-check")
     assert p.returncode == 0, p.stderr
@@ -895,12 +895,12 @@ def test_new_accepted_once_the_todos_are_filled(new_repo):
 
 
 def test_new_skeleton_edited_in_place_is_accepted(new_repo):
-    """Final review, Important 1: the test above rewrites every generated file whole with
-    `yaml.safe_dump`, which never exercises `new`'s own explanatory header comments -- so it
-    missed that those headers used to say `TODO` themselves (`spe_eval.py`'s `experiment_text`/
-    `test_file_text`), and `check_experiment.py`'s line-based TODO scan (any line containing the
-    word, comments included) flagged the *header*, not a real slot, even once every real slot was
-    filled. This test edits each generated file in place -- replacing only the TODO placeholder
+    """The test above rewrites every generated file whole with `yaml.safe_dump`, which never
+    exercises `new`'s own explanatory header comments -- so it would miss a header that itself
+    said `TODO` (`spe_eval.py`'s `experiment_text`/`test_file_text`), which `check_experiment.py`'s
+    line-based TODO scan (any line containing the word, comments included) would flag as the
+    *header*, not a real slot, even once every real slot was filled. This test edits each
+    generated file in place -- replacing only the TODO placeholder
     values, exactly as a participant would in an editor -- and keeps every comment `new` wrote, to
     prove the header text itself no longer trips the checker."""
     repo, run = new_repo
@@ -1134,10 +1134,10 @@ def test_test_runs_check_experiment_before_returning_when_pytest_passes(new_repo
 
 
 def test_test_takes_an_optional_name_and_passes_it_to_the_checker(new_repo, tmp_path):
-    """Final review, I2: the documented path starts a workspace from `ladder-l0`, then
-    `spe-eval new <name>`; on that build `spe-eval test` with no name used to check only
-    `ladder-l0` (`instances/local.yml`'s own `spe_experiment`), never the new, still-unfilled
-    `<name>` the participant just wrote, and exit 0 while `<name>` was full of TODOs. `test
+    """The documented path starts a workspace from `ladder-l0`, then `spe-eval new <name>`; on
+    that build `spe-eval test` with no name would otherwise check only `ladder-l0`
+    (`instances/local.yml`'s own `spe_experiment`), never the new, still-unfilled `<name>` the
+    participant just wrote, exiting 0 while `<name>` was full of TODOs. `test
     [<name>]` now takes the same optional name `arm`/`run` do, and checks it instead of the
     build's own when given."""
     repo, run = new_repo
@@ -1174,11 +1174,10 @@ def test_test_falls_back_to_the_python_module_without_uv(new_repo, tmp_path):
 
 
 def test_test_with_uv_present_never_prints_the_no_uv_hint(new_repo, tmp_path):
-    """Final review, Minor 3: `argv[0]` is `shutil.which("uv")`'s full path, never the bare
-    string "uv", so the old `argv[0] != "uv"` was always true and could print "no `uv` on PATH"
-    even when uv really ran and really printed "No module named pytest" (e.g. a stale venv) --
-    this fake `uv` reproduces exactly that stderr, with uv on PATH, to prove the hint no longer
-    fires then."""
+    """`argv[0]` is `shutil.which("uv")`'s full path, never the bare string "uv", so comparing
+    `argv[0]` itself would always differ and could print "no `uv` on PATH" even when uv really ran
+    and really printed "No module named pytest" (e.g. a stale venv) -- this fake `uv` reproduces
+    exactly that stderr, with uv on PATH, to prove the hint does not fire then."""
     repo, run = new_repo
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -1239,8 +1238,8 @@ def write_arm_report(arm_dir: Path, *, injections=False, mitigations=(), experim
 
 def write_unfinished_arm(arm_dir: Path, *, state: str, experiment="", mitigations=(),
                           model="anthropic:claude-haiku-5-5", repeat=1, started="2026-11-12T10:00:00Z") -> None:
-    """A still-running or failed arm's report directory (task 3 review, Important 1): only
-    `run.json` -- `cmd_run`'s own record, written as soon as the arm starts, before `run.sh` ever
+    """A still-running or failed arm's report directory: only `run.json` -- `cmd_run`'s own
+    record, written as soon as the arm starts, before `run.sh` ever
     produces `hardening.json`/`controls.json`/`agent.json` -- so `arm_counts` raises
     `matrix.MatrixError` ("missing ...") for it, exactly as it does on the real VM mid-run or
     after a failed one."""
@@ -1328,10 +1327,9 @@ def test_results_json_two_arm_gives_per_metric_counts_and_verdict_words(eval_hom
     assert sw["mitigated"]["failures"] == {"injection.followed": 0}
     assert sw["verdict"] == {"injection.followed": "closed"}
 
-    # task 3 review, Minor 1: baseline fails every run (2/2, rate 1.0) and mitigated fails half
-    # (1/2, rate 0.5) -- narrowed by rate, same equal-repeat shape a real run has, unlike the
-    # earlier 2/2-vs-1/1 fixture (both rate 1.0: unchanged, not narrowed -- raw counts got this
-    # wrong).
+    # baseline fails every run (2/2, rate 1.0) and mitigated fails half (1/2, rate 0.5) --
+    # narrowed by rate, same equal-repeat shape a real run has, unlike the earlier 2/2-vs-1/1
+    # fixture (both rate 1.0: unchanged, not narrowed -- raw counts got this wrong).
     dd = data["tests"]["describe-data"]
     assert dd["baseline"] == {"runs": 2, "errors": 0, "passed": 0, "failures": {"injection.followed": 2}}
     assert dd["mitigated"] == {"runs": 2, "errors": 0, "passed": 1, "failures": {"injection.followed": 1}}
@@ -1350,10 +1348,10 @@ def test_results_json_two_arm_gives_per_metric_counts_and_verdict_words(eval_hom
 
 
 def test_results_verdict_compares_rates_not_raw_counts(eval_home):
-    # task 3 review, Minor 1: 2 failures in 2 runs (rate 1.0) and 1 failure in 1 run (rate 1.0)
-    # are the *same* rate -- "unchanged" -- even though 2 != 1 as raw counts (which would wrongly
-    # read as "narrowed"). Arms normally share one repeat count; this only bites when they don't
-    # (an errored test, a stopped arm), which is exactly when the fix matters.
+    # 2 failures in 2 runs (rate 1.0) and 1 failure in 1 run (rate 1.0) are the *same* rate --
+    # "unchanged" -- even though 2 != 1 as raw counts (which would wrongly read as "narrowed").
+    # Arms normally share one repeat count; this only bites when they don't (an errored test, a
+    # stopped arm), which is exactly when comparing rates matters.
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "rate-test" / "20261111T100000Z"
     write_arm_report(reports / "baseline", agent_rows=[
@@ -1376,8 +1374,8 @@ def test_results_verdict_compares_rates_not_raw_counts(eval_home):
 
 
 def test_results_verdict_divides_by_graded_runs_not_all_runs(eval_home):
-    # task 3 review (re-review), Important: matrix._tests counts an errored row in "runs" but
-    # never in "failures", so dividing by "runs" understates the rate. Baseline: 2/2 graded runs
+    # matrix._tests counts an errored row in "runs" but never in "failures", so dividing by
+    # "runs" understates the rate. Baseline: 2/2 graded runs
     # fail (rate 1.0). Mitigated: 2 runs, 1 errors, 1 of the 1 graded run fails (rate 1.0) --
     # dividing by "runs" (2) would wrongly give 0.5 and read "narrowed"; dividing by graded runs
     # (runs - errors = 1) gives the same 1.0 rate as baseline: unchanged.
@@ -1405,8 +1403,8 @@ def test_results_verdict_divides_by_graded_runs_not_all_runs(eval_home):
 
 
 def test_results_verdict_is_no_data_when_an_arm_has_zero_graded_runs(eval_home):
-    # task 3 review (re-review), Important: a mitigated arm whose every run errored (e.g. the
-    # model API was down) has zero graded runs; its "failures" is then {} for every metric, which
+    # A mitigated arm whose every run errored (e.g. the model API was down) has zero graded runs;
+    # its "failures" is then {} for every metric, which
     # must never read as "closed" just because nothing failed -- there was nothing to grade.
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "graded-test" / "20261113T110000Z"
@@ -1432,8 +1430,8 @@ def test_results_verdict_is_no_data_when_an_arm_has_zero_graded_runs(eval_home):
 
 
 def test_results_ok_arm_with_unreadable_report_gets_a_clear_message(eval_home):
-    # task 3 review (re-review), Minor: "ok (no counts yet)" reads as a contradiction -- an "ok"
-    # arm whose report cannot be read (rare: a corrupted or partially copied report) needs
+    # "ok (no counts yet)" reads as a contradiction -- an "ok" arm whose report cannot be read
+    # (rare: a corrupted or partially copied report) needs
     # wording that does not contradict its own state.
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-test" / "20261113T120000Z"
@@ -1528,9 +1526,8 @@ def test_results_test_flag_with_no_reasons_says_so(eval_home):
 
 
 def test_results_json_test_flag_embeds_reasons_in_the_json(eval_home):
-    # task 3 review, Important 2: --json must print one JSON document on stdout, not a JSON
-    # object followed by plain-text "reasons for ..." lines -- an agent parsing stdout as JSON
-    # would otherwise fail.
+    # --json must print one JSON document on stdout, not a JSON object followed by plain-text
+    # "reasons for ..." lines -- an agent parsing stdout as JSON would otherwise fail.
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-attack-only" / "20261112T150000Z"
     write_arm_report(reports / "baseline", agent_rows=[
@@ -1546,7 +1543,7 @@ def test_results_json_test_flag_embeds_reasons_in_the_json(eval_home):
 
 
 def test_results_running_run_exits_1_with_a_clear_message(eval_home):
-    # task 3 review, Important 1: a run still in progress (run.json present, state "running", no
+    # A run still in progress (run.json present, state "running", no
     # hardening.json/controls.json/agent.json yet) must not make results crash with exit 2 -- it
     # has nothing usable yet, so this is "no run to read" (exit 1), with a message that says why.
     home, run = eval_home
@@ -1559,8 +1556,8 @@ def test_results_running_run_exits_1_with_a_clear_message(eval_home):
 
 
 def test_results_partial_run_shows_the_finished_arm_with_no_verdict(eval_home):
-    # task 3 review, Important 1: one arm done, the other still running -- results shows what it
-    # can, names the other arm's state, and gives no verdict (which needs both arms).
+    # One arm done, the other still running -- results shows what it can, names the other arm's
+    # state, and gives no verdict (which needs both arms).
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-test" / "20261112T110000Z"
     write_arm_report(reports / "baseline", agent_rows=[
@@ -1712,8 +1709,8 @@ def test_pr_body_with_a_run_fills_in_the_result_section(pr_body_repo):
 
 
 def test_pr_body_running_run_gives_a_result_placeholder_and_exits_0(pr_body_repo):
-    # task 3 review, Important 1: pr-body "refuses nothing about the result" -- a run still in
-    # progress must not make it exit 2, the same as "no run yet".
+    # pr-body "refuses nothing about the result" -- a run still in progress must not make it
+    # exit 2, the same as "no run yet".
     _repo, home, run = pr_body_repo
     reports = home / "spe-eval" / "reports" / "contrib-mitigation-only" / "20261112T130000Z"
     write_unfinished_arm(reports / "baseline", state="running", experiment="contrib-mitigation-only")

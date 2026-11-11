@@ -137,7 +137,6 @@ def coder_parameter_names() -> set[str]:
 
 
 def test_known_parameter_keys_match_the_templates_coder_parameters():
-    # Ruling (final review of slice 2/7, Important/Minor on validate.py's known-parameters check):
     # validate.py keeps its own EXPERIMENT_PARAMETER_ANSIBLE_NAMES list rather than parsing main.tf
     # at run time, and this test keeps the two from drifting. 'seed' is the one coder_parameter the
     # template defines that is never a key of an experiment's 'parameters' (the seed is secret, so
@@ -383,9 +382,9 @@ def test_two_mitigations_setting_the_same_on_key_fail_naming_both_files(tmp_path
 
 
 def test_three_mitigations_setting_the_same_on_key_name_all_three(tmp_path):
-    """Final review, I4b: the previous version kept only the first-seen owner of a contested key,
-    so a third mitigation setting it was never named alongside the second -- the message named
-    only two of the three files involved."""
+    """Naming only the first-seen owner of a contested key would leave a third mitigation setting
+    it unnamed alongside the second -- the message must name all three files involved, not just
+    two."""
     mitigations_dir = tmp_path / "mitigations"
     shutil.copytree(REPO / "mitigations", mitigations_dir)
     (mitigations_dir / "trs-guard.yml").write_text(

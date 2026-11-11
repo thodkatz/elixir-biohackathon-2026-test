@@ -132,10 +132,10 @@ def check_fixtures(repo_root: Path = REPO_ROOT) -> list[str]:
         if missing:
             errors.append(f"{where}: missing {', '.join(missing)}")
             continue
-        # Every field but `select` is a string (final review, I4b: a membership test on a field of
-        # the wrong type -- `fx["surface"] not in surfaces`, `switch in seen_switches` -- raises
-        # TypeError for an unhashable value, e.g. a list, instead of a clean lint error); checked,
-        # and the rest of this fixture skipped, before any such test runs.
+        # Every field but `select` is a string: a membership test on a field of the wrong type --
+        # `fx["surface"] not in surfaces`, `switch in seen_switches` -- raises TypeError for an
+        # unhashable value, e.g. a list, instead of a clean lint error; checked, and the rest of
+        # this fixture skipped, before any such test runs.
         not_strings = [f for f in FIXTURE_FIELDS if f != "select" and not isinstance(fx[f], str)]
         if not_strings:
             errors.append(f"{where}: {', '.join(not_strings)} must be strings")

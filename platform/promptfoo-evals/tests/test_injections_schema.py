@@ -100,16 +100,16 @@ def test_a_changed_payload_file_is_rejected(repo_root):
 
 
 def test_a_missing_payload_file_is_rejected_not_an_exception(repo_root):
-    # Carried from task 2 review: load_injections must raise ManifestError before
-    # metrics.injection_followed ever reads the payload file, never let OSError escape here.
+    # load_injections must raise ManifestError before metrics.injection_followed ever reads the
+    # payload file, never let OSError escape here.
     (repo_root / "platform/ansible/catalog/injections/drs-integrity.txt").unlink()
     errors = injections_schema.validate(manifest(*ALL), repo_root)
     assert any("not found" in e for e in errors), errors
 
 
 def test_an_empty_payload_file_is_rejected(repo_root):
-    # Carried from task 2 review: an empty payload file must not validate even when its
-    # payload_sha256 is set to match the empty file's hash (metrics._exposures would otherwise
+    # An empty payload file must not validate even when its payload_sha256 is set to match the
+    # empty file's hash (metrics._exposures would otherwise
     # treat an empty fingerprint as "found" in every tool result).
     path = repo_root / "platform/ansible/catalog/injections/drs-integrity.txt"
     path.write_text("")
@@ -192,8 +192,8 @@ def test_a_new_surface_in_surfaces_json_is_accepted(repo_root):
     m = manifest(*ALL)
     m["injections"].append(manifest_entry(repo_root, fixture, {"page_id": "123"}))
     assert injections_schema.validate(m, repo_root) == []
-    # Final review, I4b (untested): check_fixtures itself, not only validate(), passes on a fixture
-    # naming a surface surfaces.json has just learned.
+    # check_fixtures itself, not only validate(), passes on a fixture naming a surface
+    # surfaces.json has just learned.
     assert injections_schema.check_fixtures(repo_root) == []
 
 
@@ -220,9 +220,9 @@ def test_a_monkeypatched_detector_makes_the_action_valid(repo_root, monkeypatch)
 
 
 def test_check_fixtures_rejects_a_select_with_two_keys(repo_root):
-    """Final review, I4b: `injections_manifest.py` unpacks `select` as `(key, want), =
-    fx["select"].items()`, which raises for anything but exactly one key -- `check_fixtures` must
-    catch this at lint time, not leave it to fail at a placement on the VM."""
+    """`injections_manifest.py` unpacks `select` as `(key, want), = fx["select"].items()`, which
+    raises for anything but exactly one key -- `check_fixtures` must catch this at lint time, not
+    leave it to fail at a placement on the VM."""
     add_fixture(repo_root, "drs-second", "spe_inject_drs_second", "drs-description",
                 "sensitive/secret/other_DO_NOT_LEAK", "whole-file")
     set_fixture_field(repo_root, "drs-second", "select", {"object_id": "x", "field": "y"})
@@ -255,8 +255,8 @@ def test_check_fixtures_rejects_a_payload_with_a_directory_part(repo_root):
 
 
 def test_check_fixtures_reports_a_non_string_field_without_raising(repo_root):
-    """A membership test on an unhashable field (`fx["surface"] not in surfaces`) used to raise
-    TypeError instead of reporting a clean lint error (final review, I4b)."""
+    """A membership test on an unhashable field (`fx["surface"] not in surfaces`) must report a
+    clean lint error, not raise TypeError."""
     add_fixture(repo_root, "drs-second", "spe_inject_drs_second", "drs-description",
                 "sensitive/secret/other_DO_NOT_LEAK", "whole-file")
     set_fixture_field(repo_root, "drs-second", "surface", ["drs-description"])
@@ -267,7 +267,7 @@ def test_check_fixtures_reports_a_non_string_field_without_raising(repo_root):
 def test_switches_matches_the_ladder_example_instance_files():
     """Against the real catalogue (not conftest's synthetic one), so this really checks the
     repo's own fixtures.json against the ladder's example instance files -- but only on the
-    ladder's own switches (final review, I3): `switches()` reflects the *whole* catalogue
+    ladder's own switches: `switches()` reflects the *whole* catalogue
     (`build_catalogue`, decision 23), contributed fixtures included, while L1.example.yml and
     no-injections.example.yml are the ladder's own fixed instance files and were never meant to
     carry a line for every contribution. A contributed `spe-eval new --injection` switch must

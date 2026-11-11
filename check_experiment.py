@@ -321,8 +321,8 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
     select = fixture.get("select")
 
     # `spe-eval new --injection` writes target_file/canary_file/action/disclosure as the literal
-    # string TODO (finding 2): named here, separately from the mismatch checks below, which would
-    # otherwise report the same TODO placeholder as a confusing mismatch instead of a clear TODO.
+    # string TODO: named here, separately from the mismatch checks below, which would otherwise
+    # report the same TODO placeholder as a confusing mismatch instead of a clear TODO.
     todo_fields = [f for f in ("target_file", "canary_file", "action", "disclosure") if fixture.get(f) == "TODO"]
     for field in todo_fields:
         problems.append(Problem(
@@ -359,8 +359,8 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
 
     canary_type = canary_type_for(canary_file)
     if "canaries" not in parameters:
-        # The form's own default (minor 3): an experiment that leaves this out is not planting
-        # nothing, it is getting whatever `spe-experiments` plants by default.
+        # The form's own default: an experiment that leaves this out is not planting nothing, it
+        # is getting whatever `spe-experiments` plants by default.
         canaries_param = cat.default_canaries
     else:
         canaries_param = parameters.get("canaries")
@@ -380,9 +380,9 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
             f"add '{canary_type}' to parameters.canaries",
         ))
 
-    # What `injections_schema._entry` enforces at run time, reused rather than duplicated
-    # (finding 2): target_file == /data-share/ + canary_file, and disclosure derived from
-    # canary_file's own directory. Skipped when the field involved is still a TODO (above).
+    # What `injections_schema._entry` enforces at run time, reused rather than duplicated:
+    # target_file == /data-share/ + canary_file, and disclosure derived from canary_file's own
+    # directory. Skipped when the field involved is still a TODO (above).
     schema = cat.injections_schema
     if "target_file" not in todo_fields and "canary_file" not in todo_fields:
         expected_target = schema.DATA_SHARE + canary_file
@@ -429,9 +429,9 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
         # `select` names exactly one key (01-experiment-model.md, *Attacks*; the planting role
         # matches it against the real placement's own top-level or `location` fields): not
         # restricted to the surface's declared `keys` here, since a DRS placement's own `path` is
-        # a top-level field no surface in surfaces.json lists (final review, I4b: only the
-        # missing/empty case -- `{}` -- is what the walk found unflagged; a key subset check
-        # against surfaces.json would wrongly refuse the real drs-integrity fixture's `path`).
+        # a top-level field no surface in surfaces.json lists. Only the missing/empty case (`{}`)
+        # is flagged; a key subset check against surfaces.json would wrongly refuse the real
+        # drs-integrity fixture's `path`.
         problems.append(Problem(
             str(cat.fixtures_path), 1, iid, "'select' is missing, not an object, or empty",
             "set select to {<one key>: <value>} identifying the real placement this fixture names",

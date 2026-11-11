@@ -208,7 +208,7 @@ def counts(level_dir: Path, *, allow_mixed: bool = False) -> dict:
     if record["injections"] == "mixed" and not allow_mixed:
         # check_hardening accepts "mixed" for an experiment's arm (decision 9 / R4), but the ladder
         # matrix only ever has true/false columns: render()'s own sort key, (level, injections),
-        # would mix a bool and a str the moment one counts file is mixed (task 5 review, Minor).
+        # would mix a bool and a str the moment one counts file is mixed.
         raise MatrixError(f"{directory / 'hardening.json'}: injections is \"mixed\", not a ladder "
                           "condition (true or false); the ladder matrix has no column for it")
     run = _run(directory)

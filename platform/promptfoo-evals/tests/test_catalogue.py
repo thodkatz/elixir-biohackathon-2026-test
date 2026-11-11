@@ -143,6 +143,6 @@ def test_a_missing_group_is_rejected(tmp_path):
 
 
 def test_a_null_id_is_rejected(tmp_path):
-    """id: null must not be rejected with the generic 'id must be kebab-case' message (minor, task 5 review)."""
+    """id: null must not be rejected with the generic 'id must be kebab-case' message."""
     errors = lint([write(tmp_path, GOOD.replace("id: ask-flag", "id: null"))])
     assert any("id must not be null" in e for e in errors), errors

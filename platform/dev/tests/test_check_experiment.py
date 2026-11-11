@@ -178,8 +178,8 @@ def test_two_mitigations_sharing_an_ansible_key_is_reported(tmp_path):
         '"off": {spe_harden_trs_readonly: false}\n'
     )
     problems = ce.check(None, **real_dirs(mitigations_dir=mitigations_dir, experiments_dir=tmp_path / "no-experiments"))
-    # validate.check_mitigations_catalog names every owner of the contested key, not just two
-    # (final review, I4b): "L1.yml" and "mx.yml" both appear, not the word "both" itself.
+    # validate.check_mitigations_catalog names every owner of the contested key, not just two:
+    # "L1.yml" and "mx.yml" both appear, not the word "both" itself.
     assert any(p.id == "mitigations" and "spe_harden_trs_readonly" in p.problem
                and "L1.yml" in p.problem and "mx.yml" in p.problem
                for p in problems), problems
@@ -274,7 +274,7 @@ def test_injection_canary_file_accepted_when_parameters_canaries_is_absent(tmp_p
     """An experiment that leaves out `parameters.canaries` entirely still gets what the
     spe-experiments form plants by default (`platform/coder/experiments-template/main.tf`:
     `form_defaults = local.experiments["ladder-l0"].parameters`), not an empty list -- a false
-    refusal for every injection's canary file otherwise (minor 3)."""
+    refusal for every injection's canary file otherwise."""
     fixtures_path = write_injection_fixture(tmp_path)
     d = write_experiment(tmp_path, "no-canaries-param", threat="TM-001", paths=["P1"], mitigation=None,
                           injections=["fx-test"])  # no canaries= passed: parameters.canaries is absent
@@ -319,9 +319,9 @@ def test_injection_action_has_no_detector_is_reported(tmp_path):
 
 
 def test_injection_empty_select_is_reported(tmp_path):
-    """Final review, I4b: `spe-eval new --injection` writes `select: {}`, and nothing used to
-    object -- the planting role (`injections_manifest.py`: `(key, want), = fx["select"].items()`)
-    would instead fail at build time with "not enough values to unpack"."""
+    """`spe-eval new --injection` writes `select: {}`: the planting role
+    (`injections_manifest.py`: `(key, want), = fx["select"].items()`) would otherwise fail at
+    build time with "not enough values to unpack", so this must be refused offline instead."""
     fixtures_path = write_injection_fixture(tmp_path, select={})
     d = write_experiment(tmp_path, "bad-select", threat="TM-001", paths=["P1"], mitigation=None,
                           injections=["fx-test"], canaries=["registry_tokens"])
@@ -345,9 +345,9 @@ def test_injection_select_with_two_keys_is_reported(tmp_path):
 
 
 def test_injection_payload_with_directory_traversal_is_reported(tmp_path):
-    """The checker reads `payload` under `cat.injections_dir` with no guard against `..` or an
-    absolute path (final review, I4b): a payload naming a path outside that directory must be
-    refused, never silently read from wherever it points."""
+    """The checker reads `payload` under `cat.injections_dir`: a payload naming a path outside
+    that directory, via `..` or an absolute path, must be refused, never silently read from
+    wherever it points."""
     fixtures_path = write_injection_fixture(tmp_path, payload="../../../../etc/passwd")
     d = write_experiment(tmp_path, "bad-traversal", threat="TM-001", paths=["P1"], mitigation=None,
                           injections=["fx-test"], canaries=["registry_tokens"])
@@ -406,8 +406,8 @@ def test_injection_canary_file_with_no_disclosure_rule_is_reported(tmp_path):
 
 def test_injection_todo_fixture_fields_are_reported(tmp_path):
     """`spe-eval new --injection` writes `target_file`/`canary_file`/`action`/`disclosure` as the
-    literal string `TODO` (finding 2): each is reported by name, not folded into the mismatch
-    messages the same TODO values would also otherwise trigger."""
+    literal string `TODO`: each is reported by name, not folded into the mismatch messages the
+    same TODO values would also otherwise trigger."""
     fixtures_path = write_injection_fixture(
         tmp_path, target_file="TODO", canary_file="TODO", action="TODO", disclosure="TODO",
     )
@@ -547,15 +547,15 @@ def _literal_canary_files_in_spe_seed() -> set[str]:
 
 def test_canary_file_types_matches_spe_seed_py():
     """`check_experiment.CANARY_FILE_TYPES`'s keys must be exactly the literal canary_file paths
-    spe_seed.py's `canaries.add` calls plant (task 1 review minor: a hand-kept table drifting from
-    its source of truth, uncaught)."""
+    spe_seed.py's `canaries.add` calls plant: a hand-kept table drifting from its source of truth
+    would otherwise go uncaught."""
     assert set(ce.CANARY_FILE_TYPES) == _literal_canary_files_in_spe_seed()
 
 
 def test_catalogue_label_values_fallback_matches_matrix_build_catalogue(monkeypatch):
     """`_catalogue_label_values`'s fallback (rebuilt from the same files when `matrix` cannot be
-    imported) was never exercised (task 1 review minor: an untested fallback). Forcing the import
-    to fail here must still give the same label sets `matrix.build_catalogue` itself returns."""
+    imported) was never exercised by any other test. Forcing the import to fail here must still
+    give the same label sets `matrix.build_catalogue` itself returns."""
     sys.path.insert(0, str(REPO / "platform" / "promptfoo-evals"))
     import matrix
     expected = matrix.build_catalogue(REPO)
@@ -575,7 +575,7 @@ def test_catalogue_label_values_fallback_matches_matrix_build_catalogue(monkeypa
 def test_checking_every_experiment_does_not_duplicate_a_shared_threat_files_todo(tmp_path):
     """Two experiments sharing a threat file (e.g. the real ladder's four levels all cite TM-001)
     each visit it independently; checking every experiment must report its TODO once, not once per
-    experiment that references it (task 1 review minor: duplicate TODO problems with no <name>)."""
+    experiment that references it."""
     threats_dir = tmp_path / "threats"
     shutil.copytree(REPO / "threats", threats_dir)
     (threats_dir / "TM-001-sensitive-data-exposure.md").write_text(

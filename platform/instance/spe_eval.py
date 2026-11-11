@@ -19,7 +19,7 @@ bash, mirroring `Lock`'s file format):
     - `run_id`, `iso_now`, `spe_eval_home`, `reports_dir`: decision 7's run id, the `run.json`/
       `windows.jsonl` timestamp format, and the reports layout.
     - `promptfoo_env`: the environment `run.sh`'s promptfoo calls need, from the VM-local
-      hand-off (task 5 review item 1).
+      hand-off.
     - `Lock`, `LockHeld`: decision 11, `~/spe-eval/lock`.
     - `append_jsonl`, `discover_runs`, `run_entry`, `read_progress`: `spe-eval status`/`wait`/
       `runs`'s own reading of `~/spe-eval/reports/`, `windows.jsonl` and the progress file R3
@@ -114,8 +114,8 @@ def default_experiment_name(local_vars: dict) -> str:
 # validate.EXPERIMENT_PARAMETER_ANSIBLE_NAMES, so it needs no entry here).
 _SKIP_CREATION_TIME_PARAMETERS = frozenset({"experiment", "mitigations"})
 
-# These three hold the creation form's own list order, which a hand-edited build need not match
-# (task 3 review, minor 1): compared as sets, not sequences.
+# These three hold the creation form's own list order, which a hand-edited build need not match:
+# compared as sets, not sequences.
 _ORDER_INSENSITIVE_PARAMETERS = frozenset({"samples", "tiers", "workflows"})
 
 
@@ -133,8 +133,8 @@ def check_creation_time(experiment: dict, local_vars: dict, repo_root: Path | No
 
     `experiment["experiment"]["injections"]` (not a `parameters` key, so the loop above never
     reaches it) is checked the same way as `canaries`: every catalogue switch this experiment names
-    must be `true` in `local_vars` and every other one `false` (task 5 review item 2) -- the build's
-    own `spe_inject_*` switches (`roles/repo/tasks/main.yml`'s `spe_local_vars_fixture_switches`,
+    must be `true` in `local_vars` and every other one `false` -- the build's own `spe_inject_*`
+    switches (`roles/repo/tasks/main.yml`'s `spe_local_vars_fixture_switches`,
     persisted for every fixture whether an experiment names it or not), compared against
     `injections_schema.switches` for this experiment's own list. A switch missing from `local_vars`
     (a build from before this comparison existed) is treated as `false`, its Ansible default.
@@ -342,7 +342,7 @@ def reports_dir(experiment_name: str, run_id_: str, arm: str, home: Path | None 
     return spe_eval_home(home) / "reports" / experiment_name / run_id_ / arm
 
 
-# --- run.sh's environment (03, *The hand-off on the VM*; task 5 review item 1) ----------------
+# --- run.sh's environment (03, *The hand-off on the VM*) ----------------------------------------
 
 def promptfoo_env(handoff_dir: Path, config_dir: Path, progress_path: Path, base_env: dict | None = None) -> dict:
     """The environment `run.sh`'s promptfoo calls need, built from the VM-local hand-off
@@ -355,7 +355,7 @@ def promptfoo_env(handoff_dir: Path, config_dir: Path, progress_path: Path, base
     (ordinarily the caller's own inherited environment) carries any of them: `asserts._secret`
     prefers the bare key over its `_FILE` variant, and the controller's own docs tell an operator
     to export `SPE_LLM_API_KEY` by hand, so a shell that still has it set must not override the VM
-    hand-off this function is building (task 5 review, Minor 1). Also disables promptfoo's own
+    hand-off this function is building. Also disables promptfoo's own
     telemetry, sharing and update check, as `platform/promptfoo-evals/README.md`'s run steps set
     them by hand, and puts `/usr/local/bin` (node, npx, uv: the `spe_eval` role's own symlinks) at
     the front of `PATH`, so `run.sh` finds them whatever the caller's own PATH already has (e.g. a
@@ -410,7 +410,7 @@ class Lock:
         or empty file is "not held" (03), and so is a non-empty file whose `flock` a non-blocking
         probe can still take -- a token left behind by a process that died before `release()`
         ever ran (e.g. SIGKILLed past its SIGTERM grace period), rather than trusting the file's
-        text alone (task 5 review, Important 4a)."""
+        text alone."""
         try:
             text = self.path.read_text().strip()
         except FileNotFoundError:
@@ -437,7 +437,7 @@ class Lock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
         # A few short retries: `holder()`'s own probe (`status`, `wait`'s polling) takes the free lock
-        # for an instant, and must not make a real acquire fail (re-review N3).
+        # for an instant, and must not make a real acquire fail.
         for attempt in range(5):
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -572,9 +572,9 @@ def mitigation_text(name: str, switch: str) -> str:
     means): `id`/`on`/`off` are already filled in from `name`; every other slot is a literal
     `TODO` for the participant to fill, or -- for an attack-only idea -- to delete, along with
     this file and the switch's own line in `group_vars/all.yml` (05-contribution.md, *A skeleton*).
-    Every comment here is wording only, never the word `TODO` itself (final review, Important 1):
-    `closes: []` is already a real, valid value (a control that narrows rather than closes), so a
-    hint comment next to it must not read as a placeholder still to fill."""
+    Every comment here is wording only, never the word `TODO` itself: `closes: []` is already a
+    real, valid value (a control that narrows rather than closes), so a hint comment next to it
+    must not read as a placeholder still to fill."""
     return (
         f"id: {name}\n"
         "name: TODO\n"
@@ -787,9 +787,9 @@ def new_experiment(repo_root: Path, name: str, *, threat: str | None = None, pat
     exp_path = repo_root / "experiments" / f"{name}.yml"
     if exp_path.exists():
         raise ConfigError(f"{exp_path}: an experiment named {name!r} already exists")
-    # Checked here too, not only the experiment file (final review, Minor 2): `new` used to
-    # overwrite an existing mitigations/<name>.yml or tests/experiments/<name>.yaml with no
-    # warning, e.g. a name that collides with someone else's file still waiting to be renamed.
+    # Checked here too, not only the experiment file: an existing mitigations/<name>.yml or
+    # tests/experiments/<name>.yaml must not be silently overwritten, e.g. a name that collides
+    # with someone else's file still waiting to be renamed.
     mitigation_path_check = repo_root / "mitigations" / f"{name}.yml"
     if mitigation_path_check.exists():
         raise ConfigError(f"{mitigation_path_check}: already exists")
@@ -901,23 +901,23 @@ def new_experiment(repo_root: Path, name: str, *, threat: str | None = None, pat
 # `injections` is "mixed" by default (06's matrix has no column for it), but an experiment's own
 # arm can plant only some of the catalogue's fixtures (01, *Attacks*) and so gets exactly that
 # record (platform/ansible/roles/handoff/tasks/hardening.yml). `arm_counts` is `counts()` for one
-# arm directory, with its own opt-in `allow_mixed=True` (task 3 review, Important 3): the ladder's
-# own calls keep the default refusal, untouched.
+# arm directory, with its own opt-in `allow_mixed=True`: the ladder's own calls keep the default
+# refusal, untouched.
 
 def arm_counts(arm_dir: Path) -> dict:
     """`matrix.py counts(arm_dir, allow_mixed=True)`: one arm's report directory, read whether its
     hardening.json's `injections` is all off, all on, or "mixed" (an experiment's arm, decision 9)
-    -- `matrix.counts`'s own `allow_mixed` keyword (task 3 review, Important 3), not a second copy
-    of its body; the ladder's own default (`allow_mixed=False`) stays exactly as it was. Raises
-    `matrix.MatrixError` for anything counts() itself would refuse (a missing or malformed file)."""
+    -- `matrix.counts`'s own `allow_mixed` keyword, not a second copy of its body; the ladder's own
+    default (`allow_mixed=False`) stays exactly as it was. Raises `matrix.MatrixError` for anything
+    counts() itself would refuse (a missing or malformed file)."""
     return matrix.counts(Path(arm_dir), allow_mixed=True)
 
 
 def verdict_for(baseline: dict, mitigated: dict) -> dict[str, str]:
     """One word per metric either arm's `failures` names (07, *Read*), comparing failure *rates*
-    over *graded* runs (`failures / (runs - errors)`), not raw counts and not all runs (task 3
-    review, Minor 1, and the re-review's Important): `matrix._tests` counts an errored row in
-    `runs` but never in `failures` (nothing to judge pass or fail), so dividing by `runs` understates
+    over *graded* runs (`failures / (runs - errors)`), not raw counts and not all runs:
+    `matrix._tests` counts an errored row in `runs` but never in `failures` (nothing to judge pass
+    or fail), so dividing by `runs` understates
     the rate the moment an arm has any errors -- an arm whose every run errored would then divide
     an empty `failures` by a positive `runs` and read every metric as "closed", when in fact
     nothing was graded at all. "closed" (baseline's rate > 0, mitigated's is 0), "narrowed"
@@ -956,9 +956,9 @@ def build_results(entry: dict, home: Path | None = None) -> dict:
     `usable_arms` is the subset whose report `arm_counts` could actually read. An arm whose
     `run.json` state is not yet `"ok"` -- still `"running"`, or ended `"failed"`/`"gate
     refused"`/`"stopped"` -- has no `hardening.json`/`controls.json`/`agent.json` yet, or an
-    incomplete one, and `arm_counts` raises `matrix.MatrixError` for it (task 3 review, Important
-    1: 05's "`pr-body` ... refuses nothing about the result" means this is read as "not ready yet",
-    never a crash). Such an arm is left out of `usable_arms`/`utility`/`tests` and named in
+    incomplete one, and `arm_counts` raises `matrix.MatrixError` for it: 05's "`pr-body` ... refuses
+    nothing about the result" means this is read as "not ready yet", never a crash. Such an arm is
+    left out of `usable_arms`/`utility`/`tests` and named in
     `unusable` by its own `run.json` state (`"unknown"` if that record carries none at all).
 
     `utility`-group tests are summed into `utility` and left out of `tests` (no leak metric, so no
@@ -1005,10 +1005,9 @@ def build_results(entry: dict, home: Path | None = None) -> dict:
 
 
 def _unusable_arm_phrase(state: str) -> str:
-    """`<state> (no counts yet)`, except for `"ok"` (task 3 review, re-review, Minor): an arm's
-    `run.json` can say `"ok"` while its report is unreadable (rare -- a corrupted or only
-    partially copied report), and "ok (no counts yet)" reads as a contradiction; this says
-    plainly that the state and the report disagree."""
+    """`<state> (no counts yet)`, except for `"ok"`: an arm's `run.json` can say `"ok"` while its
+    report is unreadable (rare -- a corrupted or only partially copied report), and "ok (no counts
+    yet)" reads as a contradiction; this says plainly that the state and the report disagree."""
     if state == "ok":
         return "ok, but its report could not be read"
     return f"{state} (no counts yet)"
@@ -1204,9 +1203,9 @@ def pr_body_text(repo_root: Path, name: str, experiment: dict, results: dict | N
     if results is None:
         lines.append(f"TODO: no run yet -- `spe-eval run {name}`, then `spe-eval pr-body {name}` again.")
     elif not results["usable_arms"]:
-        # task 3 review, Important 1: "refuses nothing about the result" -- a run that exists but
-        # has nothing usable yet (still running, or none of its arms finished "ok") is a Result
-        # placeholder too, naming why, never a crash.
+        # "refuses nothing about the result" -- a run that exists but has nothing usable yet
+        # (still running, or none of its arms finished "ok") is a Result placeholder too, naming
+        # why, never a crash.
         lines.append(f"TODO: {unusable_run_message(results)} -- rerun `spe-eval pr-body {name}` once it ends.")
     else:
         lines.append(f"Model: {results.get('model') or '?'}   Repeat: {results.get('repeat') or '?'}")

@@ -77,10 +77,10 @@ def test_planned_id_refused(tmp_path):
 
 
 def test_template_yml_is_not_a_known_mitigation(tmp_path):
-    """Final review, Minor 7: `mitigations/TEMPLATE.yml`'s own header says it is "excluded from
-    the catalog by every reader", but the fileglob here used to read it like any other file, so
-    its `id: TODO` became a selectable mitigation id. `TODO` must be refused the same way any
-    other unknown id is."""
+    """`mitigations/TEMPLATE.yml`'s own header says it is "excluded from the catalog by every
+    reader", so a fileglob that reads it like any other file and lets its `id: TODO` become a
+    selectable mitigation id is wrong: `TODO` must be refused the same way any other unknown id
+    is."""
     p = run(tmp_path, REAL_MITIGATIONS, ["TODO"])
     assert p.returncode != 0
     assert "unknown or planned" in p.stdout and "TODO" in p.stdout

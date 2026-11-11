@@ -537,9 +537,9 @@ def check_mitigations_catalog(mitigations: list[Mitigation]) -> list[str]:
     """Cross-mitigation checks: duplicate ids, one owner per 'on' Ansible key,
     unless every pair sharing it declares the overlap in 'conflicts' (either direction).
 
-    Every mitigation that sets a contested key is named in its error (final review, I4b): the
-    previous version kept only the first-seen owner, so a key set by three or more mitigations
-    reported it against that first owner alone, never naming the others to each other."""
+    Every mitigation that sets a contested key is named in its error: naming only the first-seen
+    owner would report a key set by three or more mitigations against that first owner alone,
+    never naming the others to each other."""
     errors = []
     ids_seen: dict[str, str] = {}
     conflicts_by_id = {

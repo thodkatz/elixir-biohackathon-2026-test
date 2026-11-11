@@ -1,5 +1,5 @@
-"""spe-apply up recreates every container when the compose networks changed since the last up
-(docs/knowledge/compose-network-alias-lost.md): Compose 5.3 on Docker 29 recreates a network whose
+"""spe-apply up recreates every container when the compose networks changed since the last up:
+Compose 5.3 on Docker 29 recreates a network whose
 config changed (the egress overlay gives `tools` its own subnet) but reconnects a container on two
 networks without its service alias there, so the sandbox could no longer resolve `agent`. Uses a fake
 `docker` on PATH that records its calls (test_spe_apply_lock.py's pattern); `config --format json`

@@ -122,7 +122,7 @@ up() {
   # Compose 5.3 (Docker 29) recreates a network whose config changed (the egress overlay gives
   # tools its own subnet) but reconnects a container on two networks without its service alias
   # there: the sandbox could no longer resolve `agent`. So when the networks differ from the last
-  # up's, or that is unknown, every container is recreated (docs/knowledge/compose-network-alias-lost.md).
+  # up's, or that is unknown, every container is recreated.
   local networks networks_file=$dir/.compose-networks recreate=()
   networks=$("${compose[@]}" config --format json \
     | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin).get("networks", {}), sort_keys=True))' \

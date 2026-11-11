@@ -4,21 +4,24 @@ connection, source on stdin, and run as root on the instance:
     sudo -n python3 - '<offsets JSON>'
 
 Offsets: `{"journals": {"<session uuid>": <int>}, "agent_runs": <int>, "receiver": <int>,
-"openwebui": <number>}` (a missing key is 0). Prints one JSON object to stdout:
+"windows": <int>, "openwebui": <number>}` (a missing key is 0). Prints one JSON object to stdout:
 
-    {"files": {"journal:<uuid>" | "agent_runs" | "receiver": {"size", "start", "end", "lines", "line_starts"}},
+    {"files": {"journal:<uuid>" | "agent_runs" | "receiver" | "windows":
+               {"size", "start", "end", "lines", "line_starts"}},
      "openwebui": {"rows": [{"id", "title", "updated_at", "chat"}], "max": <number>} | null,
      "missing": [str], "errors": [str]}
 
-The four sources: AG-UI session journals (one file per session, `<chat-sessions mount>/*.jsonl`,
+The five sources: AG-UI session journals (one file per session, `<chat-sessions mount>/*.jsonl`,
 keyed `journal:<uuid>` where uuid is the file's stem), the agent's run log (`<agent-runs
 mount>/runs.jsonl`, keyed `agent_runs`), the test receiver's request log
-(`/var/lib/spe-eval-sink/requests.jsonl`, keyed `receiver`) and Open WebUI's chats
+(`/var/lib/spe-eval-sink/requests.jsonl`, keyed `receiver`), spe-eval's evaluation windows
+(`<home of uid 1000>/spe-eval/windows.jsonl`, keyed `windows`; the spe_eval role runs spe-eval as
+uid 1000; no such user makes it "missing") and Open WebUI's chats
 (`<open-webui-data mount>/webui.db`, keyed `openwebui`, read through sqlite3 rather than lines).
 Volume mountpoints come from `docker volume inspect spe-frontend_<name> --format
 '{{ .Mountpoint }}'`; a volume that does not exist (e.g. open-webui-data on an agui-only instance)
 makes its source "missing", not an error. `missing` names the source that does not exist on this
-instance: `sessions`, `agent_runs`, `receiver` or `openwebui`; a session simply having no journal
+instance: `sessions`, `agent_runs`, `receiver`, `windows` or `openwebui`; a session simply having no journal
 yet is not "missing" (the sessions directory exists, just empty). `errors` carries a source-level
 read failure that is not "it does not exist", as `"<name>: <exception class>"` (e.g. Open WebUI's
 `chat` table missing, or its database locked).
@@ -28,8 +31,8 @@ read failure that is not "it does not exist", as `"<name>: <exception class>"` (
 returned; a partial last line (no trailing newline yet) is left for the next poll. `line_starts`
 gives the byte offset in the file of each returned line (the lines are decoded with
 errors="replace", so the caller cannot recompute it from them): the watcher re-reads an open run
-from its `run_start` line's offset after a restart. The three file
-sources share one 1 MiB budget per call: past it, a source with nothing read yet still gets its
+from its `run_start` line's offset after a restart. The four file
+sources (journals, agent_runs, receiver, windows) share one 1 MiB budget per call: past it, a source with nothing read yet still gets its
 first complete line (so one oversized line cannot stall every source behind it), but nothing
 budgets it less than guaranteed. Open WebUI has its own 1 MiB budget on `chat` text, with the same
 guarantee for its first row; rows are those with `updated_at >= offset` (whole seconds, so a chat
@@ -41,8 +44,8 @@ where this one left off.
 The reader opens every file with `open(path, "rb")` and nothing else, and reads the Open WebUI
 database over `sqlite3.connect(f"file:{path}?mode=ro", uri=True)`: strictly read-only (decision 1,
 *Nothing on the instance changes*). The test override `SPE_READER_PATHS`, a JSON object
-`{"sessions": dir, "agent_runs": file, "receiver": file, "webui_db": file}`, replaces the docker
-volume lookup (and the receiver's otherwise-fixed path) entirely; a key it omits or sets to null
+`{"sessions": dir, "agent_runs": file, "receiver": file, "windows": file, "webui_db": file}`, replaces
+the docker volume lookup (and the receiver's and windows' otherwise-fixed paths) entirely; a key it omits or sets to null
 behaves exactly like a volume that does not exist.
 
 Standard library only, and no import of anything else in this repository: the reader is sent on its
@@ -52,6 +55,7 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import sqlite3
 import subprocess
 import sys
@@ -59,9 +63,10 @@ from pathlib import Path
 
 ONE_MIB = 1 << 20
 RECEIVER_PATH = "/var/lib/spe-eval-sink/requests.jsonl"
+SPE_EVAL_UID = 1000  # the user spe-eval runs as (the spe_eval role asserts it)
 # One name each for the files dict key, the offsets key, the SPE_READER_PATHS key and the
-# missing/error name: all four happen to coincide for these two sources.
-FILE_SOURCES = ("agent_runs", "receiver")
+# missing/error name: all four happen to coincide for these three sources.
+FILE_SOURCES = ("agent_runs", "receiver", "windows")
 
 
 def _volume_mountpoint(name: str) -> str | None:
@@ -80,13 +85,22 @@ def _volume_mountpoint(name: str) -> str | None:
     return mount or None
 
 
+def _windows_path() -> str | None:
+    """spe-eval's windows.jsonl in the home of uid SPE_EVAL_UID; None when there is no such user."""
+    try:
+        home = pwd.getpwuid(SPE_EVAL_UID).pw_dir
+    except KeyError:
+        return None
+    return os.path.join(home, "spe-eval", "windows.jsonl")
+
+
 def _paths() -> dict[str, str | None]:
-    """The four source paths: `sessions` (a directory) and `agent_runs`, `receiver`, `webui_db`
-    (files). `SPE_READER_PATHS` replaces the whole lookup, receiver's fixed path included."""
+    """The five source paths: `sessions` (a directory) and `agent_runs`, `receiver`, `windows`,
+    `webui_db` (files). `SPE_READER_PATHS` replaces the whole lookup, receiver's and windows' included."""
     override = os.environ.get("SPE_READER_PATHS")
     if override is not None:
         data = json.loads(override)
-        return {name: data.get(name) for name in ("sessions", "agent_runs", "receiver", "webui_db")}
+        return {name: data.get(name) for name in ("sessions", "agent_runs", "receiver", "windows", "webui_db")}
     sessions = _volume_mountpoint("chat-sessions")
     agent_runs = _volume_mountpoint("agent-runs")
     webui = _volume_mountpoint("open-webui-data")
@@ -94,6 +108,7 @@ def _paths() -> dict[str, str | None]:
         "sessions": sessions,
         "agent_runs": os.path.join(agent_runs, "runs.jsonl") if agent_runs else None,
         "receiver": RECEIVER_PATH,
+        "windows": _windows_path(),
         "webui_db": os.path.join(webui, "webui.db") if webui else None,
     }
 

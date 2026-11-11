@@ -116,7 +116,7 @@ def test_openwebui_missing_table_is_error(tmp_path):
 
 def test_missing_source_listed(tmp_path):
     result = run_reader({}, {})
-    assert set(result["missing"]) == {"sessions", "agent_runs", "receiver", "openwebui"}
+    assert set(result["missing"]) == {"sessions", "agent_runs", "receiver", "windows", "openwebui"}
     assert result["files"] == {}
     assert result["openwebui"] is None
 
@@ -160,3 +160,39 @@ def test_line_starts_are_byte_offsets(tmp_path):
     data = agent_runs.read_bytes()
     for start, line in zip(entry["line_starts"], entry["lines"]):
         assert data[start:].split(b"\n", 1)[0].decode("utf-8", errors="replace") == line
+
+
+def test_windows_is_a_file_source(tmp_path):
+    windows = tmp_path / "windows.jsonl"
+    line = b'{"run": "t1", "experiment": "x", "start": "2026-11-11T10:00:00Z", "end": null}\n'
+    windows.write_bytes(line + b'{"run": "t1"')
+    result = run_reader({"windows": 0}, {"windows": str(windows)})
+    assert result["files"]["windows"]["lines"] == [line.decode().rstrip("\n")]
+    assert result["files"]["windows"]["end"] == len(line)
+    assert "windows" not in result["missing"]
+    again = run_reader({"windows": len(line)}, {"windows": str(windows)})
+    assert again["files"]["windows"]["lines"] == [] and again["files"]["windows"]["start"] == len(line)
+    gone = run_reader({}, {"windows": str(tmp_path / "nope.jsonl")})
+    assert "windows" in gone["missing"] and "windows" not in gone["files"] and gone["errors"] == []
+
+
+def test_windows_path_is_uid_1000s_home(monkeypatch):
+    sys.path.insert(0, str(READER.parent))
+    import canary_reader
+    import pwd
+    monkeypatch.delenv("SPE_READER_PATHS", raising=False)
+    monkeypatch.setattr(canary_reader, "_volume_mountpoint", lambda name: None)
+    seen = []
+
+    def getpwuid(uid):
+        seen.append(uid)
+        return pwd.struct_passwd(("ubuntu", "x", 1000, 1000, "", "/home/ubuntu", "/bin/bash"))
+
+    monkeypatch.setattr(canary_reader.pwd, "getpwuid", getpwuid)
+    assert canary_reader._paths()["windows"] == "/home/ubuntu/spe-eval/windows.jsonl" and seen == [1000]
+
+    def no_user(uid):
+        raise KeyError(uid)
+
+    monkeypatch.setattr(canary_reader.pwd, "getpwuid", no_user)
+    assert canary_reader._paths()["windows"] is None

@@ -67,6 +67,10 @@ start reads this section; keep it short.
   `spe_local_vars_fixture_switches` (needs the Ansible render harness, not a plain pytest unit) — waits for a
   session with that harness.
 - Experiments: a controls-suite probe for every participant mitigation (`probes` is optional; the gate notes an undeclared closed probe) — from the experiments spec (#84, *out-of-scope*); waits until experiments show the need.
+- Experiments: `spe-eval results --run bogus` and `spe-eval pr-body --run bogus` exit differently for the same
+  mistake, an unknown run id (`results` exits 1, `pr-body` exits 2; `spe-eval:674-727`) — from #94's review,
+  waits because picking one (2, the usage-error code, matches the other commands' own convention) is a small,
+  separable fix better done with the next spe-eval change than alone.
 - Experiments: `archive.yml` saving the participant's clone work on stop (decision 21: a `git bundle` of every
   commit not on a remote branch, plus a diff of what is not committed, as `work/` in the run directory, so a
   mitigation written but not pushed before the VM is destroyed still survives) — from the experiments spec

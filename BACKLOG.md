@@ -63,12 +63,9 @@ start reads this section; keep it short.
   (also in `check_experiment.py`), its type checks now run before any set-membership test,
   `check_mitigations_catalog` names every owner of a contested key (not only the first), `injections_manifest.py`
   raises a clear error for a placement with no `id`, and `check_fixtures` itself (not only `validate()`) is now
-  tested on a new surface. Still open: the mitigation id pattern (`validate.MITIGATION_ID_PATTERN`) accepts
-  lowercase `l<n>` indistinguishably from an ordinary kebab-case id, so a contributed `l1` is never refused as
-  confusable with the ladder's reserved `L1` (a product decision: whether to reserve the whole `l<n>` shape, not
-  just `L<n>`, needs the user's call); and an empty fixture list is untested in the `repo` role's
+  tested on a new surface. Still open: an empty fixture list is untested in the `repo` role's
   `spe_local_vars_fixture_switches` (needs the Ansible render harness, not a plain pytest unit) — waits for a
-  session with that harness, or the user's ruling on the id pattern.
+  session with that harness.
 - Experiments: a controls-suite probe for every participant mitigation (`probes` is optional; the gate notes an undeclared closed probe) — from the experiments spec (#84, *out-of-scope*); waits until experiments show the need.
 - Experiments: `archive.yml` saving the participant's clone work on stop (decision 21: a `git bundle` of every
   commit not on a remote branch, plus a diff of what is not committed, as `work/` in the run directory, so a

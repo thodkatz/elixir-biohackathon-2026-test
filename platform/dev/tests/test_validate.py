@@ -431,6 +431,26 @@ def test_two_mitigations_setting_the_same_on_key_pass_when_conflicts_declares_th
     assert not overlap, problems
 
 
+def test_mitigation_lowercase_ladder_id_fails(tmp_path):
+    """`l1` has the same shape as the reserved ladder id `L1`, lowercased: confusable enough with
+    it that it is refused rather than accepted as an ordinary kebab-case id."""
+    mitigations_dir = tmp_path / "mitigations"
+    shutil.copytree(REPO / "mitigations", mitigations_dir)
+    (mitigations_dir / "l1.yml").write_text(
+        "id: l1\n"
+        "name: Lowercase ladder-shaped id\n"
+        "description: An id shaped like a reserved ladder level, lowercased.\n"
+        "closes: []\n"
+        "conflicts: [L1]\n"
+        '"on": {spe_harden_trs_readonly: true}\n'
+        '"off": {spe_harden_trs_readonly: false}\n'
+    )
+    _, problems = validate.validate_mitigations_catalog(
+        mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
+    )
+    assert any("l1.yml" in p and "l1" in p and "L<n>" in p for p in problems), problems
+
+
 def test_mitigation_closing_an_unknown_path_fails(tmp_path):
     mitigations_dir = tmp_path / "mitigations"
     shutil.copytree(REPO / "mitigations", mitigations_dir)

@@ -119,6 +119,11 @@ PATH_REQUIRED_FIELDS = ["id", "name", "description", "reaches"]
 PATH_BODY_HEADINGS = [(2, "Route"), (2, "Shown by")]
 
 MITIGATION_ID_PATTERN = re.compile(r"^(?:L\d+|[a-z0-9]+(?:-[a-z0-9]+)*)$")
+# A lowercase l<n> matches the kebab-case branch above (a single word of letters and digits needs
+# no hyphen), so it would otherwise pass as an ordinary contributed id indistinguishable from the
+# ladder's own reserved L<n> (uppercase only): refused instead, on the ruling that the whole l<n>
+# shape is reserved, not just L<n>.
+LOWERCASE_LADDER_ID_PATTERN = re.compile(r"^l\d+$")
 MITIGATION_REQUIRED_FIELDS = ["id", "name", "description", "closes"]
 MITIGATION_OPTIONAL_FIELDS = ["on", "off", "requires", "conflicts", "probes", "status"]
 MITIGATION_ALLOWED_FIELDS = MITIGATION_REQUIRED_FIELDS + MITIGATION_OPTIONAL_FIELDS
@@ -455,6 +460,11 @@ def check_mitigation(mitigation: Mitigation, path_ids: set[str], mitigation_ids:
     entry_id = meta["id"]
     if not isinstance(entry_id, str) or not MITIGATION_ID_PATTERN.match(entry_id):
         errors.append(f"id '{entry_id}' does not match format L<n> or kebab-case")
+    elif LOWERCASE_LADDER_ID_PATTERN.match(entry_id):
+        errors.append(
+            f"id '{entry_id}' looks like a ladder level written lowercase: reserved ladder ids "
+            "are L<n> (uppercase) only, pick a different id"
+        )
     elif entry_id != stem:
         errors.append(f"id '{entry_id}' does not match filename stem '{stem}'")
 

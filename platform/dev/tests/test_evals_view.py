@@ -1,0 +1,239 @@
+"""`evals-view` (decisions 14-15, docs/specs/2026-11-10-experiments-design/04-viewer.md): a
+read-only `promptfoo view` on `spe_experiments` builds, behind an nginx allow-list proxy.
+
+(a) Static checks against platform/instance/compose.yml: both services only run under profile
+`evals`, the port is 127.0.0.1-only, the `evals` network is joined by no other service,
+`evals-promptfoo` shares `evals-view`'s network namespace instead, neither service carries an
+`env_file` or a key-looking environment variable, the three DISABLE vars are set, and neither
+service nor a volume of its own is restored by the isolation reset (platform/promptfoo-evals/
+isolation.py: it is a bind mount, nothing to snapshot).
+
+(b) The proxy itself (evals-view/nginx.conf), against every route promptfoo 0.125.1's server
+registers: skipped when `docker` is unavailable. ROUTE_PATTERNS below is that route list, with
+the comment underneath saying how it was extracted; GET_ROUTES must answer 200 through the
+proxy, every other (method, route) 403 -- except socket.io's own transport (decision 15: the
+server only emits, it handles no client event, so both its GET -- plain and the websocket
+upgrade -- and its long-polling POST are let through). nginx proxies a stub upstream (listening
+on 15500, the same port promptfoo binds to, inside one shared network namespace, as
+`evals-promptfoo`'s `network_mode: "service:evals-view"` does in compose.yml) that answers 200
+to anything, so what is under test is nginx's method/path allow-list, not promptfoo itself; the
+real image was also checked once by hand against actual promptfoo (see the task's own report).
+"""
+import importlib.util
+import re
+import shutil
+import subprocess
+import time
+import urllib.error
+import urllib.request
+import uuid
+from pathlib import Path
+
+import pytest
+import yaml
+
+PLATFORM = Path(__file__).resolve().parents[2]
+INSTANCE = PLATFORM / "instance"
+EVALS_VIEW = INSTANCE / "evals-view"
+COMPOSE = yaml.safe_load((INSTANCE / "compose.yml").read_text())
+PROMPTFOO_INDEX = PLATFORM / "promptfoo-evals" / "node_modules" / "promptfoo" / "dist" / "src" / "server" / "index.js"
+
+# --- (a) static: compose.yml ------------------------------------------------------------------
+
+
+def test_both_services_only_run_under_the_evals_profile():
+    assert COMPOSE["services"]["evals-view"]["profiles"] == ["evals"]
+    assert COMPOSE["services"]["evals-promptfoo"]["profiles"] == ["evals"]
+
+
+def test_only_evals_view_publishes_a_port_and_only_on_localhost():
+    ports = COMPOSE["services"]["evals-view"]["ports"]
+    assert len(ports) == 1 and ports[0].startswith("127.0.0.1:") and ports[0].endswith(":8080")
+    assert "ports" not in COMPOSE["services"]["evals-promptfoo"]
+
+
+def test_the_evals_network_is_joined_by_evals_view_and_no_other_service():
+    for name, svc in COMPOSE["services"].items():
+        networks = svc.get("networks") or []
+        if name == "evals-view":
+            assert networks == ["evals"]
+        else:
+            assert "evals" not in networks, f"{name} joins the evals network too"
+
+
+def test_evals_promptfoo_shares_evals_views_network_namespace_instead():
+    assert COMPOSE["services"]["evals-promptfoo"]["network_mode"] == "service:evals-view"
+    assert "networks" not in COMPOSE["services"]["evals-promptfoo"]
+
+
+def test_neither_service_has_an_env_file_or_a_key_looking_variable():
+    for name in ("evals-view", "evals-promptfoo"):
+        svc = COMPOSE["services"][name]
+        assert "env_file" not in svc
+        for key in svc.get("environment") or {}:
+            assert not key.endswith("_KEY"), f"{name}.environment.{key} looks like a secret"
+            assert "API_KEY" not in key, f"{name}.environment.{key} looks like a secret"
+
+
+def test_the_three_disable_vars_are_set():
+    env = COMPOSE["services"]["evals-promptfoo"]["environment"]
+    assert env["PROMPTFOO_DISABLE_SHARING"] == "1"
+    assert env["PROMPTFOO_DISABLE_TELEMETRY"] == "1"
+    assert env["PROMPTFOO_DISABLE_UPDATE"] == "1"
+
+
+def test_neither_service_nor_a_volume_of_its_own_is_restored_by_isolation():
+    # Text, not an import (isolation.py imports its sibling handoff.py by plain `import
+    # handoff`, which only resolves on its own sys.path): the names simply must not occur in
+    # VOLUMES or CONTAINERS (platform/promptfoo-evals/isolation.py), as
+    # test_spe_eval_not_in_containers.py already does for other forbidden strings.
+    text = (PLATFORM / "promptfoo-evals" / "isolation.py").read_text()
+    assert "evals-view" not in text
+    assert "evals-promptfoo" not in text
+
+
+# --- (b) the proxy, against promptfoo 0.125.1's own routes -----------------------------------
+
+# Extracted from node_modules/promptfoo/dist/src/server/index.js (promptfoo 0.125.1, a single
+# bundled file): every `app.use("<prefix>", <name>Router)` mount gives a prefix, and every
+# `<name>.(get|post|put|patch|delete)("<path>", ...)` where <name> is "app" or one of those
+# mounted names (not a blanket match: "get"/"post" alone are common non-Express identifiers in
+# a bundle this size) is one route, at <prefix><path>. Checked to extract exactly these 68
+# entries from the real package (test_the_extractor_agrees_with_the_installed_package below).
+ROUTE_PATTERNS = (
+    ("DELETE", "/api/eval/"), ("DELETE", "/api/eval/:id"), ("DELETE", "/api/model-audit/scans/:id"),
+    ("GET", "/*splat"), ("GET", "/api/blobs/:hash"), ("GET", "/api/blobs/library"),
+    ("GET", "/api/blobs/library/evals"), ("GET", "/api/configs/"), ("GET", "/api/configs/:type"),
+    ("GET", "/api/configs/:type/:id"), ("GET", "/api/datasets"), ("GET", "/api/eval/:id/metadata-keys"),
+    ("GET", "/api/eval/:id/metadata-values"), ("GET", "/api/eval/:id/table"), ("GET", "/api/eval/job/:id"),
+    ("GET", "/api/history"), ("GET", "/api/media/:type/:filename"), ("GET", "/api/media/info/:type/:filename"),
+    ("GET", "/api/media/stats"), ("GET", "/api/model-audit/check-installed"), ("GET", "/api/model-audit/scanners"),
+    ("GET", "/api/model-audit/scans"), ("GET", "/api/model-audit/scans/:id"), ("GET", "/api/model-audit/scans/latest"),
+    ("GET", "/api/prompts"), ("GET", "/api/prompts/:sha256hash"), ("GET", "/api/providers/config-status"),
+    ("GET", "/api/redteam/status"), ("GET", "/api/remote-health"), ("GET", "/api/results"),
+    ("GET", "/api/results/:id"), ("GET", "/api/results/share/check-domain"), ("GET", "/api/traces/:traceId"),
+    ("GET", "/api/traces/evaluation/:evaluationId"), ("GET", "/api/user/cloud-config"), ("GET", "/api/user/email"),
+    ("GET", "/api/user/email/status"), ("GET", "/api/user/id"), ("GET", "/api/version/"), ("GET", "/health"),
+    ("PATCH", "/api/eval/:id"), ("PATCH", "/api/eval/:id/author"), ("POST", "/api/configs/"),
+    ("POST", "/api/dataset/generate"), ("POST", "/api/eval/"), ("POST", "/api/eval/:evalId/results/:id/rating"),
+    ("POST", "/api/eval/:id/copy"), ("POST", "/api/eval/:id/results"), ("POST", "/api/eval/job"),
+    ("POST", "/api/eval/replay"), ("POST", "/api/model-audit/check-path"), ("POST", "/api/model-audit/scan"),
+    ("POST", "/api/providers/discover"), ("POST", "/api/providers/http-generator"), ("POST", "/api/providers/test"),
+    ("POST", "/api/providers/test-request-transform"), ("POST", "/api/providers/test-response-transform"),
+    ("POST", "/api/providers/test-session"), ("POST", "/api/redteam/:taskId"), ("POST", "/api/redteam/cancel"),
+    ("POST", "/api/redteam/generate-test"), ("POST", "/api/redteam/run"), ("POST", "/api/results/share"),
+    ("POST", "/api/telemetry"), ("POST", "/api/user/email"), ("POST", "/api/user/login"),
+    ("POST", "/api/user/logout"), ("PUT", "/api/user/email/clear"),
+)
+
+MOUNT_RE = re.compile(r'app\.use\("([^"]+)",\s*(\w+)\)')
+ROUTE_RE = re.compile(r'\b(\w+)\.(get|post|put|patch|delete)\(\s*"([^"]+)"')
+
+
+def extract_routes(text: str) -> set[tuple[str, str]]:
+    """The same extraction described in ROUTE_PATTERNS' comment, run over real source text."""
+    mounts = {name: prefix for prefix, name in MOUNT_RE.findall(text)}
+    mounts["app"] = ""
+    routes = set()
+    for var, method, path in ROUTE_RE.findall(text):
+        if var in mounts:
+            routes.add((method.upper(), mounts[var] + path))
+    return routes
+
+
+def test_the_extractor_agrees_with_the_installed_package():
+    if not PROMPTFOO_INDEX.is_file():
+        pytest.skip("platform/promptfoo-evals/node_modules/promptfoo is not installed here")
+    assert extract_routes(PROMPTFOO_INDEX.read_text()) == set(ROUTE_PATTERNS)
+
+
+def concretize(path: str) -> str:
+    """A real path for one of ROUTE_PATTERNS' route patterns: ':param' segments become 'x',
+    and the one Express 5 wildcard ('/*splat', the SPA's catch-all) becomes a plain asset path."""
+    if path == "/*splat":
+        return "/app.js"
+    return re.sub(r":[A-Za-z_][A-Za-z0-9_]*", "x", path)
+
+
+GET_ROUTES = [concretize(path) for method, path in ROUTE_PATTERNS if method == "GET"]
+NON_GET_ROUTES = [(method, concretize(path)) for method, path in ROUTE_PATTERNS if method != "GET"]
+
+DOCKER = shutil.which("docker")
+pytestmark_proxy = pytest.mark.skipif(DOCKER is None, reason="needs docker")
+NGINX_IMAGE = "nginx:1.29-alpine"
+# A stub upstream that answers 200 to any method and path, pinned by tag; already used to check
+# the real image by hand (the task's own report). Its -port flag puts it on 15500, the same port
+# promptfoo binds to and nginx.conf's upstream names, so nginx.conf needs no change for the test.
+STUB_IMAGE = "traefik/whoami:v1.10"
+
+
+def _run(*args):
+    subprocess.run(["docker", *args], check=True, capture_output=True, text=True)
+
+
+@pytest.fixture(scope="module")
+def proxy():
+    if DOCKER is None:
+        pytest.skip("needs docker")
+    tag = uuid.uuid4().hex[:8]
+    nginx_name = f"evals-view-test-nginx-{tag}"
+    stub_name = f"evals-view-test-stub-{tag}"
+    try:
+        _run("run", "-d", "--name", nginx_name,
+             "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
+             "--user", "101:101", "--tmpfs", "/tmp",
+             "-p", "127.0.0.1::8080",
+             "-v", f"{EVALS_VIEW / 'nginx.conf'}:/etc/nginx/nginx.conf:ro",
+             NGINX_IMAGE)
+        _run("run", "-d", "--name", stub_name, "--network", f"container:{nginx_name}",
+             STUB_IMAGE, "-port", "15500")
+        port = subprocess.run(["docker", "port", nginx_name, "8080/tcp"], check=True,
+                               capture_output=True, text=True).stdout.strip().rsplit(":", 1)[1]
+        base = f"http://127.0.0.1:{port}"
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                urllib.request.urlopen(base + "/", timeout=2)
+                break
+            except (urllib.error.URLError, ConnectionError):
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(0.5)
+        yield base
+    finally:
+        subprocess.run(["docker", "rm", "-f", nginx_name, stub_name], capture_output=True, text=True)
+
+
+def status(base: str, method: str, path: str) -> int:
+    req = urllib.request.Request(base + path, method=method)
+    try:
+        return urllib.request.urlopen(req, timeout=5).status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+@pytestmark_proxy
+@pytest.mark.parametrize("path", GET_ROUTES)
+def test_get_routes_answer_200(proxy, path):
+    assert status(proxy, "GET", path) == 200
+
+
+@pytestmark_proxy
+@pytest.mark.parametrize("method,path", NON_GET_ROUTES)
+def test_non_get_routes_are_refused(proxy, method, path):
+    assert status(proxy, method, path) == 403
+
+
+@pytestmark_proxy
+def test_head_is_let_through(proxy):
+    assert status(proxy, "HEAD", "/") == 200
+
+
+@pytestmark_proxy
+def test_socket_io_polling_post_is_let_through(proxy):
+    assert status(proxy, "POST", "/socket.io/?EIO=4&transport=polling") == 200
+
+
+@pytestmark_proxy
+def test_socket_io_still_refuses_every_other_method(proxy):
+    assert status(proxy, "DELETE", "/socket.io/") == 403

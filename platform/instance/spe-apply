@@ -119,7 +119,17 @@ up() {
   # agent.yaml is a bind mount: its hash is a container label, so a change recreates the agent.
   SPE_AGENT_CONFIG_HASH=$(sha256sum "$dir/agent.yaml" 2>/dev/null | cut -c1-16 || true)
   export SPE_AGENT_CONFIG_HASH
-  "${compose[@]}" up -d --remove-orphans
+  # Compose 5.3 (Docker 29) recreates a network whose config changed (the egress overlay gives
+  # tools its own subnet) but reconnects a container on two networks without its service alias
+  # there: the sandbox could no longer resolve `agent`. So when the networks differ from the last
+  # up's, or that is unknown, every container is recreated (docs/knowledge/compose-network-alias-lost.md).
+  local networks networks_file=$dir/.compose-networks recreate=()
+  networks=$("${compose[@]}" config --format json \
+    | python3 -c 'import json, sys; print(json.dumps(json.load(sys.stdin).get("networks", {}), sort_keys=True))' \
+    | sha256sum | cut -c1-16)
+  [[ -f $networks_file && $(<"$networks_file") == "$networks" ]] || recreate=(--force-recreate)
+  "${compose[@]}" up -d --remove-orphans "${recreate[@]}"
+  echo "$networks" > "$networks_file"
   echo "== waiting for the frontend"
   if has_profile openwebui; then
     wait_http "http://127.0.0.1:${SPE_WEBUI_PORT}/health"

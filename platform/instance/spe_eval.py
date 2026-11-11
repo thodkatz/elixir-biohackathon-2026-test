@@ -1,8 +1,10 @@
 """`spe-eval`'s core library (experiments spec part 03, `docs/specs/2026-11-10-experiments-design/`):
-experiments, arms, the suite config, run ids and the lock. Standard library plus PyYAML only (the
-VM has `python3-yaml`); the only repository imports are `validate` (repo root) and
-`injections_schema` (`platform/promptfoo-evals/`), both read-only siblings of the same clone, not
-new dependencies.
+experiments, arms, the suite config, run ids, the lock and reading past runs. Standard library
+plus PyYAML only (the VM has `python3-yaml`); the only repository imports are `validate` (repo
+root), `injections_schema` and `matrix` (`platform/promptfoo-evals/`), all read-only siblings of
+the same clone, not new dependencies -- always imported from this script's own location (never
+`SPE_REPO_DIR`), so `matrix.CATALOGUE` is always this checkout's real catalogue, whichever repo
+`SPE_REPO_DIR` points the rest of `spe-eval` at.
 
 Used by the `spe-eval` CLI (`platform/instance/spe-eval`) and, for the lock, by `spe-apply` (in
 bash, mirroring `Lock`'s file format):
@@ -22,6 +24,13 @@ bash, mirroring `Lock`'s file format):
     - `append_jsonl`, `discover_runs`, `run_entry`, `read_progress`: `spe-eval status`/`wait`/
       `runs`'s own reading of `~/spe-eval/reports/`, `windows.jsonl` and the progress file R3
       writes.
+    - `new_experiment` and its skeleton-text helpers: `spe-eval new` (07, *Start*).
+    - `arm_counts`, `verdict_for`, `build_results`, `format_results_text`, `test_reasons`:
+      `spe-eval results` (07, *Read*): one arm's counts tolerant of a "mixed" hardening record,
+      the closed/narrowed/unchanged/worse word per metric, both arms' counts for one run, and its
+      text form; `test_reasons` is `--test`'s own read of `agent.json`.
+    - `pr_body_text` and its summary helpers: `spe-eval pr-body` (05, *The PR*; 07, *Share*), the
+      title and body filled in from an experiment's files and its `build_results`.
 """
 from __future__ import annotations
 
@@ -44,6 +53,7 @@ for _p in (str(OWN_REPO_ROOT), str(_PROMPTFOO_DIR)):
         sys.path.insert(0, _p)
 import validate  # noqa: E402  (repo root: EXPERIMENT_PARAMETER_ANSIBLE_NAMES, main.tf's own mapping)
 import injections_schema  # noqa: E402  (promptfoo-evals: switches(), built from the fixtures.json catalogue)
+import matrix  # noqa: E402  (promptfoo-evals: counts()/MatrixError, reused by `results`/`pr-body`, task 3)
 
 
 class ConfigError(Exception):
@@ -858,3 +868,292 @@ def new_experiment(repo_root: Path, name: str, *, threat: str | None = None, pat
     written.append(exp_path)
 
     return written
+
+
+# --- spe-eval results (07-agent-friendly.md, *Read*) -------------------------------------------
+#
+# `matrix.py counts()` is the ladder's own reading of one report directory (hardening.json,
+# controls.json, agent.json, run.json, injections.json): labels, probe ids, test metadata,
+# per-metric failure counts, never an answer or a token. It refuses a hardening record whose
+# `injections` is "mixed" (06's matrix has no column for it), but an experiment's own arm can
+# plant only some of the catalogue's fixtures (01, *Attacks*) and so gets exactly that record
+# (platform/ansible/roles/handoff/tasks/hardening.yml). `arm_counts` is `counts()` for one arm
+# directory, tolerant of "mixed": every other branch is counts() unchanged (same MatrixError), so
+# the ladder's own refusal (06's matrix) is never touched; only this one extra case is handled,
+# by calling matrix's own small building blocks directly instead of its `counts()` entry point.
+
+def arm_counts(arm_dir: Path) -> dict:
+    """`matrix.py counts(arm_dir)`, except a hardening.json with `injections: "mixed"` (an
+    experiment's arm, decision 9) is read too, rather than refused: `results`/`pr-body` read any
+    arm's report directory, which is exactly this shape (03, *Every run is kept*), and need its
+    counts whether the arm's injections are all off, all on, or mixed. Raises `matrix.MatrixError`
+    for anything else counts() itself would refuse (a missing or malformed file)."""
+    directory = Path(arm_dir)
+    try:
+        record = matrix.handoff.check_hardening(matrix._load(directory / "hardening.json"))
+    except matrix.handoff.ConfigError as e:
+        raise matrix.MatrixError(str(e)) from e
+    if record["injections"] != "mixed":
+        return matrix.counts(directory)  # the ladder's own path and its own refusal, unchanged
+    run = matrix._run(directory)
+    return {
+        "schema_version": 1, "instance": record["instance"], "level": record["level"],
+        "injections": "mixed", "started": run["started"], "canaries_sha256": run["canaries_sha256"],
+        # mixed means at least one catalogue fixture is planted (never none, by definition): the
+        # same bool matrix._payloads itself uses for the "all on" case.
+        "payloads": matrix._payloads(directory, True),
+        "model": f"{record['model_provider']}:{record['model']}", "commit": record["commit"],
+        "restore_seconds": record.get("restore_seconds"),
+        "controls": matrix._controls(matrix._rows(matrix._load(directory / "controls.json"), "controls.json")),
+        "tests": matrix._tests(matrix._rows(matrix._load(directory / "agent.json"), "agent.json")),
+    }
+
+
+def verdict_for(baseline_failures: dict, mitigated_failures: dict) -> dict[str, str]:
+    """One word per metric either arm's `failures` names (07, *Read*): "closed" (baseline failed,
+    mitigated does not), "narrowed" (mitigated fails less than baseline, but still some),
+    "unchanged" (same count, including 0 and 0), "worse" (mitigated fails more)."""
+    verdicts: dict[str, str] = {}
+    for metric in sorted(set(baseline_failures) | set(mitigated_failures)):
+        b = baseline_failures.get(metric, 0)
+        m = mitigated_failures.get(metric, 0)
+        if m == 0 and b > 0:
+            verdicts[metric] = "closed"
+        elif m < b:
+            verdicts[metric] = "narrowed"
+        elif m == b:
+            verdicts[metric] = "unchanged"
+        else:
+            verdicts[metric] = "worse"
+    return verdicts
+
+
+def build_results(entry: dict, home: Path | None = None) -> dict:
+    """The counts of every arm of `entry` (one of `discover_runs`'s, or `run_entry`'s), as
+    `results`/`pr-body` print them: `{"run", "experiment", "arms", "model", "repeat", "utility":
+    {<arm>: {"passed", "runs"}}, "tests": {<id>: {"group", "threat", "path", "closed_by",
+    <arm>: {"runs", "errors", "passed", "failures"}, ..., "verdict": {<metric>: <word>}}}}`.
+    `utility`-group tests are summed into `utility` and left out of `tests` (no leak metric, so no
+    verdict); `verdict` is present only for a test both arms ran (always true for a two-arm run,
+    03's own gate). Raises `ConfigError` for a report `arm_counts` cannot read (never a bare
+    `matrix.MatrixError`, which `main()` does not know to catch)."""
+    arms = sorted(entry["arms"])  # "baseline" < "mitigated": the run's own order (03, decision 9)
+    try:
+        counts_by_arm = {arm: arm_counts(reports_dir(entry["experiment"], entry["run"], arm, home)) for arm in arms}
+    except matrix.MatrixError as e:
+        raise ConfigError(str(e)) from e
+
+    first_arm_record = next((entry["arms"][arm] for arm in arms if entry["arms"].get(arm)), {})
+    utility = {arm: {"passed": 0, "runs": 0} for arm in arms}
+    tests: dict[str, dict] = {}
+    all_tids = sorted({tid for c in counts_by_arm.values() for tid in c["tests"]})
+    for tid in all_tids:
+        meta: dict | None = None
+        per_arm: dict[str, dict] = {}
+        for arm in arms:
+            t = counts_by_arm[arm]["tests"].get(tid)
+            if t is None:
+                continue
+            if meta is None:
+                meta = {k: t[k] for k in ("group", "threat", "path", "closed_by")}
+            per_arm[arm] = {"runs": t["runs"], "errors": t["errors"], "passed": t["passed"], "failures": t["failures"]}
+        if meta and meta["group"] == "utility":
+            for arm, t in per_arm.items():
+                utility[arm]["passed"] += t["passed"]
+                utility[arm]["runs"] += t["runs"]
+            continue
+        test_entry = {**(meta or {}), **per_arm}
+        if len(arms) == 2 and "baseline" in per_arm and "mitigated" in per_arm:
+            test_entry["verdict"] = verdict_for(per_arm["baseline"]["failures"], per_arm["mitigated"]["failures"])
+        tests[tid] = test_entry
+
+    return {"run": entry["run"], "experiment": entry["experiment"], "arms": arms,
+            "model": first_arm_record.get("model"), "repeat": first_arm_record.get("repeat"),
+            "utility": utility, "tests": tests}
+
+
+def _results_body_lines(results: dict) -> list[str]:
+    """The lines `results`'s text output and `pr-body`'s *Result* section share: the utility
+    outcome, then every leak-metric test's baseline/mitigated counts and verdict."""
+    arms = results["arms"]
+    lines = ["Utility tests: " + ", ".join(
+        f"{arm} {results['utility'][arm]['passed']}/{results['utility'][arm]['runs']} pass" for arm in arms)]
+    for tid in sorted(results["tests"]):
+        t = results["tests"][tid]
+        lines.append(f"{tid} (group {t.get('group') or '-'}, threat {t.get('threat') or '-'}, "
+                      f"path {t.get('path') or '-'}, closed_by {t.get('closed_by') or '-'}):")
+        metrics = sorted({m for arm in arms if arm in t for m in t[arm]["failures"]})
+        if not metrics:
+            lines.append("  no leak metric recorded")
+            continue
+        verdict = t.get("verdict", {})
+        for metric in metrics:
+            row = "  " + f"{metric}: " + ", ".join(
+                f"{arm} {t[arm]['failures'].get(metric, 0)}/{t[arm]['runs']}" for arm in arms if arm in t)
+            if metric in verdict:
+                row += f" -> {verdict[metric]}"
+            lines.append(row)
+    return lines
+
+
+def format_results_text(results: dict) -> str:
+    """`spe-eval results`'s text output (07, *Read*): the run, the experiment, then
+    `_results_body_lines`."""
+    return "\n".join([f"run {results['run']} ({results['experiment']})", *_results_body_lines(results)]) + "\n"
+
+
+def test_reasons(entry: dict, test_id: str, home: Path | None = None) -> dict[str, list[str]]:
+    """Every component assertion's `reason` for `test_id`, by arm, read straight from each arm's
+    `agent.json` (not from `build_results`'s counts, which keep labels and numbers only): `--test`
+    (07, *Read*). An arm missing the id, or with no readable `agent.json`, is left out; empty when
+    the id never ran at all (never raises: this is a read for a human, not a refusal)."""
+    reasons: dict[str, list[str]] = {}
+    for arm in sorted(entry["arms"]):
+        agent_path = reports_dir(entry["experiment"], entry["run"], arm, home) / "agent.json"
+        if not agent_path.is_file():
+            continue
+        try:
+            rows = matrix._rows(matrix._load(agent_path), "agent.json")
+        except matrix.MatrixError:
+            continue
+        found: list[str] = []
+        for row in rows:
+            meta = (row.get("testCase") or {}).get("metadata") or {}
+            if meta.get("id") != test_id:
+                continue
+            for component in (row.get("gradingResult") or {}).get("componentResults") or []:
+                reason = component.get("reason")
+                if reason:
+                    found.append(str(reason))
+        if found:
+            reasons[arm] = found
+    return reasons
+
+
+# --- spe-eval pr-body (05-contribution.md, *The PR*; 07-agent-friendly.md, *Share*) -------------
+#
+# The PR template is `.github/pull_request_template.md`, 05's *The PR* block verbatim. `pr_body`
+# fills it in from the files (never from the catalogue's own validation: check_experiment.py's
+# output is quoted, not re-derived) and the run's counts (`build_results`, above); a slot the
+# experiment does not fill (no mitigation under test, no injection and no own test file) is left
+# out rather than printed empty (05's acceptance check). *Idea and rationale* always stays the
+# template's own placeholder: the reasoning is the participant's, not something these files hold.
+
+def _one_line(text: object) -> str:
+    """Collapse `text` to one line (a YAML `description: >` block's folded newlines, or any other
+    free text) for a line of the PR body; "TODO" for anything that is not a non-empty string."""
+    if not isinstance(text, str) or not text.strip():
+        return "TODO"
+    return " ".join(text.split())
+
+
+def _front_matter_name(path: Path) -> str | None:
+    try:
+        meta, _ = validate.split_frontmatter(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError, UnicodeDecodeError):
+        return None
+    return meta.get("name") if isinstance(meta, dict) else None
+
+
+def threat_summary(repo_root: Path, threat_id: str | None) -> str:
+    """`<id>: <threats/<id>-*.md's name, one line>` ("TODO" when the id has no catalogue file
+    yet, e.g. a `spe-eval new` skeleton not yet filled in)."""
+    if not threat_id:
+        return "TODO"
+    for path in sorted((repo_root / "threats").glob(f"{threat_id}-*.md")):
+        name = _front_matter_name(path)
+        if name:
+            return f"{threat_id}: {_one_line(name)}"
+    return f"{threat_id}: TODO"
+
+
+def path_summary(repo_root: Path, path_id: str) -> str:
+    """`<id>: <paths/<id>-*.md's name, one line>` ("TODO" when the id has no catalogue file yet)."""
+    for path in sorted((repo_root / "paths").glob(f"{path_id}-*.md")):
+        name = _front_matter_name(path)
+        if name:
+            return f"{path_id}: {_one_line(name)}"
+    return f"{path_id}: TODO"
+
+
+def mitigation_summary(repo_root: Path, mitigation_id: str) -> str:
+    """`` `<id>` (`<switch>`[, `<switch2>`...]): <description, one line> ``, the switch(es) read
+    from the mitigation's own `on` (never guessed from the naming convention: a reused catalogue
+    id such as `L1` does not follow `spe_mitigate_<id>`, only a freshly `spe-eval new`-written
+    one does)."""
+    path = repo_root / "mitigations" / f"{mitigation_id}.yml"
+    try:
+        meta = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        meta = None
+    meta = meta if isinstance(meta, dict) else {}
+    on = meta.get("on")
+    switches = ", ".join(f"`{s}`" for s in sorted(on)) if isinstance(on, dict) and on else "`?`"
+    return f"`{mitigation_id}` ({switches}): {_one_line(meta.get('description'))}"
+
+
+def _fixtures_by_id(repo_root: Path) -> dict[str, dict]:
+    path = repo_root / "platform" / "ansible" / "catalog" / "injections" / "fixtures.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {f["id"]: f for f in (data.get("fixtures") or []) if isinstance(f, dict) and "id" in f}
+
+
+def attack_summary(repo_root: Path, name: str, experiment: dict) -> str | None:
+    """The *Attack* line's value, or `None` when this experiment fills no attack slot of its own
+    (05, *A skeleton*: it only reuses the catalogue's existing tests) -- a prompt test when
+    `tests/experiments/<name>.yaml` exists, each injection id (surface and action, from
+    `fixtures.json`) otherwise or in addition."""
+    parts: list[str] = []
+    own_test = repo_root / "platform" / "promptfoo-evals" / "tests" / "experiments" / f"{name}.yaml"
+    if own_test.is_file():
+        parts.append(f"a prompt test (`tests/experiments/{name}.yaml`)")
+    fixtures = _fixtures_by_id(repo_root)
+    for iid in (experiment.get("experiment") or {}).get("injections") or []:
+        fixture = fixtures.get(iid)
+        if fixture:
+            parts.append(f"injection `{iid}`: {fixture.get('surface', '?')} / {fixture.get('action', '?')}")
+        else:
+            parts.append(f"injection `{iid}`")
+    return "; ".join(parts) if parts else None
+
+
+def pr_body_text(repo_root: Path, name: str, experiment: dict, results: dict | None,
+                  checker_output: str) -> tuple[str, str]:
+    """The title and body `spe-eval pr-body` prints (05, *The PR*): the template's own sections,
+    filled from `experiment` (the files) and `results` (`build_results`, or `None` for *no run
+    yet*, 05's acceptance check), with `checker_output` (`check_experiment.py <name>`'s own text)
+    quoted verbatim under *Checks*. `title` is the PR title line, printed separately
+    (`--help`: "the split")."""
+    exp = experiment.get("experiment") or {}
+    threat_id = exp.get("threat")
+    paths_ids = exp.get("paths") or []
+    mitigation_id = exp.get("mitigation")
+    base = exp.get("base") or []
+
+    title = f"Experiment: {name}"
+    lines = [f"## Experiment: {name}", "", f"**Threat:** {threat_summary(repo_root, threat_id)}"]
+    paths_text = "; ".join(path_summary(repo_root, pid) for pid in paths_ids) if paths_ids else "TODO"
+    lines.append(f"**Paths:** {paths_text}")
+    attack = attack_summary(repo_root, name, experiment)
+    if attack is not None:
+        lines.append(f"**Attack:** {attack}")
+    if mitigation_id:
+        lines.append(f"**Mitigation:** {mitigation_summary(repo_root, mitigation_id)}")
+    lines.append(f"**Base:** {', '.join(base) if base else 'none'}")
+    lines.append(f"**Experiment file:** `experiments/{name}.yml`")
+    lines += ["", "### Idea and rationale", "<why this attack or mitigation, what was tried, known limits>", "",
+              "### Result"]
+    if results is None:
+        lines.append(f"TODO: no run yet -- `spe-eval run {name}`, then `spe-eval pr-body {name}` again.")
+    else:
+        lines.append(f"Model: {results.get('model') or '?'}   Repeat: {results.get('repeat') or '?'}")
+        lines += _results_body_lines(results)
+        if mitigation_id and "mitigated" in results["arms"]:
+            util = results["utility"].get("mitigated") or {}
+            ok = bool(util.get("runs")) and util.get("passed") == util.get("runs")
+            lines.append(f"Utility tests pass with the mitigation on: {'yes' if ok else 'no'}")
+    lines += ["", "### Checks", f"`python3 check_experiment.py {name}`:", "```", checker_output.rstrip(), "```"]
+    return title, "\n".join(lines) + "\n"

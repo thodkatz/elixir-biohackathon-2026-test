@@ -723,6 +723,29 @@ def test_new_refuses_the_reserved_template_name(new_repo):
         assert "not a valid experiment name" in p.stderr
 
 
+def test_new_refuses_a_name_too_long_for_sync_template_sh(new_repo):
+    """`platform/coder/deploy/sync-template.sh` skips an `experiment/<name>` branch over 26
+    characters, so no `spe-x-<name>` template would ever appear for a longer name (07-agent-
+    friendly.md, *Conventions*): refused up front, with the reason."""
+    repo, run = new_repo
+    too_long = "a" + "-b" * 13  # 27 characters, one over sync-template.sh's cap
+    assert len(too_long) == 27
+    p = run("new", too_long)
+    assert p.returncode == 2
+    assert "26" in p.stderr
+    assert "sync-template.sh" in p.stderr
+    assert not (repo / "experiments" / f"{too_long}.yml").exists()
+
+
+def test_new_accepts_a_name_exactly_at_the_cap(new_repo):
+    repo, run = new_repo
+    exactly = "aa" + "-b" * 12  # 26 characters
+    assert len(exactly) == 26
+    p = run("new", exactly)
+    assert p.returncode == 0, p.stderr
+    assert (repo / "experiments" / f"{exactly}.yml").exists()
+
+
 def test_new_refuses_an_existing_name(new_repo):
     _repo, run = new_repo
     p = run("new", "ladder-l1")

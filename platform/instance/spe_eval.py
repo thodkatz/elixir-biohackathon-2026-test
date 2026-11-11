@@ -543,16 +543,22 @@ def read_progress(path: Path, repeat: int = 1) -> dict:
 # so an existing entry's formatting is untouched (`git diff` shows only what was added).
 
 NEW_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+# `platform/coder/deploy/sync-template.sh` turns a pushed `experiment/<name>` branch into the
+# template `spe-x-<name>` (07-agent-friendly.md, *Hand over*), and skips any branch name over 26
+# characters: a longer `<name>` would write a skeleton no template could ever be built from.
+NEW_NAME_MAX_LEN = 26
 _THREAT_ID_PATTERN = re.compile(r"^TM-\d{3}$")
 _PATH_ID_PATTERN = re.compile(r"^P\d+$")
 
 
 def valid_new_name(name: str) -> bool:
     """A name `spe-eval new` accepts: lowercase kebab-case (so it is also a valid mitigation id
-    and, with `-` as `_`, a valid Ansible switch suffix), and not `template` (`experiments/
+    and, with `-` as `_`, a valid Ansible switch suffix), not `template` (`experiments/
     TEMPLATE.yml`/`mitigations/TEMPLATE.yml` are copy-and-fill-in documents, excluded from the
-    catalog by every reader -- never a real experiment's name, whatever its case)."""
-    return bool(NEW_NAME_PATTERN.match(name)) and name.lower() != "template"
+    catalog by every reader -- never a real experiment's name, whatever its case), and at most
+    `NEW_NAME_MAX_LEN` characters."""
+    return (bool(NEW_NAME_PATTERN.match(name)) and name.lower() != "template"
+            and len(name) <= NEW_NAME_MAX_LEN)
 
 
 def _switch(prefix: str, name: str) -> str:
@@ -769,6 +775,12 @@ def new_experiment(repo_root: Path, name: str, *, threat: str | None = None, pat
     and returns the paths written, in the order printed. Raises `ConfigError` (CLI exit 2) for an
     existing name, a bad name, or an unknown `--from` experiment or `--injection` surface --
     checked up front, so a refusal never leaves a partial skeleton behind."""
+    if len(name) > NEW_NAME_MAX_LEN and NEW_NAME_PATTERN.match(name) and name.lower() != "template":
+        raise ConfigError(
+            f"{name!r}: {len(name)} characters, more than the {NEW_NAME_MAX_LEN} sync-template.sh "
+            "accepts for an experiment/<name> branch -- no spe-x-<name> template would ever appear "
+            "for it; pick a shorter name"
+        )
     if not valid_new_name(name):
         raise ConfigError(f"{name!r}: not a valid experiment name (lowercase kebab-case, e.g. 'trs-guard')")
 

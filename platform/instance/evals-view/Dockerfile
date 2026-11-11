@@ -3,13 +3,14 @@
 # run agree on the database schema. Built with context platform/promptfoo-evals (like spe-apply's
 # sandbox build uses -f: docker build -f platform/instance/evals-view/Dockerfile platform/promptfoo-evals).
 # Read-only is nginx's job, not this image's: evals-view, its other service
-# (platform/instance/evals-view/nginx.conf), sits in front of it, and this container's own port
-# (15500) is reachable only from inside its shared network namespace
-# (compose.yml: evals-promptfoo's network_mode: "service:evals-view").
+# (platform/instance/evals-view/nginx.conf), sits in front of it; this container's own port
+# (15500) is reachable only through that proxy, which shares its network namespace
+# (compose.yml: evals-promptfoo's network_mode: "service:evals-view") -- not a boundary against
+# the VM host itself, which can always reach any container's own interfaces.
 #
-# Node matches spe_eval_node_version's major (platform/ansible/inventory/group_vars/all.yml):
-# the same Node major the VM installs to run `spe-eval run`/promptfoo there.
-FROM node:24-slim
+# Pinned to spe_eval_node_version (platform/ansible/inventory/group_vars/all.yml): the same
+# Node version the VM installs to run `spe-eval run`/promptfoo there.
+FROM node:24.21.0-slim
 WORKDIR /app
 # No sharing, telemetry or self-update from an SPE instance; the config dir is the bind-mounted
 # evaluations volume (compose.yml: evals-promptfoo's /data), not promptfoo's own default.

@@ -159,14 +159,23 @@ services:
   # The entry point: a stock nginx, configuration only (evals-view/nginx.conf), proxying
   # GET/HEAD everywhere and socket.io's own POST, 403 to everything else -- including every
   # write `promptfoo view` itself would otherwise accept. Publishes the only port; promptfoo
-  # (below) shares its network namespace instead of joining the `evals` network itself, so
-  # its own port is reachable only from inside that namespace, never directly.
+  # (below) shares its network namespace instead of joining the `evals` network itself: the
+  # proxy guards the published entry point, nothing reaches promptfoo's own port without going
+  # through it first (though not a boundary against the VM host itself, which can always reach
+  # any container directly).
+  #
+  # Every SPE_EVALS_* variable below has a default: compose interpolates and parses every
+  # service, including one in an inactive profile (`evals` here, only on spe_experiments
+  # builds), so a plain spe build's .env -- which has none of these -- must still parse
+  # (fix round 1, Critical 1; platform/dev/tests/test_evals_view.py's
+  # test_compose_loads_without_any_spe_evals_variable checks this). The defaults are never used
+  # by a running container: this profile is simply never active on such a build.
   evals-view:
     profiles: [evals]
     image: nginx:1.29-alpine
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${SPE_EVALS_PORT}:8080"
+      - "127.0.0.1:${SPE_EVALS_PORT:-8200}:8080"
     volumes:
       - ${SPE_REPO_DIR}/platform/instance/evals-view/nginx.conf:/etc/nginx/nginx.conf:ro
     networks: [evals]
@@ -184,10 +193,12 @@ services:
     pids_limit: 64
   evals-promptfoo:
     profiles: [evals]
-    image: ${SPE_EVALS_VIEW_IMAGE}
+    image: ${SPE_EVALS_VIEW_IMAGE:-spe-evals-view:local}
     restart: unless-stopped
-    # Its own port (15500) is reachable only from inside evals-view's network namespace, not
-    # from the `evals` network or any other: evals-view is the only entry point.
+    # Shares evals-view's network namespace instead of joining a network of its own: nothing
+    # on the `evals` network, or any other, reaches this port directly, only evals-view's proxy
+    # in front of it (not a boundary against the VM host itself, which can always reach any
+    # container's own interfaces).
     network_mode: "service:evals-view"
     environment:
       # No sharing, telemetry or self-update from an SPE instance; baked into the image too
@@ -199,8 +210,9 @@ services:
     volumes:
       # The host's evaluations directory (docs/specs/2026-11-10-experiments-design/04-viewer.md),
       # the same PROMPTFOO_CONFIG_DIR a run itself writes (read-write: promptfoo view runs its
-      # own DB migrations at start).
-      - ${SPE_EVALS_DATA_DIR}:/data
+      # own DB migrations at start). The default is a placeholder, never read on a build where
+      # this profile is inactive (see the comment above evals-view).
+      - ${SPE_EVALS_DATA_DIR:-/nonexistent-spe-evals-data}:/data
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true

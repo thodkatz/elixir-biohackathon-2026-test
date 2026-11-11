@@ -19,7 +19,7 @@ on 15500, the same port promptfoo binds to, inside one shared network namespace,
 to anything, so what is under test is nginx's method/path allow-list, not promptfoo itself; the
 real image was also checked once by hand against actual promptfoo (see the task's own report).
 """
-import importlib.util
+import os
 import re
 import shutil
 import subprocess
@@ -92,6 +92,35 @@ def test_neither_service_nor_a_volume_of_its_own_is_restored_by_isolation():
     assert "evals-promptfoo" not in text
 
 
+DOCKER = shutil.which("docker")
+
+
+def test_compose_loads_without_any_spe_evals_variable(tmp_path):
+    # Fix round 1, Critical 1: compose interpolates and parses every service, including one in
+    # an inactive profile, so a plain spe build's .env (no SPE_EVALS_* at all -- the golden
+    # frontend.env.L0 used here, profiles openwebui,agui,ui) must still parse. It did not before
+    # the defaults were added to the evals-view/evals-promptfoo lines in compose.yml (an unset
+    # ${SPE_EVALS_DATA_DIR} made the volume spec ":/data", "empty section between colons").
+    if DOCKER is None:
+        pytest.skip("needs docker")
+    golden_env = (Path(__file__).resolve().parent / "golden" / "frontend.env.L0").read_text()
+    assert "SPE_EVALS" not in golden_env  # the fixture this test leans on must stay evals-free
+    env_vars = dict(line.split("=", 1) for line in golden_env.splitlines()
+                     if line and not line.startswith("#"))
+    # env_file: entries (webui.env, chat-ui.env, agent.env, terminal.env) resolve relative to
+    # --project-directory and must exist for `config` to parse at all; a real build's Ansible
+    # writes them next to .env, so empty stand-ins here are enough -- their contents are not
+    # what this test is about.
+    for name in ("webui.env", "chat-ui.env", "agent.env", "terminal.env"):
+        (tmp_path / name).write_text("")
+    result = subprocess.run(
+        ["docker", "compose", "-f", str(INSTANCE / "compose.yml"), "--project-directory", str(tmp_path),
+         "config", "-q"],
+        env={**os.environ, **env_vars}, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 # --- (b) the proxy, against promptfoo 0.125.1's own routes -----------------------------------
 
 # Extracted from node_modules/promptfoo/dist/src/server/index.js (promptfoo 0.125.1, a single
@@ -127,7 +156,9 @@ ROUTE_PATTERNS = (
 )
 
 MOUNT_RE = re.compile(r'app\.use\("([^"]+)",\s*(\w+)\)')
-ROUTE_RE = re.compile(r'\b(\w+)\.(get|post|put|patch|delete)\(\s*"([^"]+)"')
+# Every Express Router method (fix round 1, Minor 6), not just the five 0.125.1 happens to use:
+# `all`, `head` and `options` register a route too (a future version could add one).
+ROUTE_RE = re.compile(r'\b(\w+)\.(get|post|put|patch|delete|head|options|all)\(\s*"([^"]+)"')
 
 
 def extract_routes(text: str) -> set[tuple[str, str]]:
@@ -158,7 +189,6 @@ def concretize(path: str) -> str:
 GET_ROUTES = [concretize(path) for method, path in ROUTE_PATTERNS if method == "GET"]
 NON_GET_ROUTES = [(method, concretize(path)) for method, path in ROUTE_PATTERNS if method != "GET"]
 
-DOCKER = shutil.which("docker")
 pytestmark_proxy = pytest.mark.skipif(DOCKER is None, reason="needs docker")
 NGINX_IMAGE = "nginx:1.29-alpine"
 # A stub upstream that answers 200 to any method and path, pinned by tag; already used to check
@@ -204,12 +234,29 @@ def proxy():
         subprocess.run(["docker", "rm", "-f", nginx_name, stub_name], capture_output=True, text=True)
 
 
-def status(base: str, method: str, path: str) -> int:
-    req = urllib.request.Request(base + path, method=method)
+def request(base: str, method: str, path: str, headers: dict | None = None) -> tuple[int, str]:
+    req = urllib.request.Request(base + path, method=method, headers=headers or {})
     try:
-        return urllib.request.urlopen(req, timeout=5).status
+        resp = urllib.request.urlopen(req, timeout=5)
+        return resp.status, resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
-        return e.code
+        return e.code, e.read().decode("utf-8", "replace")
+
+
+def status(base: str, method: str, path: str) -> int:
+    return request(base, method, path)[0]
+
+
+def upstream_path(body: str) -> str | None:
+    """traefik/whoami echoes the request line it actually received as the first word pair of
+    its body: the path nginx forwarded, however the client phrased the one it sent (fix round
+    1, Important 2 -- the whole point of these bypass tests is to see this, not just the
+    status, since the always-200 stub alone cannot show a mismatch)."""
+    for line in body.splitlines():
+        parts = line.split(" ")
+        if len(parts) >= 2 and parts[0] in ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"):
+            return parts[1]
+    return None
 
 
 @pytestmark_proxy
@@ -230,10 +277,51 @@ def test_head_is_let_through(proxy):
 
 
 @pytestmark_proxy
+def test_socket_io_polling_get_handshake_is_let_through(proxy):
+    code, body = request(proxy, "GET", "/socket.io/?EIO=4&transport=polling")
+    assert code == 200 and upstream_path(body) == "/socket.io/?EIO=4&transport=polling"
+
+
+@pytestmark_proxy
 def test_socket_io_polling_post_is_let_through(proxy):
-    assert status(proxy, "POST", "/socket.io/?EIO=4&transport=polling") == 200
+    code, body = request(proxy, "POST", "/socket.io/?EIO=4&transport=polling")
+    assert code == 200 and upstream_path(body) == "/socket.io/?EIO=4&transport=polling"
+
+
+@pytestmark_proxy
+def test_socket_io_websocket_upgrade_get_is_let_through(proxy):
+    code, body = request(proxy, "GET", "/socket.io/?EIO=4&transport=websocket",
+                          headers={"Connection": "Upgrade", "Upgrade": "websocket"})
+    assert code == 200 and upstream_path(body) == "/socket.io/?EIO=4&transport=websocket"
+    assert "Connection: upgrade" in body
 
 
 @pytestmark_proxy
 def test_socket_io_still_refuses_every_other_method(proxy):
     assert status(proxy, "DELETE", "/socket.io/") == 403
+
+
+# Fix round 1, Important 2: nginx picks a location (and so which methods it allows) from the
+# decoded, dot-segment-resolved URI, but `proxy_pass http://upstream;` with no URI forwards the
+# client's raw, undecoded one -- so a request that *normalizes* to exactly /socket.io/ (where
+# POST is allowed) could, forwarded raw, dispatch to one of promptfoo's own param routes
+# instead (e.g. redteamRouter's "/:taskId", whose param swallows a traversal). Forwarding
+# $uri$is_args$args (nginx.conf) closes this: whatever path nginx decided on is exactly what
+# reaches promptfoo, so each case below must either be refused outright or land only on the
+# literal, harmless /socket.io/ -- never anywhere else.
+BYPASS_CASES = [
+    ("POST", "/api/redteam/..%2F..%2Fsocket.io%2F", None),
+    ("POST", "/socket.io/../api/eval/job", None),
+    ("POST", "//socket.io/", None),
+    ("POST", "/socket.io/%2E%2E/api/eval/job", None),
+    ("POST", "/api/eval/job", {"X-HTTP-Method-Override": "GET"}),
+]
+
+
+@pytestmark_proxy
+@pytest.mark.parametrize("method,path,headers", BYPASS_CASES,
+                          ids=["redteam-encoded-traversal", "socket-io-dotdot", "double-slash",
+                               "socket-io-encoded-dotdot", "method-override-header"])
+def test_encoded_path_bypasses_are_refused_or_land_only_on_socket_io(proxy, method, path, headers):
+    code, body = request(proxy, method, path, headers)
+    assert code == 403 or upstream_path(body) == "/socket.io/"

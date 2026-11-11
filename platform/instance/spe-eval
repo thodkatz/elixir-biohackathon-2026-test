@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """`spe-eval`: the agent-friendly command line over `spe_eval.py` (experiments spec part 03,
 `docs/specs/2026-11-10-experiments-design/03-evaluation-in-workspace.md`, and part 07's command
-table). This slice has `arm`, `run` (with `--detach`), `status`, `wait` and `runs`; `new`, `test`,
-`results` and `pr-body` are a later slice's and are not stubbed here.
+table). This slice adds `new` and `test` to the previous slice's `arm`, `run` (with `--detach`),
+`status`, `wait` and `runs`; `results` and `pr-body` are a later slice's and are not stubbed here.
 
 Every command is non-interactive, prints no secrets, and exits 0 on success, 1 when the thing it
-checked failed (a refused gate, a failed run, a timed-out wait), 2 on a usage or configuration
-error (also where a library call raises a plain `ValueError`, e.g. an unknown arm or injection id:
-task 3 review, minor 2).
+checked failed (a refused gate, a failed run, a timed-out wait, a failing test or checker problem),
+2 on a usage or configuration error (also where a library call raises a plain `ValueError`, e.g. an
+unknown arm or injection id: task 3 review, minor 2).
 
-External processes, all resolved on `$PATH` except `run.sh` (never installed on it; called at its
-path under the experiment's own repository clone, like `suite_config`'s `agent.yaml`):
+External processes, all resolved on `$PATH` except `run.sh` and `check_experiment.py` (never
+installed on it; called at their path under the experiment's own repository clone, like
+`suite_config`'s `agent.yaml`):
 
     - `spe-apply` (bash, next to this script): `arm` and `run` apply each arm with
       `spe-apply all -e @<vars file>`, passing their own lock token as `SPE_EVAL_LOCK` so
@@ -29,6 +30,14 @@ path under the experiment's own repository clone, like `suite_config`'s `agent.y
       validates the same way `run` does and does not return until the child holds the lock (or a
       bounded wait for that gives up), so a `wait` right after never sees "no run in progress" for
       a run that is in fact starting (task 4 review, Important 3).
+    - `uv` (`test`, offline): `uv run --group dev pytest -q` in `<repo_root>/platform/promptfoo-evals`,
+      the same command the workspace's `spe_eval` Ansible role installs `uv` to run (`uv sync
+      --group dev` there, at creation); without `uv` on `$PATH`, falls back to `python3 -m pytest
+      -q`, failing with a clear exit-2 message if that has no `pytest` either, rather than a bare
+      traceback.
+    - `<repo_root>/check_experiment.py` (`test`, offline): `[<name>]`, the build's own experiment
+      (`instances/local.yml`'s `spe_experiment`) if this is a `spe-experiments` build, else every
+      experiment (not a build at all, e.g. a plain development checkout).
 
 SIGTERM/SIGINT during `run` (one `_StopState` per call, installed for the whole of `cmd_run`):
 forwarded to whichever external process is currently running (task 4 review, Important 2), and the
@@ -40,6 +49,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -53,17 +63,20 @@ sys.path.insert(0, str(_HERE.parent))
 import spe_eval  # noqa: E402
 
 COMMAND_TABLE = """\
-How to run an experiment (07-agent-friendly.md): `arm` to try a build by hand, `run` to measure
-every arm, `status`/`wait` to watch a run, `runs` to list past ones. Every command is
-non-interactive, prints no secrets, and exits 0 on success, 1 when the thing checked failed (a
-refused gate, a failed run), 2 on a usage or configuration error.
+How to run an experiment (07-agent-friendly.md): `new` to write a skeleton, `test` for the offline
+checks, `arm` to try a build by hand, `run` to measure every arm, `status`/`wait` to watch a run,
+`runs` to list past ones. Every command is non-interactive, prints no secrets, and exits 0 on
+success, 1 when the thing checked failed (a refused gate, a failed run, a failing test or checker
+problem), 2 on a usage or configuration error.
 
-| Step  | Command                                       | For an agent |
-|-------|------------------------------------------------|--------------|
-| Try   | spe-eval arm [<name>] baseline\\|mitigated      | applies one arm and exits when the stack answers |
-| Run   | spe-eval run [<name>] [--repeat N] [--detach]  | --detach starts the run in the background (a user systemd unit) and returns at once with its id; the agent's own command timeouts never cut a run short |
-| Watch | spe-eval status [--json]                       | the lock, the run id, arm, test k of n, last error; spe-eval wait [--timeout S] blocks until the run ends or the timeout passes, for agents that can wait in bounded steps |
-| List  | spe-eval runs [--json]                         | every kept run, newest first: id, experiment, mitigation sets, model, repeat, how it ended |
+| Step  | Command                                                                | For an agent |
+|-------|-------------------------------------------------------------------------|--------------|
+| Start | spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--injection <surface>] [--from <experiment>] | writes every slot's file with TODOs (01-experiment-model.md): the experiment, its mitigation and switch, its own test, and, when new, a threat or path file; with --injection a fixtures.json entry and payload; with --path, tests prefilled from the catalogue |
+| Test  | spe-eval test                                                          | offline, seconds: the evaluations' unit tests, then check_experiment.py (the build's own experiment, or every one) |
+| Try   | spe-eval arm [<name>] baseline\\|mitigated                               | applies one arm and exits when the stack answers |
+| Run   | spe-eval run [<name>] [--repeat N] [--detach]                         | --detach starts the run in the background (a user systemd unit) and returns at once with its id; the agent's own command timeouts never cut a run short |
+| Watch | spe-eval status [--json]                                              | the lock, the run id, arm, test k of n, last error; spe-eval wait [--timeout S] blocks until the run ends or the timeout passes, for agents that can wait in bounded steps |
+| List  | spe-eval runs [--json]                                                 | every kept run, newest first: id, experiment, mitigation sets, model, repeat, how it ended |
 """
 
 
@@ -179,6 +192,92 @@ def _wait_for_stack(state: _StopState, timeout: float | None = None, interval: f
             return False
         time.sleep(interval)
     return False
+
+
+# --- new (07-agent-friendly.md, *Start*) ------------------------------------------------------
+
+def cmd_new(ns: argparse.Namespace) -> int:
+    repo_root = spe_eval.repo_dir()
+    written = spe_eval.new_experiment(
+        repo_root, ns.name, threat=ns.threat, path=ns.path, injection=ns.injection, from_name=ns.from_name,
+    )
+    print(f"spe-eval new {ns.name}: wrote")
+    for path in written:
+        print(f"  {path}")
+    print(
+        "Fill in every TODO (check_experiment.py names each one); delete a slot this idea does "
+        "not need -- for an attack only, delete the mitigation file above, its spe_mitigate_* "
+        "switch in group_vars/all.yml, and set mitigation: null in the experiment file."
+    )
+    print(f"Add a line for {ns.name} to experiments/README.md once it is ready.")
+    print(f"Next: spe-eval test, or python3 check_experiment.py {ns.name}")
+    return 0
+
+
+# --- test (07-agent-friendly.md, *Test offline*) ----------------------------------------------
+
+def _pytest_argv() -> list[str]:
+    """`uv run --group dev pytest -q`, the way the `spe_eval` Ansible role itself runs these
+    tests (it installs `uv` to `/usr/local/bin` and runs `uv sync --group dev` there at creation);
+    `python3 -m pytest -q` when `uv` is not on `$PATH` (e.g. a plain development checkout)."""
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "run", "--group", "dev", "pytest", "-q"]
+    return [sys.executable, "-m", "pytest", "-q"]
+
+
+def _run_pytest(repo_root: Path) -> int:
+    promptfoo_dir = repo_root / "platform" / "promptfoo-evals"
+    argv = _pytest_argv()
+    try:
+        result = subprocess.run(argv, cwd=promptfoo_dir, capture_output=True, text=True)
+    except OSError as e:
+        _print_err(f"could not run {' '.join(argv)}: {e}")
+        return 2
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    if argv[0] != "uv" and "No module named pytest" in result.stderr:
+        _print_err(
+            "no `uv` on PATH and no pytest module installed here; install pytest "
+            "(`uv sync --group dev` in platform/promptfoo-evals) and retry"
+        )
+        return 2
+    if result.returncode not in (0, 1):
+        _print_err(f"{' '.join(argv)} exited {result.returncode} (not a pass/fail pytest run)")
+        return 2
+    return result.returncode
+
+
+def _experiment_to_check(repo_root: Path) -> str | None:
+    """The build's own experiment (`instances/local.yml`'s `spe_experiment`), or `None` to check
+    every experiment: this is not a `spe-experiments` build at all (e.g. a plain development
+    checkout running `spe-eval test` offline)."""
+    try:
+        local_vars = spe_eval.load_local_vars(repo_root)
+        return spe_eval.default_experiment_name(local_vars)
+    except spe_eval.ConfigError:
+        return None
+
+
+def cmd_test(ns: argparse.Namespace) -> int:
+    repo_root = spe_eval.repo_dir()
+    pytest_rc = _run_pytest(repo_root)
+    if pytest_rc == 2:
+        return 2
+
+    name = _experiment_to_check(repo_root)
+    check_argv = [sys.executable, str(repo_root / "check_experiment.py")] + ([name] if name else [])
+    try:
+        check_result = subprocess.run(check_argv, cwd=repo_root, capture_output=True, text=True)
+    except OSError as e:
+        _print_err(f"could not run {' '.join(check_argv)}: {e}")
+        return 2
+    sys.stdout.write(check_result.stdout)
+    sys.stderr.write(check_result.stderr)
+    if check_result.returncode == 2:
+        return 2
+
+    return 1 if (pytest_rc != 0 or check_result.returncode != 0) else 0
 
 
 # --- arm -------------------------------------------------------------------------------------
@@ -553,6 +652,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="spe-eval", description="Measure an experiment on this workspace.",
                                       epilog=COMMAND_TABLE, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command")
+
+    p_new = sub.add_parser("new", help="write every slot of a new experiment's skeleton, with TODOs")
+    p_new.add_argument("name")
+    p_new.add_argument("--threat", help="a threats/TM-NNN id, existing or new")
+    p_new.add_argument("--path", help="a paths/P<n> id, existing or new")
+    p_new.add_argument("--injection", metavar="SURFACE", help="plant a new injection on this surface")
+    p_new.add_argument("--from", dest="from_name", metavar="EXPERIMENT",
+                        help="base this experiment's base mitigations on <EXPERIMENT>'s base plus its own mitigation")
+    p_new.set_defaults(handler=cmd_new)
+
+    p_test = sub.add_parser("test", help="offline: the evaluations' unit tests, then check_experiment.py")
+    p_test.set_defaults(handler=cmd_test)
 
     p_arm = sub.add_parser("arm", help="apply one arm and wait for the stack to answer")
     p_arm.add_argument("args", nargs="+", metavar="[<name>] baseline|mitigated")

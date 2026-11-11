@@ -176,10 +176,14 @@ def check_build_matches(experiment: dict, local_vars: dict, repo_root: Path | No
 # --- arms (decision 9) ----------------------------------------------------------------------
 
 def load_mitigations(repo_root: Path | None = None) -> dict[str, dict]:
-    """`mitigations/<id>.yml`, by id, skipping `status: planned` ones (no `on`/`off` to apply)."""
+    """`mitigations/<id>.yml`, by id, skipping `status: planned` ones (no `on`/`off` to apply) and
+    `TEMPLATE.yml` (a copy-and-fill-in document with no `on`/`off` of its own, not a mitigation to
+    apply; check_experiment.py and validate.py exclude it from the catalog the same way)."""
     repo_root = repo_root or repo_dir()
     mitigations: dict[str, dict] = {}
     for path in sorted((repo_root / "mitigations").glob("*.yml")):
+        if path.stem == "TEMPLATE":
+            continue
         meta = yaml.safe_load(path.read_text())
         if not isinstance(meta, dict) or meta.get("status") == "planned":
             continue
@@ -511,3 +515,346 @@ def read_progress(path: Path, repeat: int = 1) -> dict:
                 if record.get("error"):
                     last_error = record["error"]
     return {"total": (total * repeat) if total is not None else None, "done": done, "last_error": last_error}
+
+
+# --- spe-eval new (07-agent-friendly.md, *Start*) ---------------------------------------------
+#
+# Writes every slot of a new experiment's skeleton, with `TODO`s, so `check_experiment.py` refuses
+# it until they are filled or the slot's own file is deleted (05-contribution.md, *A skeleton, not
+# a rulebook*): the experiment file, its mitigation (`mitigations/<name>.yml`, switch
+# `spe_mitigate_<name_>`, default off in `group_vars/all.yml`), its own test
+# (`tests/experiments/<name>.yaml`), and -- when `--threat`/`--path` name an id not in the catalog
+# yet -- that threat's or path's file from `TEMPLATE.md`. With `--injection`, also a fixtures.json
+# entry, its payload file, and switch `spe_inject_<name_>` default off.
+#
+# Every refusal (`ConfigError`: a bad or existing name, an unknown `--from` or `--injection`
+# surface) is checked before anything is written, so a refused `new` never leaves a partial
+# skeleton behind. `group_vars/all.yml` and `fixtures.json` are edited by text, not a full re-dump,
+# so an existing entry's formatting is untouched (`git diff` shows only what was added).
+
+NEW_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+_THREAT_ID_PATTERN = re.compile(r"^TM-\d{3}$")
+_PATH_ID_PATTERN = re.compile(r"^P\d+$")
+
+
+def valid_new_name(name: str) -> bool:
+    """A name `spe-eval new` accepts: lowercase kebab-case (so it is also a valid mitigation id
+    and, with `-` as `_`, a valid Ansible switch suffix), and not `template` (`experiments/
+    TEMPLATE.yml`/`mitigations/TEMPLATE.yml` are copy-and-fill-in documents, excluded from the
+    catalog by every reader -- never a real experiment's name, whatever its case)."""
+    return bool(NEW_NAME_PATTERN.match(name)) and name.lower() != "template"
+
+
+def _switch(prefix: str, name: str) -> str:
+    """`spe_<prefix>_<name with - as _>` (07-agent-friendly.md, *Conventions*: "names derive from
+    one name")."""
+    return f"spe_{prefix}_{name.replace('-', '_')}"
+
+
+def mitigation_text(name: str, switch: str) -> str:
+    """`mitigations/<name>.yml`'s skeleton (see `mitigations/TEMPLATE.yml` for what each key
+    means): `id`/`on`/`off` are already filled in from `name`; every other slot is a literal
+    `TODO` for the participant to fill, or -- for an attack-only idea -- to delete, along with
+    this file and the switch's own line in `group_vars/all.yml` (05-contribution.md, *A skeleton*).
+    """
+    return (
+        f"id: {name}\n"
+        "name: TODO\n"
+        "description: >\n"
+        "  TODO: what this mitigation changes, and where, when it is on.\n"
+        "closes: []  # TODO: path ids (P<n>, paths/) this closes when on; stays [] for a control "
+        "that narrows (then list its probes below)\n"
+        f'"on": {{{switch}: true}}\n'
+        f'"off": {{{switch}: false}}\n'
+        "requires: []  # optional: mitigation ids that must also be on\n"
+        "conflicts: []  # optional: mitigation ids that must not be on\n"
+        "probes: []  # optional: controls-suite probes (platform/promptfoo-evals/probes/*.sh) it closes\n"
+    )
+
+
+def threat_file_text(threat_id: str) -> str:
+    """`threats/<threat_id>-<slug>.md`'s skeleton, the shape of `threats/TEMPLATE.md` with every
+    free-text slot a literal `TODO` (including the controlled-vocabulary fields, so this threat
+    stays out of the catalog -- `validate.py`'s own check, not a `TODO`-scan -- until real values
+    replace them)."""
+    return (
+        "---\n"
+        f"id: {threat_id}\n"
+        "name: TODO\n"
+        "description: >\n"
+        "  TODO: three to five sentences -- what the agent does or is made to do, the mechanism "
+        "that turns it into harm, and what in this stack makes it possible.\n"
+        "status: TODO\n"
+        "entry-points:\n"
+        "  - TODO\n"
+        "assets:\n"
+        "  - TODO\n"
+        "stride:\n"
+        "  - TODO\n"
+        "---\n"
+        "\n"
+        f"# {threat_id}: TODO\n"
+        "\n"
+        "## Attack Scenarios\n"
+        "\n"
+        "1. TODO\n"
+        "\n"
+        "## Preconditions\n"
+        "\n"
+        "- TODO\n"
+        "\n"
+        "## Mitigations\n"
+        "\n"
+        "### Preventive\n"
+        "\n"
+        "- TODO\n"
+        "\n"
+        "### Detective\n"
+        "\n"
+        "- TODO\n"
+        "\n"
+        "### Responsive\n"
+        "\n"
+        "- TODO\n"
+    )
+
+
+def path_file_text(path_id: str) -> str:
+    """`paths/<path_id>-<slug>.md`'s skeleton, the shape of `paths/TEMPLATE.md`; `reaches: [TODO]`
+    is not a real canary type, so this path stays out of the catalog until it is."""
+    return (
+        "---\n"
+        f"id: {path_id}\n"
+        "name: TODO\n"
+        "description: >\n"
+        "  TODO: one or two sentences -- the concrete route through the stack that reaches the canaries below.\n"
+        "reaches:\n"
+        "  - TODO\n"
+        "---\n"
+        "\n"
+        f"# {path_id}: TODO\n"
+        "\n"
+        "## Route\n"
+        "\n"
+        "TODO: the steps the agent (or an attacker through it) takes, with the real endpoints of this stack.\n"
+        "\n"
+        "## Shown by\n"
+        "\n"
+        "TODO: the controls probe or agent test that demonstrates this path open.\n"
+    )
+
+
+def test_file_text(name: str, *, threat: str | None, path: str | None, closed_by: str | None) -> str:
+    """`tests/experiments/<name>.yaml`'s skeleton: one labelled test (07-agent-friendly.md,
+    *Start*). `metadata.group` is this file's own stem, always a valid label once the file exists
+    (01-experiment-model.md, *Tests*: group values are the test files' stems)."""
+    data = [{
+        "description": "TODO: what this test does.",
+        "vars": {"message": "TODO: the prompt that attempts the attack, or exercises the mitigation."},
+        "metadata": {"id": name, "group": name, "threat": threat, "path": path, "closed_by": closed_by},
+        "assert": [],
+    }]
+    header = (
+        "# Written by `spe-eval new` (07-agent-friendly.md, *Start*). Add at least one assertion "
+        "under `assert`\n"
+        "# (see platform/promptfoo-evals/tests/utility.yaml for examples), and fill in every "
+        "other TODO.\n"
+    )
+    return header + yaml.safe_dump(data, sort_keys=False)
+
+
+def experiment_text(name: str, *, threat: str, paths: list[str], mitigation: str | None, base: list[str],
+                     injections: list[str], tests: list[str], extra_parameters: dict | None = None,
+                     extra_top: dict | None = None) -> str:
+    """`experiments/<name>.yml`'s skeleton (see `experiments/TEMPLATE.yml` for what each key
+    means). `extra_parameters` and `extra_top` carry over a `--from` experiment's own form
+    parameters and `vars` (not mandated by the spec, but otherwise unusable on a workspace until
+    hand-filled); without `--from` they are empty and the participant fills `parameters` by hand.
+    """
+    parameters = {"experiment": name, "mitigations": list(base)}
+    parameters.update(extra_parameters or {})
+    data = {
+        "name": "TODO",
+        "description": "TODO: what this measures and why.",
+        "parameters": parameters,
+        "experiment": {
+            "threat": threat, "paths": list(paths), "mitigation": mitigation, "base": list(base),
+            "injections": list(injections), "tests": list(tests),
+        },
+    }
+    data.update(extra_top or {})
+    header = (
+        "# Written by `spe-eval new` (07-agent-friendly.md, *Start*); every TODO is a slot to "
+        "fill, or -- if\n"
+        "# this idea does not need it -- to delete along with its own file (05-contribution.md,\n"
+        "# *A skeleton, not a rulebook*: an attack-only idea deletes mitigations/<name>.yml and "
+        "its\n"
+        "# switch in group_vars/all.yml, and sets mitigation: null here).\n"
+        "# See experiments/TEMPLATE.yml for what each key means.\n"
+    )
+    return header + yaml.safe_dump(data, sort_keys=False)
+
+
+def _append_switch(group_vars_path: Path, switch: str, comment: str, marker: str) -> None:
+    """Appends `<switch>: false  # <comment>` to `group_vars/all.yml`, as plain text (never a full
+    YAML re-dump, so every existing line is untouched): a no-op if the switch is already there
+    (re-running `new` after a partial failure), and `marker`'s own banner comment is added once,
+    the first time any contributed switch is appended."""
+    text = group_vars_path.read_text()
+    if re.search(rf"^{re.escape(switch)}:", text, re.MULTILINE):
+        return
+    if not text.endswith("\n"):
+        text += "\n"
+    if marker not in text:
+        text += f"\n{marker}\n"
+    text += f"{switch}: false  # {comment}\n"
+    group_vars_path.write_text(text)
+
+
+def _append_fixture(fixtures_path: Path, entry: dict) -> None:
+    """Appends one `fixtures.json` entry by text, not a full `json.dumps` re-dump (the existing
+    entries' own formatting -- e.g. an inline `select` -- would otherwise be rewritten): finds the
+    fixtures array's closing `]`, right before the file's closing `}`, and inserts `entry` before
+    it, indented to match the existing entries (`git diff` then shows only the added entry)."""
+    text = fixtures_path.read_text()
+    closing = "\n  ]\n}"
+    idx = text.rindex(closing)
+    body = "\n".join(
+        f"      {json.dumps(k)}: {json.dumps(v)}" + ("," if i < len(entry) - 1 else "")
+        for i, (k, v) in enumerate(entry.items())
+    )
+    new_entry = f"    {{\n{body}\n    }}"
+    new_text = text[:idx] + ",\n" + new_entry + text[idx:]
+    json.loads(new_text)  # never leave fixtures.json broken: re-parse before writing it back
+    fixtures_path.write_text(new_text)
+
+
+def tests_naming_path(repo_root: Path, path_id: str) -> list[str]:
+    """Existing test ids (`platform/promptfoo-evals/tests/*.yaml` and `tests/experiments/*.yaml`)
+    whose `metadata.path` is `path_id`: the `--path` prefill's `tests` half (07-agent-friendly.md,
+    *Start*; "Decisions for you" on this task -- fixtures.json has no injection-to-path link to
+    read, so only `tests` is prefilled, not `injections`)."""
+    tests_dir = repo_root / "platform" / "promptfoo-evals" / "tests"
+    ids: set[str] = set()
+    files = sorted(tests_dir.glob("*.yaml")) + sorted((tests_dir / "experiments").glob("*.yaml"))
+    for p in files:
+        try:
+            cases = yaml.safe_load(p.read_text())
+        except (yaml.YAMLError, UnicodeDecodeError):
+            continue
+        if not isinstance(cases, list):
+            continue
+        for case in cases:
+            meta = case.get("metadata") if isinstance(case, dict) else None
+            if isinstance(meta, dict) and meta.get("path") == path_id and isinstance(meta.get("id"), str):
+                ids.add(meta["id"])
+    return sorted(ids)
+
+
+def new_experiment(repo_root: Path, name: str, *, threat: str | None = None, path: str | None = None,
+                    injection: str | None = None, from_name: str | None = None) -> list[Path]:
+    """Writes every slot of `name`'s skeleton under `repo_root` (07-agent-friendly.md, *Start*),
+    and returns the paths written, in the order printed. Raises `ConfigError` (CLI exit 2) for an
+    existing name, a bad name, or an unknown `--from` experiment or `--injection` surface --
+    checked up front, so a refusal never leaves a partial skeleton behind."""
+    if not valid_new_name(name):
+        raise ConfigError(f"{name!r}: not a valid experiment name (lowercase kebab-case, e.g. 'trs-guard')")
+
+    exp_path = repo_root / "experiments" / f"{name}.yml"
+    if exp_path.exists():
+        raise ConfigError(f"{exp_path}: an experiment named {name!r} already exists")
+
+    base: list[str] = []
+    extra_parameters: dict = {}
+    extra_top: dict = {}
+    if from_name is not None:
+        from_path = repo_root / "experiments" / f"{from_name}.yml"
+        if from_name.upper() == "TEMPLATE" or not from_path.is_file():
+            raise ConfigError(f"--from {from_name!r}: no such experiment ('{from_path}' not found)")
+        from_data = yaml.safe_load(from_path.read_text())
+        if not isinstance(from_data, dict):
+            raise ConfigError(f"{from_path}: not a YAML mapping")
+        from_experiment = from_data.get("experiment") or {}
+        from_mitigation = from_experiment.get("mitigation")
+        base = list(from_experiment.get("base") or []) + ([from_mitigation] if from_mitigation else [])
+        from_parameters = from_data.get("parameters") or {}
+        if isinstance(from_parameters, dict):
+            for key in ("samples", "tiers", "workflows", "canaries", "flavor", "smoke_test"):
+                if key in from_parameters:
+                    extra_parameters[key] = from_parameters[key]
+        if "vars" in from_data:
+            extra_top["vars"] = from_data["vars"]
+
+    if threat is not None and not _THREAT_ID_PATTERN.match(threat):
+        raise ConfigError(f"{threat!r}: not a threat id (expected TM-NNN)")
+    if path is not None and not _PATH_ID_PATTERN.match(path):
+        raise ConfigError(f"{path!r}: not a path id (expected P<n>)")
+
+    surfaces_path = repo_root / "platform" / "ansible" / "catalog" / "injections" / "surfaces.json"
+    if injection is not None:
+        try:
+            surfaces_data = json.loads(surfaces_path.read_text())
+        except OSError as e:
+            raise ConfigError(f"{surfaces_path}: {e.strerror or e}") from None
+        surfaces = surfaces_data.get("surfaces") if isinstance(surfaces_data, dict) else None
+        if not isinstance(surfaces, dict) or injection not in surfaces:
+            known = ", ".join(sorted(surfaces)) if isinstance(surfaces, dict) else ""
+            raise ConfigError(f"{injection!r}: not a known injection surface ({known})")
+
+    # Every refusal above is checked; nothing is written until here.
+    written: list[Path] = []
+
+    threat_id = threat if threat is not None else "TODO"
+    if threat is not None and not any((repo_root / "threats").glob(f"{threat}-*.md")):
+        threat_path = repo_root / "threats" / f"{threat}-{name}.md"
+        threat_path.write_text(threat_file_text(threat))
+        written.append(threat_path)
+
+    path_ids = [path] if path is not None else ["TODO"]
+    if path is not None and not any((repo_root / "paths").glob(f"{path}-*.md")):
+        path_path = repo_root / "paths" / f"{path}-{name}.md"
+        path_path.write_text(path_file_text(path))
+        written.append(path_path)
+
+    group_vars_path = repo_root / "platform" / "ansible" / "inventory" / "group_vars" / "all.yml"
+
+    switch = _switch("mitigate", name)
+    mitigation_path = repo_root / "mitigations" / f"{name}.yml"
+    mitigation_path.write_text(mitigation_text(name, switch))
+    written.append(mitigation_path)
+    _append_switch(group_vars_path, switch, f"mitigations/{name}.yml: TODO",
+                   "# --- contributed mitigations' own switches (spe-eval new; default off) ---")
+
+    injections: list[str] = []
+    if injection is not None:
+        inj_switch = _switch("inject", name)
+        payload_path = repo_root / "platform" / "ansible" / "catalog" / "injections" / f"{name}.txt"
+        payload_path.write_text(
+            f"TODO: a payload for the {injection} surface. Name its target file explicitly, and "
+            "ask for something that leads to disclosing the canary inside it.\n"
+        )
+        written.append(payload_path)
+        fixtures_path = repo_root / "platform" / "ansible" / "catalog" / "injections" / "fixtures.json"
+        _append_fixture(fixtures_path, {
+            "id": name, "switch": inj_switch, "surface": injection, "payload": f"{name}.txt",
+            "select": {}, "target_file": "TODO", "canary_file": "TODO", "action": "TODO", "disclosure": "TODO",
+        })
+        written.append(fixtures_path)
+        _append_switch(group_vars_path, inj_switch, f"{name}.txt on the {injection} surface",
+                       "# --- contributed injections' own switches (spe-eval new --injection; default off) ---")
+        injections = [name]
+
+    tests = [name]
+    if path is not None:
+        tests += [tid for tid in tests_naming_path(repo_root, path) if tid != name]
+    test_path = repo_root / "platform" / "promptfoo-evals" / "tests" / "experiments" / f"{name}.yaml"
+    test_path.write_text(test_file_text(name, threat=threat, path=path, closed_by=name))
+    written.append(test_path)
+
+    exp_path.write_text(experiment_text(
+        name, threat=threat_id, paths=path_ids, mitigation=name, base=base, injections=injections,
+        tests=tests, extra_parameters=extra_parameters, extra_top=extra_top,
+    ))
+    written.append(exp_path)
+
+    return written

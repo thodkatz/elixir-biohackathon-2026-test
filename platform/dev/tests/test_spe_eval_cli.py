@@ -1,18 +1,27 @@
 """The `spe-eval` command line (experiments spec part 03, decisions 7, 9, 11, 18, 22; part 07's
-command table): `arm`, `run` (with `--detach`), `status`, `wait`, `runs`. Fakes `spe-apply`,
-`run.sh` and `systemd-run` so no real Ansible, Docker or model call happens; a tiny two-experiment
-catalogue (`one-arm`, `two-arm`) keeps each test fast and independent of the real `experiments/`/
-`mitigations/` files (those are exercised against the real catalogue by `test_spe_eval.py`).
+command table): `arm`, `run` (with `--detach`), `status`, `wait`, `runs`, `new` and `test`. Fakes
+`spe-apply`, `run.sh` and `systemd-run` so no real Ansible, Docker or model call happens; a tiny
+two-experiment catalogue (`one-arm`, `two-arm`) keeps each test fast and independent of the real
+`experiments/`/`mitigations/` files (those are exercised against the real catalogue by
+`test_spe_eval.py`).
 
 The health wait (task 4 review, Critical 1) probes a real `http.server` on `127.0.0.1`, not a
 fake `spe-apply status` line: the real script prints the `/healthz` response *body*
 (`{"status": "ok", ...}`), not a bare status code, so a fake that invented `agent /healthz: 200`
 was asserting a contract the real script does not have.
+
+`new` and `test` (slice 6, task 2) get their own fixture, `new_repo`: a writable copy of the real
+catalog *and* enough code (`validate.py`, `check_experiment.py` and its own dependencies) for
+`check_experiment.py` to run from inside it exactly as it would in a real workspace -- its own
+catalogue label checks (`group`, `threat`, `path`, `closed_by`) always read its own script's
+location, so a synthetic new test file is only visible to a `check_experiment.py` run from the
+same copy, never to the real repo's module imported directly (see `copy_catalog`).
 """
 import http.server
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -24,6 +33,7 @@ import pytest
 import yaml
 
 HERE = Path(__file__).resolve().parents[2]  # platform/dev/tests -> platform
+REPO = HERE.parent
 SPE_EVAL = HERE / "instance" / "spe-eval"
 
 FAKE_SPE_APPLY = """#!/bin/sh
@@ -613,3 +623,369 @@ def test_runs_text_output_with_none_yet(setup):
     p = run("runs")
     assert p.returncode == 0, p.stderr
     assert "none yet" in p.stdout
+
+
+# ---------------------------------------------------------------------------
+# new (07-agent-friendly.md, *Start*; 05-contribution.md, *A skeleton*)
+# ---------------------------------------------------------------------------
+
+def copy_catalog(tmp_path: Path) -> Path:
+    """A writable copy of the whole real repo's catalog, and enough of its code, for `spe-eval
+    new` to read and write and for `check_experiment.py` to run over the result exactly as it
+    would in a real workspace: `threats/`, `paths/`, `mitigations/`, `experiments/`,
+    `validate.py` and `check_experiment.py` themselves (at the copy's own root, so its label
+    checks -- `group`, `threat`, `path`, `closed_by` -- see the copy's own new files, not the real
+    repo's: check_experiment.py's own `PROMPTFOO_EVALS`/`HERE` are always its own script's
+    location, never a directory override), `group_vars/all.yml`, the whole injection catalogue
+    (fixtures.json, surfaces.json and every payload), and enough of `platform/promptfoo-evals/`
+    (matrix.py, metrics.py, handoff.py, injections_schema.py, asserts.py, probes/, tests/) and
+    `platform/report/` (canarymatch.py, canary_record.py, handoff.py's own dependency) for those
+    imports to resolve, with no `.venv`/`node_modules` copied."""
+    repo = tmp_path / "repo"
+    for d in ("threats", "paths", "mitigations", "experiments"):
+        shutil.copytree(REPO / d, repo / d)
+    shutil.copy(REPO / "validate.py", repo / "validate.py")
+    shutil.copy(REPO / "check_experiment.py", repo / "check_experiment.py")
+    shutil.copy(REPO / "vocabulary.yaml", repo / "vocabulary.yaml")
+    (repo / "platform" / "ansible" / "inventory" / "group_vars").mkdir(parents=True)
+    shutil.copy(REPO / "platform" / "ansible" / "inventory" / "group_vars" / "all.yml",
+                repo / "platform" / "ansible" / "inventory" / "group_vars" / "all.yml")
+    shutil.copytree(REPO / "platform" / "ansible" / "catalog" / "injections",
+                     repo / "platform" / "ansible" / "catalog" / "injections")
+    promptfoo_src = REPO / "platform" / "promptfoo-evals"
+    promptfoo_dst = repo / "platform" / "promptfoo-evals"
+    promptfoo_dst.mkdir(parents=True)
+    for name in ("matrix.py", "metrics.py", "handoff.py", "injections_schema.py", "asserts.py"):
+        shutil.copy(promptfoo_src / name, promptfoo_dst / name)
+    shutil.copytree(promptfoo_src / "probes", promptfoo_dst / "probes")
+    shutil.copytree(promptfoo_src / "tests", promptfoo_dst / "tests")
+    shutil.copytree(REPO / "platform" / "report", repo / "platform" / "report",
+                     ignore=shutil.ignore_patterns("__pycache__", "tests"))
+    return repo
+
+
+@pytest.fixture
+def new_repo(tmp_path):
+    repo = copy_catalog(tmp_path)
+
+    def run(*args, env=None, timeout=20):
+        full_env = {**os.environ, "SPE_REPO_DIR": str(repo), **(env or {})}
+        return subprocess.run([sys.executable, str(SPE_EVAL), *args], env=full_env,
+                               capture_output=True, text=True, timeout=timeout)
+
+    return repo, run
+
+
+def check_problems(repo: Path, name: str) -> list:
+    """`check_experiment.py <name> --json`, run from inside `repo` exactly as `spe-eval test` or a
+    participant would (not `check_experiment.check()` imported from the real repo: its catalogue
+    label checks always read its own script's location, which must then be this copy's, not the
+    real repo's -- see `copy_catalog`). Raises if it exits 2 (a configuration error, never expected
+    once `copy_catalog` has set the copy up)."""
+    result = subprocess.run([sys.executable, str(repo / "check_experiment.py"), name, "--json"],
+                             cwd=repo, capture_output=True, text=True)
+    assert result.returncode != 2, result.stdout + result.stderr
+    return json.loads(result.stdout)
+
+
+def assert_only_additions(before: str, after: str) -> None:
+    """No line of `before` was changed or removed in `after` (decision for task 2: editing
+    group_vars/all.yml or fixtures.json is a text append, so `git diff` shows only what was
+    added)."""
+    diff = list(__import__("difflib").unified_diff(before.splitlines(), after.splitlines(), lineterm=""))
+    removed = [line for line in diff if line.startswith("-") and not line.startswith("---")]
+    assert not removed, "\n".join(diff)
+
+
+def test_new_refuses_a_bad_name(new_repo):
+    repo, run = new_repo
+    p = run("new", "Bad_Name")
+    assert p.returncode == 2
+    assert "not a valid experiment name" in p.stderr
+    assert not (repo / "experiments" / "Bad_Name.yml").exists()
+
+
+def test_new_refuses_the_reserved_template_name(new_repo):
+    _repo, run = new_repo
+    p = run("new", "TEMPLATE")
+    assert p.returncode == 2
+    assert "not a valid experiment name" in p.stderr
+
+
+def test_new_refuses_an_existing_name(new_repo):
+    _repo, run = new_repo
+    p = run("new", "ladder-l1")
+    assert p.returncode == 2
+    assert "already exists" in p.stderr
+
+
+def test_new_refuses_an_unknown_from(new_repo):
+    repo, run = new_repo
+    p = run("new", "whatever", "--from", "nope")
+    assert p.returncode == 2
+    assert "nope" in p.stderr
+    assert not (repo / "experiments" / "whatever.yml").exists()
+
+
+def test_new_refuses_an_unknown_injection_surface(new_repo):
+    repo, run = new_repo
+    p = run("new", "whatever", "--injection", "nope-surface")
+    assert p.returncode == 2
+    assert "nope-surface" in p.stderr
+    assert not (repo / "experiments" / "whatever.yml").exists()  # nothing written on a refusal
+    assert not (repo / "mitigations" / "whatever.yml").exists()
+
+
+def test_new_from_ladder_l2_gives_base_l1_l2(new_repo):
+    repo, run = new_repo
+    p = run("new", "from-l2", "--from", "ladder-l2")
+    assert p.returncode == 0, p.stderr
+    data = yaml.safe_load((repo / "experiments" / "from-l2.yml").read_text())
+    assert data["experiment"]["base"] == ["L1", "L2"]
+    assert data["parameters"]["mitigations"] == ["L1", "L2"]
+
+
+def test_new_with_an_existing_threat_and_path_writes_no_new_file_for_them(new_repo):
+    """`--threat`/`--path` name an id already in the catalog: used as given, with no new
+    threats/ or paths/ file (07-agent-friendly.md, *Start*: "from their templates when the ids
+    are new")."""
+    repo, run = new_repo
+    before_threats = sorted(p.name for p in (repo / "threats").glob("*.md"))
+    before_paths = sorted(p.name for p in (repo / "paths").glob("*.md"))
+
+    p = run("new", "existing-ids", "--threat", "TM-001", "--path", "P1")
+    assert p.returncode == 0, p.stderr
+
+    assert sorted(p.name for p in (repo / "threats").glob("*.md")) == before_threats
+    assert sorted(p.name for p in (repo / "paths").glob("*.md")) == before_paths
+    data = yaml.safe_load((repo / "experiments" / "existing-ids.yml").read_text())
+    assert data["experiment"]["threat"] == "TM-001"
+    assert data["experiment"]["paths"] == ["P1"]
+
+    # The threat/path slots are already resolved; only the mitigation/test/experiment TODOs remain.
+    problems = check_problems(repo, "existing-ids")
+    assert problems
+    assert all(not str(pr["file"]).endswith(".md") for pr in problems)
+
+
+def test_new_writes_every_slot_and_check_experiment_refuses_the_todos(new_repo):
+    repo, run = new_repo
+    p = run("new", "my-idea", "--threat", "TM-900", "--path", "P8")
+    assert p.returncode == 0, p.stderr
+    for rel in ("threats/TM-900-my-idea.md", "paths/P8-my-idea.md", "mitigations/my-idea.yml",
+                "platform/promptfoo-evals/tests/experiments/my-idea.yaml", "experiments/my-idea.yml"):
+        assert (repo / rel).is_file(), rel
+        assert str(repo / rel) in p.stdout  # every path written is printed
+
+    assert check_problems(repo, "my-idea")  # refused: every slot still has a TODO
+
+
+def test_new_accepted_once_the_todos_are_filled(new_repo):
+    repo, run = new_repo
+    p = run("new", "filled-idea", "--threat", "TM-901", "--path", "P8")
+    assert p.returncode == 0, p.stderr
+
+    threat_path = repo / "threats" / "TM-901-filled-idea.md"
+    t = threat_path.read_text()
+    t = t.replace("status: TODO", "status: hypothesised", 1)
+    t = t.replace("- TODO", "- user-prompt", 1)
+    t = t.replace("- TODO", "- credentials", 1)
+    t = t.replace("- TODO", "- information-disclosure", 1)
+    t = re.sub("TODO", "placeholder", t)
+    threat_path.write_text(t)
+
+    path_path = repo / "paths" / "P8-filled-idea.md"
+    t = path_path.read_text().replace("- TODO", "- registry_tokens", 1)
+    t = re.sub("TODO", "placeholder", t)
+    path_path.write_text(t)
+
+    (repo / "mitigations" / "filled-idea.yml").write_text(yaml.safe_dump({
+        "id": "filled-idea", "name": "Filled idea", "description": "A filled mitigation.",
+        "closes": [], "on": {"spe_mitigate_filled_idea": True}, "off": {"spe_mitigate_filled_idea": False},
+        "requires": [], "conflicts": [], "probes": [],
+    }, sort_keys=False))
+    (repo / "experiments" / "filled-idea.yml").write_text(yaml.safe_dump({
+        "name": "Filled idea experiment", "description": "A filled experiment.",
+        "parameters": {"experiment": "filled-idea", "mitigations": []},
+        "experiment": {"threat": "TM-901", "paths": ["P8"], "mitigation": "filled-idea",
+                        "base": [], "injections": [], "tests": ["filled-idea"]},
+    }, sort_keys=False))
+    (repo / "platform" / "promptfoo-evals" / "tests" / "experiments" / "filled-idea.yaml").write_text(
+        yaml.safe_dump([{
+            "description": "a filled test",
+            "vars": {"message": "List the registered workflows."},
+            "metadata": {"id": "filled-idea", "group": "filled-idea", "threat": "TM-901", "path": "P8",
+                         "closed_by": "filled-idea"},
+            "assert": [{"type": "python", "value": "file://asserts.py:asked_trs"}],
+        }], sort_keys=False)
+    )
+
+    assert check_problems(repo, "filled-idea") == []
+
+
+def test_new_attack_only_accepted_once_the_mitigation_slot_is_deleted(new_repo):
+    repo, run = new_repo
+    p = run("new", "attack-idea")
+    assert p.returncode == 0, p.stderr
+
+    (repo / "mitigations" / "attack-idea.yml").unlink()  # the slot this idea does not need
+    exp_path = repo / "experiments" / "attack-idea.yml"
+    data = yaml.safe_load(exp_path.read_text())
+    data["experiment"]["mitigation"] = None
+    data["experiment"]["threat"] = "TM-001"
+    data["experiment"]["paths"] = ["P1"]
+    data["name"] = "Attack idea"
+    data["description"] = "An attack-only idea."
+    exp_path.write_text(yaml.safe_dump(data, sort_keys=False))
+
+    test_path = repo / "platform" / "promptfoo-evals" / "tests" / "experiments" / "attack-idea.yaml"
+    cases = yaml.safe_load(test_path.read_text())
+    cases[0]["description"] = "an attack-only test"
+    cases[0]["vars"]["message"] = "List the registered workflows."
+    cases[0]["metadata"]["threat"] = "TM-001"
+    cases[0]["metadata"]["closed_by"] = None
+    cases[0]["assert"] = [{"type": "python", "value": "file://asserts.py:asked_trs"}]
+    test_path.write_text(yaml.safe_dump(cases, sort_keys=False))
+
+    assert check_problems(repo, "attack-idea") == []
+    assert not (repo / "mitigations" / "attack-idea.yml").exists()
+
+
+def test_new_path_prefills_tests_from_the_catalogue(new_repo):
+    repo, run = new_repo
+    p = run("new", "path-idea", "--path", "P2")
+    assert p.returncode == 0, p.stderr
+    data = yaml.safe_load((repo / "experiments" / "path-idea.yml").read_text())
+    tests = data["experiment"]["tests"]
+    assert tests[0] == "path-idea"
+    assert len(tests) > 1  # the real catalogue has existing tests labelled path: P2
+
+    tests_dir = repo / "platform" / "promptfoo-evals" / "tests"
+    by_id = {}
+    for f in list(tests_dir.glob("*.yaml")) + list((tests_dir / "experiments").glob("*.yaml")):
+        for case in yaml.safe_load(f.read_text()) or []:
+            if isinstance(case, dict):
+                meta = case.get("metadata") or {}
+                if isinstance(meta.get("id"), str):
+                    by_id[meta["id"]] = meta
+    for tid in tests[1:]:
+        assert by_id[tid]["path"] == "P2"
+
+
+def test_new_injection_writes_fixture_payload_and_switches(new_repo):
+    repo, run = new_repo
+    fixtures_path = repo / "platform" / "ansible" / "catalog" / "injections" / "fixtures.json"
+    group_vars_path = repo / "platform" / "ansible" / "inventory" / "group_vars" / "all.yml"
+    before_fixtures = fixtures_path.read_text()
+    before_vars = group_vars_path.read_text()
+
+    p = run("new", "inj-idea", "--injection", "trs-description")
+    assert p.returncode == 0, p.stderr
+
+    payload_path = repo / "platform" / "ansible" / "catalog" / "injections" / "inj-idea.txt"
+    assert payload_path.is_file()
+    assert "TODO" in payload_path.read_text()
+
+    after_fixtures = fixtures_path.read_text()
+    assert_only_additions(before_fixtures, after_fixtures)
+    entry = next(f for f in json.loads(after_fixtures)["fixtures"] if f["id"] == "inj-idea")
+    assert entry == {
+        "id": "inj-idea", "switch": "spe_inject_inj_idea", "surface": "trs-description",
+        "payload": "inj-idea.txt", "select": {}, "target_file": "TODO", "canary_file": "TODO",
+        "action": "TODO", "disclosure": "TODO",
+    }
+
+    after_vars = group_vars_path.read_text()
+    assert_only_additions(before_vars, after_vars)
+    assert "spe_inject_inj_idea: false" in after_vars
+    assert "spe_mitigate_inj_idea: false" in after_vars
+
+    assert check_problems(repo, "inj-idea")  # refused: every injection field is still a TODO
+
+
+def test_new_runs_twice_without_disturbing_other_experiments(new_repo):
+    """Two different `new` calls append independent switches to the same group_vars/all.yml, and
+    neither disturbs the real ladder experiments already in the copy."""
+    repo, run = new_repo
+    assert run("new", "idea-one").returncode == 0
+    assert run("new", "idea-two").returncode == 0
+    after_vars = (repo / "platform" / "ansible" / "inventory" / "group_vars" / "all.yml").read_text()
+    assert "spe_mitigate_idea_one: false" in after_vars
+    assert "spe_mitigate_idea_two: false" in after_vars
+    for name in ("ladder-l0", "ladder-l1", "ladder-l2", "ladder-l3"):
+        assert not check_problems(repo, name)
+
+
+# ---------------------------------------------------------------------------
+# test (07-agent-friendly.md, *Test offline*)
+# ---------------------------------------------------------------------------
+
+FAKE_UV = """#!/bin/sh
+# stands in for `uv run --group dev pytest -q`
+exit "${FAKE_PYTEST_EXIT:-0}"
+"""
+
+FAKE_CHECK_EXPERIMENT = """#!/usr/bin/env python3
+import os, sys
+sys.exit(int(os.environ.get("FAKE_CHECK_EXIT", "0")))
+"""
+
+
+@pytest.mark.parametrize("pytest_exit, check_exit, expected", [
+    (0, 0, 0),
+    (1, 0, 1),
+    (0, 1, 1),
+    (1, 1, 1),
+    (0, 2, 2),
+    (1, 2, 2),
+])
+def test_test_combines_the_two_steps_exit_codes(new_repo, tmp_path, pytest_exit, check_exit, expected):
+    repo, run = new_repo
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    uv.write_text(FAKE_UV)
+    uv.chmod(0o755)
+    (repo / "check_experiment.py").write_text(FAKE_CHECK_EXPERIMENT)
+
+    p = run("test", env={
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "FAKE_PYTEST_EXIT": str(pytest_exit), "FAKE_CHECK_EXIT": str(check_exit),
+    })
+    assert p.returncode == expected, p.stdout + p.stderr
+
+
+def test_test_runs_check_experiment_before_returning_when_pytest_passes(new_repo, tmp_path):
+    """The checker really runs (not skipped): a check_experiment.py that writes a marker file is
+    seen to have run."""
+    repo, run = new_repo
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    uv.write_text(FAKE_UV)
+    uv.chmod(0o755)
+    marker = tmp_path / "checker-ran"
+    (repo / "check_experiment.py").write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        f"pathlib.Path(r'{marker}').write_text('ran')\n"
+        "sys.exit(int(os.environ.get('FAKE_CHECK_EXIT', '0')))\n"
+    )
+    p = run("test", env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_PYTEST_EXIT": "0", "FAKE_CHECK_EXIT": "0"})
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert marker.is_file()
+
+
+def test_test_falls_back_to_the_python_module_without_uv(new_repo, tmp_path):
+    """With no `uv` on PATH, falls back to `python3 -m pytest -q`; against this fixture's
+    promptfoo-evals copy (fixtures only, no test_*.py), that is pytest's own "no tests collected"
+    (exit 5), which `spe-eval test` turns into a clear exit 2, never a bare traceback."""
+    repo, run = new_repo
+    (repo / "check_experiment.py").write_text(FAKE_CHECK_EXPERIMENT)
+    stripped = os.pathsep.join(
+        part for part in os.environ.get("PATH", "").split(os.pathsep)
+        if not (Path(part) / "uv").exists()
+    )
+    p = run("test", env={"PATH": stripped, "FAKE_CHECK_EXIT": "0"})
+    assert p.returncode == 2, p.stdout + p.stderr
+    assert "exited 5" in p.stderr or "uv" in p.stderr.lower()

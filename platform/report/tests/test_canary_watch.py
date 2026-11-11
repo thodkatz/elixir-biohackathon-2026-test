@@ -1295,3 +1295,52 @@ def test_windows_in_offsets_reply_and_names():
     canary_watch.check_reply(_reply({"windows": _file(["{}"])}))
     assert "windows" in canary_watch.READER_SOURCES
     assert canary_watch.READER_ERROR.fullmatch("windows: PermissionError")
+
+
+def test_window_closed_after_a_big_journal_keeps_a_later_hit_chat(tmp_path):
+    """A journal past the reader's shared budget, a window opened and closed, then the chat's own delivery:
+    the window is read whole (before the journal), so the delivery is chat, not eval for good."""
+    fake = Fake(tmp_path)
+    fake.write_journal([json.dumps({"pad": "y" * 1000}) + "\n"] * 1200)  # ~ 1.2 MiB
+    # Earlier runs' windows between t1's opening and closing lines: past the 64 KiB the reader reads on
+    # to a first line, so a starved windows read would stop before t1's close.
+    earlier = [_window(f"e{n}", "2026-11-10T10:00:00Z", "2026-11-10T10:01:00Z") | {"experiment": "x" * 200}
+               for n in range(400)]
+    _append(fake.windows, [_window("t1", "2026-11-11T10:00:00Z", None), *earlier,
+                           _window("t1", "2026-11-11T10:00:00Z", "2026-11-11T10:05:00Z")])
+    _append(fake.receiver, [REQUEST | {"at": _epoch("2026-11-11T10:06:00Z")}])
+    fake.watcher().tick(1000.0)
+    assert _delivered(fake) == [("2026-11-11T10:06:00Z", "chat")]
+
+
+def test_receiver_waits_while_windows_are_not_read_to_their_end(tmp_path):
+    """Windows not read to their end (`end < size`): the receiver's lines wait for the next poll, its offset
+    unmoved, rather than be judged against windows half read."""
+    fake = Fake(tmp_path)
+    opened = json.dumps(_window("t1", "2026-11-11T10:00:00Z", None))
+    _append(fake.windows, [_window("t1", "2026-11-11T10:00:00Z", None),
+                           _window("t1", "2026-11-11T10:00:00Z", "2026-11-11T10:05:00Z")])
+    _append(fake.receiver, [REQUEST | {"at": _epoch("2026-11-11T10:06:00Z")}])
+    windows = _file([opened]) | {"size": fake.windows.stat().st_size}
+    receiver = _file([json.dumps(REQUEST | {"at": _epoch("2026-11-11T10:06:00Z")})])
+    transport = Counting(fake.transport.inner, replies=[_reply({"windows": windows, "receiver": receiver})])
+    watcher = fake.watcher(transport)
+    watcher.tick(1000.0)
+    assert _delivered(fake) == []
+    assert fake.state()["offsets"]["receiver"] == 0 and fake.state()["offsets"]["windows"] == windows["end"]
+    watcher.tick(1003.0)  # the rest of the windows, then the receiver against them
+    assert transport.calls[-1]["receiver"] == 0
+    assert _delivered(fake) == [("2026-11-11T10:06:00Z", "chat")]
+
+
+def test_status_counts_chat_hits_per_kind_and_eval_apart(tmp_path):
+    fake = Fake(tmp_path)
+    _append(fake.windows, [_window("t1", "2026-11-11T10:00:00Z", "2026-11-11T10:05:00Z")])
+    _append(fake.receiver, [REQUEST | {"at": _epoch("2026-11-11T10:01:00Z")},
+                            REQUEST | {"at": _epoch("2026-11-11T10:06:00Z")}])
+    watcher = fake.watcher()
+    watcher.tick(1000.0)
+    assert fake.status()["hits"] == {"delivered": 1, "eval": 1}
+    (fake.hits_dir / f"{WORKSPACE}.status.json").unlink()
+    fake.watcher().tick(1003.0)  # a restart rebuilds the counts from the hits file
+    assert fake.status()["hits"] == {"delivered": 1, "eval": 1}

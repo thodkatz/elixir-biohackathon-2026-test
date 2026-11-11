@@ -12,14 +12,14 @@ The first form is the daemon (Watcher.run_forever). Per workspace id it keeps, i
 journal's open run's start, the dedup keys, the run directories scanned, the run log's titles, the evaluation
 windows read so far, the last WINDOWS_MAX runs') and
 `<id>.status.json` (0640: `state` running|stopped|unreachable|encrypted|capped, `since`, `last_poll`,
-`hits` per kind, `note`), which the pages read. What the reader returns is the participant's (root on
+`hits`: the chat's hits per kind plus `eval`, every evaluation hit whatever its kind, `note`), which the pages read. What the reader returns is the participant's (root on
 their instance): a line that does not parse or is malformed is dropped, a reply of the wrong shape is a
 failed poll, at most 200 hits are kept per poll and 10 MB per hits file.
 
 Each hit carries its `origin` (decision 12): a journal's or the run log's from the run's own mark, a
 receiver request's "eval" when its time falls inside an evaluation window (spe-eval's windows.jsonl, read
 before the receiver in each poll so a window and a delivery new in the same poll classify right), else
-"chat".
+"chat". While a poll has not read the windows to their end, the receiver's lines wait for the next one.
 
 The second form scans one archived run directory (/data-share/runs/<time>_<instance>/, as the
 run_archive role writes it) into a hits file.
@@ -682,6 +682,15 @@ def _load_state(data: object) -> tuple[dict, set[str]]:
     return state, {k for k in seen if isinstance(k, str)} if isinstance(seen, list) else set()
 
 
+def _count_key(hit: dict) -> str:
+    """The status file's `hits` key a hit counts under: "eval" for an evaluation's, else its kind."""
+    return "eval" if hit.get("origin") == "eval" else hit["kind"]
+
+
+def _count_keys(hits: list[dict]) -> list[str]:
+    return [_count_key(h) for h in hits if isinstance(h.get("kind"), str)]
+
+
 def _apply(w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: float) -> tuple[int, int, int]:
     """Match one reply's lines and rows, append their new hits; (hits added, lines dropped, hits over
     the per-poll limit). Offsets, run starts and titles are committed only once the whole reply is in.
@@ -720,7 +729,7 @@ def _apply(w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: floa
             if w.hits.append(hit) is None:
                 continue
             w.seen.add(key)
-            w.kinds[hit["kind"]] += 1
+            w.kinds[_count_key(hit)] += 1
             tally["added"] += 1
 
     def each(entry: dict, handle) -> None:
@@ -787,10 +796,12 @@ def _apply(w: _Watched, reply: dict, sent: dict, canaries: list[dict], now: floa
     if "agent_runs" in files:
         each(files["agent_runs"], run_log_line)
         offsets["agent_runs"] = files["agent_runs"]["end"]
+    windows_whole = True
     if "windows" in files:  # before the receiver: a window and a delivery new in this poll
         each(files["windows"], window_line)
         offsets["windows"] = files["windows"]["end"]
-    if "receiver" in files:
+        windows_whole = files["windows"]["end"] >= files["windows"]["size"]
+    if "receiver" in files and windows_whole:  # else its lines wait, its offset unmoved, for the windows' rest
         each(files["receiver"], receiver_line)
         offsets["receiver"] = files["receiver"]["end"]
     if reply["openwebui"] is not None:
@@ -899,7 +910,7 @@ class Watcher:
             # canary only) would otherwise block the rebuilt instance's first delivered hit of that canary.
             seen |= {dedup_key(h, state["generation"]) for h in hits.read(after=state["generation_start"])
                      if isinstance(h.get("canary"), dict) and isinstance(h["canary"].get("token"), str)}
-        kinds = Counter(h["kind"] for h in existing if isinstance(h.get("kind"), str))
+        kinds = Counter(_count_keys(existing))
         status = {"state": status.get("state"), "since": status.get("since"), "last_poll": status.get("last_poll"),
                   "hits": dict(kinds), "note": status.get("note")}
         return _Watched(ws=ws, state=state, seen=seen, hits=hits, kinds=kinds, status=status, readers={},
@@ -1008,14 +1019,14 @@ class Watcher:
                 logger.warning("%s: archived run not scanned (%s)", ws.id, type(e).__name__)
                 count = 0
             except OSError as e:  # writing its hits: not marked scanned, tried again (`seen` keeps what was written)
-                w.kinds.update(h["kind"] for h in w.hits.read(after=before) if isinstance(h.get("kind"), str))
+                w.kinds.update(_count_keys(w.hits.read(after=before)))
                 w.scan_retry, pending = now + BACKOFF, True
                 logger.warning("%s: archived run scan failed (%s), again in %d s", ws.id, type(e).__name__, BACKOFF)
                 continue
             except Exception as e:  # untrusted content: marked scanned all the same, never rescanned every tick
                 logger.warning("%s: archived run scan failed (%s)", ws.id, type(e).__name__)
                 count = w.hits.count - before
-            w.kinds.update(h["kind"] for h in w.hits.read(after=before) if isinstance(h.get("kind"), str))
+            w.kinds.update(_count_keys(w.hits.read(after=before)))
             w.state["archived"].append(entry.name)
             w.dirty = True
             if not past:
@@ -1100,7 +1111,7 @@ def once(output_dir: str, out: str, transport: Transport | None = None) -> int:
         print(f"canary_watch: {output_dir}: canary record is encrypted, not polled")
         return 1
     hits = HitsFile(out)
-    kinds = Counter(h["kind"] for h in hits.read() if isinstance(h.get("kind"), str))
+    kinds = Counter(_count_keys(hits.read()))
     seen = {dedup_key(h, ws.generation) for h in hits.read()
             if isinstance(h.get("canary"), dict) and isinstance(h["canary"].get("token"), str)}
     w = _Watched(ws=ws, state=_fresh_state(ws.generation), seen=seen, hits=hits, kinds=kinds, status={}, readers={})

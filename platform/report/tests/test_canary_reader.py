@@ -196,3 +196,26 @@ def test_windows_path_is_uid_1000s_home(monkeypatch):
 
     monkeypatch.setattr(canary_reader.pwd, "getpwuid", no_user)
     assert canary_reader._paths()["windows"] is None
+
+
+def test_windows_read_first_and_outside_the_shared_budget(tmp_path):
+    # A journal well past the shared 1 MiB budget: windows, read before it on a budget of its own, still
+    # comes back whole (the watcher judges receiver lines against it), and the receiver gets its guarantee.
+    sessions = tmp_path / "sessions"
+    sessions.mkdir()
+    line = b'{"x": "' + b"y" * 1000 + b'"}\n'
+    (sessions / "44444444-4444-4444-4444-444444444444.jsonl").write_bytes(line * 2000)  # ~ 2 MiB
+    windows = tmp_path / "windows.jsonl"
+    opened = b'{"run": "t1", "experiment": "x", "start": "2026-11-11T10:00:00Z", "end": null}\n'
+    closed = b'{"run": "t1", "experiment": "x", "start": "2026-11-11T10:00:00Z", "end": "2026-11-11T10:05:00Z"}\n'
+    earlier = b'{"run": "e", "experiment": "' + b"x" * 200 + b'", "start": "2026-11-10T10:00:00Z", "end": null}\n'
+    windows.write_bytes(opened + earlier * 400 + closed)  # past the 64 KiB read on to a first line
+    receiver = tmp_path / "requests.jsonl"
+    receiver.write_bytes(b'{"request": 1}\n')
+    result = run_reader({}, {"sessions": str(sessions), "windows": str(windows), "receiver": str(receiver)})
+    assert list(result["files"])[0] == "windows"
+    entry = result["files"]["windows"]
+    assert entry["end"] == entry["size"] == windows.stat().st_size and len(entry["lines"]) == 402
+    journal = result["files"]["journal:44444444-4444-4444-4444-444444444444"]
+    assert journal["end"] < journal["size"]  # the shared budget ran out in the journal
+    assert result["files"]["receiver"]["lines"] == ['{"request": 1}']

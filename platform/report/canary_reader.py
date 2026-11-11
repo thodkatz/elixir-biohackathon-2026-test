@@ -31,10 +31,13 @@ read failure that is not "it does not exist", as `"<name>: <exception class>"` (
 returned; a partial last line (no trailing newline yet) is left for the next poll. `line_starts`
 gives the byte offset in the file of each returned line (the lines are decoded with
 errors="replace", so the caller cannot recompute it from them): the watcher re-reads an open run
-from its `run_start` line's offset after a restart. The four file
-sources (journals, agent_runs, receiver, windows) share one 1 MiB budget per call: past it, a source with nothing read yet still gets its
-first complete line (so one oversized line cannot stall every source behind it), but nothing
-budgets it less than guaranteed. Open WebUI has its own 1 MiB budget on `chat` text, with the same
+from its `run_start` line's offset after a restart. `windows` is read first, on a 1 MiB budget
+of its own (two short lines per evaluation run: in practice all of it), since the watcher judges the
+receiver's lines against it and leaves them for the next poll while it is not read to its end. The
+other file sources are then read in this order: the journals (sorted by name), agent_runs, receiver;
+they share one 1 MiB budget per call: past it, a source with nothing read yet still gets its first
+complete line (so one oversized line cannot stall every source behind it), but nothing budgets it
+less than guaranteed; `windows` has the same guarantee within its own budget. Open WebUI has its own 1 MiB budget on `chat` text, with the same
 guarantee for its first row; rows are those with `updated_at >= offset` (whole seconds, so a chat
 saved in the same second as the last row read is returned again — the caller's dedup keys drop the
 repeat), ordered by it; `max` is the newest `updated_at` among the rows actually returned (not
@@ -65,8 +68,10 @@ ONE_MIB = 1 << 20
 RECEIVER_PATH = "/var/lib/spe-eval-sink/requests.jsonl"
 SPE_EVAL_UID = 1000  # the user spe-eval runs as (the spe_eval role asserts it)
 # One name each for the files dict key, the offsets key, the SPE_READER_PATHS key and the
-# missing/error name: all four happen to coincide for these three sources.
-FILE_SOURCES = ("agent_runs", "receiver", "windows")
+# missing/error name: all four happen to coincide for these sources. Read after the journals, in this
+# order, on the shared budget; WINDOWS goes before them all, on its own.
+FILE_SOURCES = ("agent_runs", "receiver")
+WINDOWS = "windows"
 
 
 def _volume_mountpoint(name: str) -> str | None:
@@ -138,8 +143,28 @@ def _read_file(path: str, offset: int, remaining: int) -> tuple[int, int, int, l
     return size, start, at, lines, starts, at - start
 
 
+def _read_source(name: str, paths: dict, offsets: dict, remaining: int, files: dict,
+                 missing: list[str], errors: list[str]) -> int:
+    """Read one named file source into `files`; the bytes it consumed (0 when missing or failed)."""
+    path = paths.get(name)
+    if path is None:
+        missing.append(name)
+        return 0
+    try:
+        size, start, end, lines, starts, consumed = _read_file(path, offsets.get(name, 0), remaining)
+    except FileNotFoundError:
+        missing.append(name)
+        return 0
+    except OSError as e:
+        errors.append(f"{name}: {type(e).__name__}")
+        return 0
+    files[name] = {"size": size, "start": start, "end": end, "lines": lines, "line_starts": starts}
+    return consumed
+
+
 def _collect_files(paths: dict, offsets: dict, missing: list[str], errors: list[str]) -> dict[str, dict]:
     files: dict[str, dict] = {}
+    _read_source(WINDOWS, paths, offsets, ONE_MIB, files, missing, errors)  # first, on its own budget
     remaining = ONE_MIB
 
     sessions_dir = paths.get("sessions")
@@ -159,21 +184,7 @@ def _collect_files(paths: dict, offsets: dict, missing: list[str], errors: list[
             remaining -= consumed
 
     for name in FILE_SOURCES:
-        path = paths.get(name)
-        if path is None:
-            missing.append(name)
-            continue
-        offset = offsets.get(name, 0)
-        try:
-            size, start, end, lines, starts, consumed = _read_file(path, offset, remaining)
-        except FileNotFoundError:
-            missing.append(name)
-            continue
-        except OSError as e:
-            errors.append(f"{name}: {type(e).__name__}")
-            continue
-        files[name] = {"size": size, "start": start, "end": end, "lines": lines, "line_starts": starts}
-        remaining -= consumed
+        remaining -= _read_source(name, paths, offsets, remaining, files, missing, errors)
     return files
 
 

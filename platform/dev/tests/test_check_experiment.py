@@ -39,11 +39,14 @@ def real_dirs(**overrides) -> dict:
 
 
 def write_experiment(tmp_path: Path, name: str, *, threat="TM-001", paths=("P1",), mitigation=None,
-                      base=(), injections=(), tests=(), canaries=()) -> Path:
+                      base=(), injections=(), tests=(), canaries=None) -> Path:
+    """`canaries=None` (the default) leaves `parameters.canaries` out entirely, distinct from
+    `canaries=[]` (present, but empty): a test for the absent case needs the real omission, not an
+    empty list that happens to also be falsy."""
     d = tmp_path / "experiments"
     d.mkdir(exist_ok=True)
     parameters = {"experiment": name, "mitigations": list(base)}
-    if canaries:
+    if canaries is not None:
         parameters["canaries"] = list(canaries)
     data = {
         "name": f"{name} fixture",
@@ -259,6 +262,21 @@ def test_injection_canary_file_not_planted_is_reported(tmp_path):
         group_vars_path=write_group_vars_with_switch(tmp_path, False),
     ))
     assert any(p.id == "fx-test" and "not in parameters.canaries" in p.problem for p in problems), problems
+
+
+def test_injection_canary_file_accepted_when_parameters_canaries_is_absent(tmp_path):
+    """An experiment that leaves out `parameters.canaries` entirely still gets what the
+    spe-experiments form plants by default (`platform/coder/experiments-template/main.tf`:
+    `form_defaults = local.experiments["ladder-l0"].parameters`), not an empty list -- a false
+    refusal for every injection's canary file otherwise (minor 3)."""
+    fixtures_path = write_injection_fixture(tmp_path)
+    d = write_experiment(tmp_path, "no-canaries-param", threat="TM-001", paths=["P1"], mitigation=None,
+                          injections=["fx-test"])  # no canaries= passed: parameters.canaries is absent
+    problems = ce.check("no-canaries-param", **real_dirs(
+        experiments_dir=d, fixtures_path=fixtures_path,
+        group_vars_path=write_group_vars_with_switch(tmp_path, False),
+    ))
+    assert not any(p.id == "fx-test" and "not in parameters.canaries" in p.problem for p in problems), problems
 
 
 def test_injection_switch_defaults_true_is_reported(tmp_path):

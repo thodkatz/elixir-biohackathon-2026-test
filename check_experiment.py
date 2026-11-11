@@ -141,6 +141,7 @@ class Catalog:
     injections_dir: Path
     fixtures_path: Path
     group_vars_path: Path
+    default_canaries: list[str]
 
 
 def _wrap(raw: list[str], directory: Path, pattern: re.Pattern | None) -> list[Problem]:
@@ -191,6 +192,22 @@ def _load_surfaces(path: Path) -> dict[str, list]:
     if not isinstance(surfaces, dict):
         raise ConfigError(f"surfaces file '{path}' has no 'surfaces' object")
     return surfaces
+
+
+def _default_canaries() -> list[str]:
+    """The spe-experiments form's own default `canaries` list (`platform/coder/experiments-
+    template/main.tf`: `form_defaults = local.experiments["ladder-l0"].parameters`), read from
+    this script's own repository location -- never a test's overridden `experiments_dir` -- so an
+    experiment that leaves out `parameters.canaries` is checked against what the form actually
+    plants for it, not an empty list."""
+    try:
+        data = yaml.safe_load((HERE / "experiments" / "ladder-l0.yml").read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    canaries = (data.get("parameters") or {}).get("canaries")
+    return list(canaries) if isinstance(canaries, list) else []
 
 
 def _load_detectors() -> dict:
@@ -314,9 +331,14 @@ def _check_injection(iid: str, fixture: dict, parameters: dict, cat: Catalog) ->
             ))
 
     canary_type = canary_type_for(canary_file)
-    canaries_param = parameters.get("canaries")
-    if not isinstance(canaries_param, list):
-        canaries_param = []
+    if "canaries" not in parameters:
+        # The form's own default (minor 3): an experiment that leaves this out is not planting
+        # nothing, it is getting whatever `spe-experiments` plants by default.
+        canaries_param = cat.default_canaries
+    else:
+        canaries_param = parameters.get("canaries")
+        if not isinstance(canaries_param, list):
+            canaries_param = []
     if canary_type is None:
         problems.append(Problem(
             str(cat.fixtures_path), 1, iid,
@@ -520,7 +542,7 @@ def check(
         reserved_vars=reserved_vars, group_vars=group_vars, surfaces=surfaces, detectors=detectors,
         catalogue_labels=_catalogue_label_values(), threats_dir=threats_dir, paths_dir=paths_dir,
         mitigations_dir=mitigations_dir, tests_dir=tests_dir, injections_dir=fixtures_path.parent,
-        fixtures_path=fixtures_path, group_vars_path=group_vars_path,
+        fixtures_path=fixtures_path, group_vars_path=group_vars_path, default_canaries=_default_canaries(),
     )
 
     if name is not None:

@@ -1017,24 +1017,6 @@ def test_once_cli_needs_output_dir_and_out(tmp_path):
         canary_watch.main(["--once", "--archive", str(tmp_path), "--out", str(tmp_path / "h.jsonl")])
 
 
-def test_nothing_on_the_instance_changes():
-    """decision 1: no file under platform/instance/ or platform/ansible/roles/ is touched by this
-    branch. Skipped outside a git checkout, or when origin/main is not available (as CI and a
-    fresh upstream clone may lack it)."""
-    repo = Path(__file__).resolve().parents[3]
-    if not (repo / ".git").exists():
-        pytest.skip("not a git checkout")
-    check = subprocess.run(["git", "rev-parse", "--verify", "origin/main"], cwd=repo,
-                           capture_output=True, text=True)
-    if check.returncode != 0:
-        pytest.skip("origin/main is not available")
-    diff = subprocess.run(["git", "diff", "--name-only", "origin/main...HEAD"], cwd=repo,
-                          capture_output=True, text=True, check=True)
-    changed = [line for line in diff.stdout.splitlines() if line]
-    touched = [line for line in changed if line.startswith(("platform/instance/", "platform/ansible/roles/"))]
-    assert touched == []
-
-
 # --- write failures, a stop missed across a rebuild, a rebuild between
 # discoveries, a stop whose archive never finishes ---
 

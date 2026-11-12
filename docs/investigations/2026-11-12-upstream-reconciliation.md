@@ -148,6 +148,35 @@ The pitch upstream: *Josef's loop finds attacks, a person (later perhaps an agen
 harness judges whether a mitigation closes the gap without breaking the service.* A blue agent only becomes safe to
 allow once there is a strict judge.
 
+## The baseline and the mitigation's granularity
+
+Two follow-up questions from the user, answered in the same session.
+
+**The baseline is the previous commit.** In the test-driven frame a mitigation is a feature: a new threat lands as
+failing tests, a mitigation PR turns them green, and the next threat starts the cycle again. "Baseline" then means
+nothing more than the suite on `main` before the mitigation's PR, as CI shows any feature's tests failing before
+and passing after. It needs no arm of its own. What differs from ordinary software: tests are rates over repeats,
+not booleans; a model change is a dependency upgrade, so the whole suite reruns; and "which mitigation closes this
+test" is asked by switching one off, the way a feature flag is turned off to see what depends on it.
+
+**A mitigation is one control at one enforcement point, not one threat or one Ansible role.** The current split
+follows the paths (the system's boundaries), not the threats: `trs-read-only` closes P2 at the TRS and WES APIs,
+`data-tiers` P3 at the workflow mounts, `egress-allowlist` P4 at the network, the airlock the answer. A threat
+crosses several paths (TM-001 needs all four closed) and a mitigation serves several threats, so the threat can't
+be the unit. Nor can the role: `trs-read-only` is one switch (`spe_harden_trs_readonly`) touching Traefik and WES
+config in `workflow_stack`, and a mitigation with a large Ansible setup is still one mitigation. The test of the
+unit is the controls probe: one mitigation is a control a model-free probe can show to be on or off
+(`probes: [trs-write, wes-inline, e2e-exploit]`), independently of the others.
+
+**Why not one config.** For a deployment it is one config: everything on is the product. The split is kept because:
+1. **Attribution:** one off at a time says what each control buys; one config can only be all on or all off.
+2. **Cost:** each control can break legitimate work (utility tests), and SPEs differ in what they can adopt (a site
+   may not run an egress allowlist), so a deployer needs to drop one and know what reopens.
+3. **Review:** one mitigation per PR, as one feature per PR.
+The switches cost combinations and conflicts (`trs-guard` against `trs-read-only`). A possible rule, for the
+close-the-loop spec: a mitigation stays a switch while it has a utility cost or a site may decline it; one with
+neither could graduate into the base config, as a feature flag is removed once the feature is settled.
+
 ## What each side brings
 
 **The fork brings** (none of it upstream, see `docs/upstream-ports.md`):

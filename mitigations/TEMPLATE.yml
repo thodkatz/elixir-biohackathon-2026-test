@@ -21,6 +21,9 @@ closes: []                # path ids (P<n>, paths/) this closes when on; stays [
 # any value, not only a plain boolean -- a map or a list (see mitigations/data-tiers.yml for a
 # list example); `off` MUST equal the default already in platform/ansible/inventory/group_vars/all.yml,
 # so a build with every mitigation off stays today's build (decision 4).
+# An `on` that sets one of the canary ladder's switches (LADDER in
+# platform/promptfoo-evals/controls_asserts.py) instead makes this a ladder mitigation: create.yml then
+# requires the ladder's mitigations before it, and its probes count as the ladder's.
 "on": {spe_mitigate_TODO: true}
 "off": {spe_mitigate_TODO: false}
 

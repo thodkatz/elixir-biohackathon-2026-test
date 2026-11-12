@@ -89,7 +89,8 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
 `experiments/README.md`.
 
 1. **Start**: first `git switch -c experiment/<name>` in `~/sperange`, so every commit lands on the experiment's
-   branch (the workspace's clone starts on whatever branch it was built from). Then
+   branch (the workspace's clone starts on whatever branch it was built from); in a workspace built from
+   `spe-x-<name>`, the branch exists already: `git switch experiment/<name>` instead. Then
    `spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--injection <surface>] [--from <experiment>]`
    writes every slot's file with `TODO`s: `experiments/<name>.yml`, `mitigations/<name>.yml` with its
    `spe_mitigate_<name>` switch (added to `group_vars/all.yml`), `tests/experiments/<name>.yaml`, and a threat or
@@ -141,7 +142,8 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
    each exit 2. A build whose settings differ is what a new injection (or new data, tiers or workflows) always
    gets here: those are planted when a workspace is created, so this one cannot try or measure them. Stop there,
    as the refusal says: commit and push `experiment/<name>` (after `check_experiment.py <name>` exits 0), tell the
-   person to build a workspace from the template `spe-x-<name>`, and continue in that one; `spe-eval test` and the
+   person to build a workspace from the template `spe-x-<name>`, and continue in that one (on `experiment/<name>`,
+   step 1); `spe-eval test` and the
    checker still run here meanwhile. Apply arms with `spe-eval arm`, not `spe-apply … -e key=value`: `-e` with
    `=` passes a string, which the roles' `when:` refuses ("Conditionals must have a boolean result"); by hand,
    `-e '{"spe_mitigate_<name>": true}'`.

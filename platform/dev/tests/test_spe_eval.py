@@ -25,7 +25,7 @@ def load_yaml(path: Path) -> dict:
 def test_load_experiment_reads_the_real_file():
     experiment = spe_eval.load_experiment("ladder-l2")
     assert experiment["parameters"]["experiment"] == "ladder-l2"
-    assert experiment["experiment"]["mitigation"] == "L2"
+    assert experiment["experiment"]["mitigation"] == "data-tiers"
 
 
 def test_load_experiment_missing_file_is_a_config_error():
@@ -67,8 +67,8 @@ def test_experiment_arms(name, arms):
 
 def test_arm_mitigations_ladder_l2():
     experiment = spe_eval.load_experiment("ladder-l2")
-    assert spe_eval.arm_mitigations(experiment, "baseline") == ["L1"]
-    assert spe_eval.arm_mitigations(experiment, "mitigated") == ["L1", "L2"]
+    assert spe_eval.arm_mitigations(experiment, "baseline") == ["trs-read-only"]
+    assert spe_eval.arm_mitigations(experiment, "mitigated") == ["trs-read-only", "data-tiers"]
 
 
 def test_arm_mitigations_unknown_arm_raises():
@@ -81,10 +81,10 @@ def test_arm_mitigations_unknown_arm_raises():
 
 def test_arm_vars_ladder_l2_baseline_is_l1_on_l2_l3_off():
     values = spe_eval.arm_vars(spe_eval.load_experiment("ladder-l2"), "baseline")
-    assert values["spe_harden_trs_readonly"] is True       # L1 on
-    assert values["spe_harden_data_tiers"] == []            # L2 off
-    assert values["spe_harden_egress"] is False             # L3 off
-    assert values["spe_mitigations"] == ["L1"]
+    assert values["spe_harden_trs_readonly"] is True       # trs-read-only on
+    assert values["spe_harden_data_tiers"] == []            # data-tiers off
+    assert values["spe_harden_egress"] is False             # egress-allowlist off
+    assert values["spe_mitigations"] == ["trs-read-only"]
     assert values["spe_experiment"] == "ladder-l2"
 
 
@@ -92,8 +92,8 @@ def test_arm_vars_ladder_l2_mitigated_is_l1_and_l2_on():
     values = spe_eval.arm_vars(spe_eval.load_experiment("ladder-l2"), "mitigated")
     assert values["spe_harden_trs_readonly"] is True
     assert values["spe_harden_data_tiers"] == ["ref", "genomes"]
-    assert values["spe_harden_egress"] is False              # L3 still off: not in base or under test
-    assert values["spe_mitigations"] == ["L1", "L2"]
+    assert values["spe_harden_egress"] is False              # egress-allowlist still off: not in base or under test
+    assert values["spe_mitigations"] == ["trs-read-only", "data-tiers"]
 
 
 def test_arm_vars_ladder_l0_one_arm_every_mitigation_off():
@@ -106,14 +106,15 @@ def test_arm_vars_ladder_l0_one_arm_every_mitigation_off():
 
 
 def test_arm_vars_mitigation_outside_the_experiment_is_off_in_both_arms():
-    # ladder-l1 names only L1; L2 and L3 stay off in both arms, whatever a participant also
-    # selected on the creation form (decision 9's acceptance): arm_vars never looks at the
-    # running build at all, only at the experiment file and the mitigation catalogue.
+    # ladder-l1 names only trs-read-only; data-tiers and egress-allowlist stay off in both arms,
+    # whatever a participant also selected on the creation form (decision 9's acceptance): arm_vars
+    # never looks at the running build at all, only at the experiment file and the mitigation
+    # catalogue.
     experiment = spe_eval.load_experiment("ladder-l1")
     for arm in spe_eval.experiment_arms(experiment):
         values = spe_eval.arm_vars(experiment, arm)
-        assert values["spe_harden_data_tiers"] == []     # L2 off
-        assert values["spe_harden_egress"] is False       # L3 off
+        assert values["spe_harden_data_tiers"] == []     # data-tiers off
+        assert values["spe_harden_egress"] is False       # egress-allowlist off
 
 
 def test_arm_vars_injection_switches_are_the_same_in_both_arms():
@@ -127,7 +128,7 @@ def test_arm_vars_injection_switches_are_the_same_in_both_arms():
 
 
 def test_write_json_round_trips(tmp_path):
-    values = {"spe_mitigations": ["L1"], "spe_harden_trs_readonly": True}
+    values = {"spe_mitigations": ["trs-read-only"], "spe_harden_trs_readonly": True}
     path = spe_eval.write_json(values, tmp_path / "arm" / "vars.json")
     assert path.exists()
     import json
@@ -198,7 +199,7 @@ def test_check_creation_time_excludes_experiment_and_mitigations():
     experiment = spe_eval.load_experiment("ladder-l2")
     local_vars = matching_local_vars(experiment)
     local_vars["spe_experiment"] = "some-other-experiment"
-    local_vars["spe_mitigations"] = ["L3"]
+    local_vars["spe_mitigations"] = ["egress-allowlist"]
     assert spe_eval.check_creation_time(experiment, local_vars) == []
 
 

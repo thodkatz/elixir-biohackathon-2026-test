@@ -72,8 +72,8 @@ RESTORE_SH = ('set -eu; d="/s/$1/$2"; for v in /v/*; do n=$(basename "$v"); test
               'find "$v" -mindepth 1 -delete; tar -xpf "$d/$n.tar" -C "$v"; done')
 _INSTANCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
 _STAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
-# Mirrors validate.py's MITIGATION_ID_PATTERN: L<n> for ladder levels, else kebab-case.
-_MITIGATION_ID = re.compile(r"L\d+|[a-z0-9]+(?:-[a-z0-9]+)*")
+# Mirrors validate.py's MITIGATION_ID_PATTERN: kebab-case.
+_MITIGATION_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 Runner = Callable[..., subprocess.CompletedProcess]
 

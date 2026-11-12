@@ -45,8 +45,8 @@ def build(tmp_path, overrides):
     ({"spe_harden_data_tiers": ["ref"]}, 0), ({"spe_harden_egress": True}, 0),
     ({"spe_harden_trs_readonly": True, "spe_harden_data_tiers": ["ref", "genomes"], "spe_harden_egress": True,
       "spe_agent_tool_surface": "typed", "spe_harden_airlock": True}, 5),
-    ({"spe_mitigations": ["L1", "L2"]}, 0), ({"spe_experiment": "ladder-l2"}, 0),
-    ({"spe_harden_trs_readonly": True, "spe_mitigations": ["L1"], "spe_experiment": "ladder-l1"}, 1)])
+    ({"spe_mitigations": ["trs-read-only", "data-tiers"]}, 0), ({"spe_experiment": "ladder-l2"}, 0),
+    ({"spe_harden_trs_readonly": True, "spe_mitigations": ["trs-read-only"], "spe_experiment": "ladder-l1"}, 1)])
 def test_hardening_json(tmp_path, overrides, level):
     rec = build(tmp_path, overrides)
     head = subprocess.run(["git", "-C", str(ANSIBLE), "rev-parse", "HEAD"], capture_output=True, text=True).stdout

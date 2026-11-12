@@ -97,13 +97,13 @@ def test_an_experiment_build_persists_its_keys_through_spe_local_vars_extra(tmp_
     # The spe-experiments template (no group_vars edit) lists the experiment's keys in
     # spe_local_vars_extra, so a later spe-apply in the workspace rebuilds the same arm.
     values = run(tmp_path, {
-        "spe_experiments": True, "spe_experiment": "ladder-l2", "spe_mitigations": ["L1", "L2"],
+        "spe_experiments": True, "spe_experiment": "ladder-l2", "spe_mitigations": ["trs-read-only", "data-tiers"],
         "spe_harden_trs_readonly": True, "spe_eval_sink": True,
         "spe_local_vars_extra": ["spe_experiments", "spe_experiment", "spe_mitigations",
                                  "spe_harden_trs_readonly", "spe_eval_sink"]})
     assert values["spe_experiments"] is True
     assert values["spe_experiment"] == "ladder-l2"
-    assert values["spe_mitigations"] == ["L1", "L2"]
+    assert values["spe_mitigations"] == ["trs-read-only", "data-tiers"]
     assert values["spe_harden_trs_readonly"] is True
     assert values["spe_eval_sink"] is True
 

@@ -69,9 +69,25 @@
           {%- endfor -%}
           {{ ns.list | to_json }}
         spe_mitigation_conflicts_problems: "{{ spe_mitigation_conflicts_problems_json | from_json }}"
-        spe_mitigation_ladder_selected: "{{ spe_mitigations | select('match', '^L[0-9]+$') | list | sort }}"
+        # A ladder mitigation is one whose `on` sets a ladder switch; its place is that switch's
+        # position in this list, the ladder's order as controls_asserts.py's LADDER holds it (and
+        # roles/handoff/tasks/hardening.yml counts it). Ids say what a mitigation does, not its place.
+        spe_mitigation_ladder_switches: [spe_harden_trs_readonly, spe_harden_data_tiers, spe_harden_egress,
+                                         spe_agent_tool_surface, spe_harden_airlock]
+        spe_mitigation_ladder_selected_entries_json: >-
+          {%- set ns = namespace(list=[]) -%}
+          {%- for mid in spe_mitigation_known_selected -%}
+          {%- for key in (spe_mitigation_by_id[mid]['on'] | default({})) | list -%}
+          {%- if key in spe_mitigation_ladder_switches -%}
+          {%- set _ = ns.list.append({'id': mid, 'n': spe_mitigation_ladder_switches.index(key) + 1}) -%}
+          {%- endif -%}
+          {%- endfor -%}
+          {%- endfor -%}
+          {{ ns.list | sort(attribute='n') | to_json }}
+        spe_mitigation_ladder_selected_entries: "{{ spe_mitigation_ladder_selected_entries_json | from_json }}"
+        spe_mitigation_ladder_selected: "{{ spe_mitigation_ladder_selected_entries | map(attribute='id') | list }}"
         spe_mitigation_ladder_selected_n: >-
-          {{ spe_mitigation_ladder_selected | map('regex_replace', '^L', '') | map('int') | sort | list }}
+          {{ spe_mitigation_ladder_selected_entries | map(attribute='n') | map('int') | list }}
       block:
         - name: Every selected mitigation id exists and is not status planned
           ansible.builtin.assert:
@@ -91,12 +107,13 @@
             fail_msg: "{{ spe_mitigation_conflicts_problems | join('; ') }}"
             quiet: true
 
-        - name: Selected ladder mitigations are contiguous from L1
+        - name: Selected ladder mitigations are contiguous from the ladder's first
           ansible.builtin.assert:
             that: spe_mitigation_ladder_selected_n == (range(1, spe_mitigation_ladder_selected_n | length + 1) | list)
             fail_msg: >-
-              spe_mitigations selects non-contiguous ladder levels ({{ spe_mitigation_ladder_selected | join(', ') }});
-              select L1, then L2, ... with no gaps
+              spe_mitigations selects non-contiguous ladder mitigations ({{ spe_mitigation_ladder_selected | join(', ') }});
+              select the ladder's mitigations in its order (switches {{ spe_mitigation_ladder_switches | join(', ') }})
+              with no gaps
             quiet: true
   roles:
     - { role: os_provision, tags: [always], when: spe_provision == 'openstack' }

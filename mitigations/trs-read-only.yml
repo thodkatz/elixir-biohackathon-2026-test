@@ -1,4 +1,4 @@
-id: L1
+id: trs-read-only
 name: TRS read-only
 description: >
   TRS is GET-only at Traefik, and WES runs only installed TRS tools (no workflow_attachment, no other URL

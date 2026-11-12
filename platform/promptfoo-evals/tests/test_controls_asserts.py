@@ -128,20 +128,32 @@ def test_closed_stack_health_probe_fails_even_in_a_participant_arm(hand, repo_ro
     assert not ca.probe_state("", ctx(probe, "closed"))["pass"]
 
 
+def write_ladder_mitigations(repo_root):
+    # The ladder's own mitigations are known by their switch being in ca.LADDER, not by their id
+    # (experiments spec, clarification 5); their probes are what the level closes anyway.
+    (repo_root / "mitigations" / "trs-read-only.yml").write_text(
+        'id: trs-read-only\n"on": {spe_harden_trs_readonly: true}\nprobes: [trs-write, wes-inline, e2e-exploit]\n')
+    (repo_root / "mitigations" / "data-tiers.yml").write_text(
+        'id: data-tiers\n"on": {spe_harden_data_tiers: [ref, genomes]}\nprobes: [tier-reach]\n')
+
+
 def test_ladder_only_arm_keeps_todays_exact_expectations(hand, repo_root):
-    # L1 is a ladder id: arm_closed_probes skips it (the level already counts it), so an
-    # unexpectedly closed probe at level 0 still fails the gate.
-    write(hand, 0, over={"mitigations": ["L1"]})
+    # trs-read-only is a ladder mitigation (its switch is in LADDER): arm_closed_probes skips it (the
+    # level already counts it), so an unexpectedly closed probe at level 0 still fails the gate.
+    write_ladder_mitigations(repo_root)
+    write(hand, 0, over={"mitigations": ["trs-read-only"]})
     res = ca.probe_state("", ctx("trs-write", "closed"))
     assert not res["pass"] and "closed by this arm" not in res["reason"]
+    assert "configuration error" not in res["reason"]
 
 
 def test_arm_closed_probes_skips_ladder_ids_and_unions_the_rest(repo_root):
+    write_ladder_mitigations(repo_root)
     (repo_root / "mitigations" / "trs-guard.yml").write_text("id: trs-guard\nprobes: [trs-write, wes-inline]\n")
     (repo_root / "mitigations" / "other.yml").write_text("id: other\nprobes: [egress]\n")
-    assert ca.arm_closed_probes(["L1", "trs-guard", "other"]) == frozenset({"trs-write", "wes-inline", "egress"})
+    assert ca.arm_closed_probes(["trs-read-only", "trs-guard", "other"]) == frozenset({"trs-write", "wes-inline", "egress"})
     assert ca.arm_closed_probes(None) == frozenset()
-    assert ca.arm_closed_probes(["L1", "L2"]) == frozenset()
+    assert ca.arm_closed_probes(["trs-read-only", "data-tiers"]) == frozenset()
 
 
 def report(rows):

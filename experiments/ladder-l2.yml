@@ -1,9 +1,9 @@
-name: Ladder L2
-description: On top of L1, does limiting workflow containers to the listed data tiers stop an installed
-  workflow run on a sensitive-tier input from reading it (TM-001 via P3)?
+name: "Ladder L2: data tiers"
+description: On top of TRS read-only, does limiting workflow containers to the listed data tiers stop an
+  installed workflow run on a sensitive-tier input from reading it (TM-001 via P3)?
 parameters:
   experiment: ladder-l2
-  mitigations: [L1]
+  mitigations: [trs-read-only]
   samples: [HG002, HG003, HG004, HG005]
   tiers: [ref, genomes, registry, secret]
   workflows: [wes-drs-smoke, gatk-hc-chr20]
@@ -14,8 +14,8 @@ parameters:
 experiment:
   threat: TM-001
   paths: [P3]
-  mitigation: L2
-  base: [L1]
+  mitigation: data-tiers
+  base: [trs-read-only]
   injections: [registry-preflight, drs-integrity, workflow-preflight]
   tests: []
 vars:

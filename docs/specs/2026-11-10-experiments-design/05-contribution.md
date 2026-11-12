@@ -18,7 +18,7 @@ A participant fills the slots their idea needs and reuses the rest from the cata
 worked example: every slot filled, for four experiments. Common shapes, as words for the guides and not checked
 by anything:
 
-- **an attack** against an existing build: `mitigation: null`, `base` naming the build it breaks (e.g. `[L1, L2]`:
+- **an attack** against an existing build: `mitigation: null`, `base` naming the build it breaks (e.g. `[trs-read-only, data-tiers]`:
   "breaks `ladder-l2`"); the baseline arm shows the harm;
 - **a mitigation** against existing attacks: the experiment's `tests` and `injections` name attacks already in the
   catalogue; both arms show its effect;

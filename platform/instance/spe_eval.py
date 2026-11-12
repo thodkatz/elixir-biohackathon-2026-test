@@ -1136,7 +1136,7 @@ def path_summary(repo_root: Path, path_id: str) -> str:
 def mitigation_summary(repo_root: Path, mitigation_id: str) -> str:
     """`` `<id>` (`<switch>`[, `<switch2>`...]): <description, one line> ``, the switch(es) read
     from the mitigation's own `on` (never guessed from the naming convention: a reused catalogue
-    id such as `L1` does not follow `spe_mitigate_<id>`, only a freshly `spe-eval new`-written
+    id such as `trs-read-only` does not follow `spe_mitigate_<id>`, only a freshly `spe-eval new`-written
     one does)."""
     path = repo_root / "mitigations" / f"{mitigation_id}.yml"
     try:

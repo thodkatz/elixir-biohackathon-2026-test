@@ -80,6 +80,29 @@ def api_host(dir: Path | str) -> str:
     return _required(read_hosts(dir), "api_host")
 
 
+def _mitigation_text(mitigation_id: str, repo_root: Path | None) -> str:
+    """mitigations/<id>.yml's text. An id outside mitigations/*.yml, or not a bare filename, is a
+    configuration error."""
+    if not MITIGATION_ID.fullmatch(mitigation_id):
+        raise ConfigError(f"mitigations/{mitigation_id}.yml: not a mitigation id")
+    root = repo_root or REPO_ROOT
+    path = Path(root) / MITIGATIONS / f"{mitigation_id}.yml"
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise ConfigError(f"mitigations/{mitigation_id}.yml: {e}") from None
+
+
+def _top_level_value(text: str, key: str) -> str | None:
+    """The raw value of a top-level `key: value` line (the key bare or quoted, as the mitigation
+    files write `"on"`), or None when the file has no such line."""
+    for line in text.splitlines():
+        name, sep, raw = line.partition(":")
+        if sep and name.strip("'\"") == key and not line[:1].isspace():
+            return raw.strip()
+    return None
+
+
 def mitigation_probes(mitigation_id: str, repo_root: Path | None = None) -> frozenset[str]:
     """The `probes` list of mitigations/<id>.yml (experiments spec part 03, *The gate learns the
     arm*): every mitigation file writes `probes` as one flow-style list on its own line (`probes:
@@ -87,23 +110,38 @@ def mitigation_probes(mitigation_id: str, repo_root: Path | None = None) -> froz
     standard library only, unlike validate.py's fuller pyyaml read, which lints the files
     themselves. An id outside mitigations/*.yml, or not a bare filename, is a configuration error.
     """
-    if not MITIGATION_ID.fullmatch(mitigation_id):
-        raise ConfigError(f"mitigations/{mitigation_id}.yml: not a mitigation id")
-    root = repo_root or REPO_ROOT
-    path = Path(root) / MITIGATIONS / f"{mitigation_id}.yml"
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as e:
-        raise ConfigError(f"mitigations/{mitigation_id}.yml: {e}") from None
-    for line in text.splitlines():
-        key, sep, raw = line.partition(":")
-        if key.strip() != "probes" or not sep:
-            continue
-        raw = raw.strip()
-        if not (raw.startswith("[") and raw.endswith("]")):
-            raise ConfigError(f"mitigations/{mitigation_id}.yml: probes must be a flow list")
-        return frozenset(item.strip().strip("'\"") for item in raw[1:-1].split(",") if item.strip())
-    return frozenset()
+    raw = _top_level_value(_mitigation_text(mitigation_id, repo_root), "probes")
+    if raw is None:
+        return frozenset()
+    if not (raw.startswith("[") and raw.endswith("]")):
+        raise ConfigError(f"mitigations/{mitigation_id}.yml: probes must be a flow list")
+    return frozenset(item.strip().strip("'\"") for item in raw[1:-1].split(",") if item.strip())
+
+
+def mitigation_switches(mitigation_id: str, repo_root: Path | None = None) -> frozenset[str]:
+    """The Ansible switch names a mitigation sets: the keys of mitigations/<id>.yml's `on`, which
+    every mitigation file writes as one flow mapping on its own line (`"on": {spe_harden_egress:
+    true}`), read from that line as `mitigation_probes` reads `probes`. Empty for a planned
+    mitigation (no `on` yet) or one written in block style. A ladder mitigation is one whose switch
+    is in controls_asserts.LADDER (experiments spec, clarification 5: the ladder's order lives
+    there, not in the ids)."""
+    raw = _top_level_value(_mitigation_text(mitigation_id, repo_root), "on")
+    if not raw or not (raw.startswith("{") and raw.endswith("}")):
+        return frozenset()
+    keys, depth, part = [], 0, ""
+    for ch in raw[1:-1] + ",":
+        if ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            key = part.split(":", 1)[0].strip().strip("'\"")
+            if key:
+                keys.append(key)
+            part = ""
+        else:
+            part += ch
+    return frozenset(keys)
 
 
 def check_hardening(record: object) -> dict:
@@ -122,7 +160,7 @@ def check_hardening(record: object) -> dict:
     beyond its unbroken leading run. This holds for an experiment's arm too (spec part 03, *An arm
     is its mitigation set, not a level*): a participant mitigation adds no level of its own.
 
-    `mitigations` (an experiment's arm: every mitigation on, ladder ids and the one under test) and
+    `mitigations` (an experiment's arm: every mitigation on, the ladder's and the one under test) and
     `experiment` (its id), when present, are checked only for shape: a list of non-empty strings, and a
     string (empty for a `spe_experiments` build with no experiment selected: `platform/ansible/README.md`'s
     `[]`/`""` defaults). Neither is required, so the ladder's own hand-off (which carries neither,

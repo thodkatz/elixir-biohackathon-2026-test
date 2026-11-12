@@ -143,10 +143,10 @@ def test_hardening_accepts_mixed_injections(handoff_dir):
 
 
 def test_hardening_accepts_mitigations_and_experiment(handoff_dir):
-    record = hardening(mitigations=["L1", "trs-guard"], experiment="trs-guard")
+    record = hardening(mitigations=["trs-read-only", "trs-guard"], experiment="trs-guard")
     (handoff_dir / "hardening.json").write_text(json.dumps(record))
     loaded = handoff.load_hardening(handoff_dir)
-    assert loaded["mitigations"] == ["L1", "trs-guard"] and loaded["experiment"] == "trs-guard"
+    assert loaded["mitigations"] == ["trs-read-only", "trs-guard"] and loaded["experiment"] == "trs-guard"
 
 
 def test_hardening_accepts_the_spe_experiments_defaults(handoff_dir):
@@ -158,7 +158,7 @@ def test_hardening_accepts_the_spe_experiments_defaults(handoff_dir):
     assert loaded["mitigations"] == [] and loaded["experiment"] == ""
 
 
-@pytest.mark.parametrize("change", [{"mitigations": "L1"}, {"mitigations": [1]}, {"mitigations": [""]},
+@pytest.mark.parametrize("change", [{"mitigations": "trs-read-only"}, {"mitigations": [1]}, {"mitigations": [""]},
                                      {"experiment": 1}, {"experiment": True}])
 def test_malformed_mitigations_or_experiment(handoff_dir, change):
     (handoff_dir / "hardening.json").write_text(json.dumps(hardening(**change)))
@@ -177,10 +177,28 @@ def test_mitigation_probes(repo_root):
 
 def test_mitigation_probes_reads_the_real_ladder_files():
     # Sanity check against the repository's own mitigations/*.yml, with the real REPO_ROOT.
-    assert handoff.mitigation_probes("L1") == frozenset({"trs-write", "wes-inline", "e2e-exploit"})
+    assert handoff.mitigation_probes("trs-read-only") == frozenset({"trs-write", "wes-inline", "e2e-exploit"})
 
 
-@pytest.mark.parametrize("mitigation_id", ["nope", "../../etc/passwd", "L1/../../etc"])
+def test_mitigation_switches_reads_the_real_ladder_files():
+    # A ladder mitigation is known by its switch (controls_asserts.LADDER), not its id
+    # (experiments spec, clarification 5).
+    assert handoff.mitigation_switches("trs-read-only") == frozenset({"spe_harden_trs_readonly"})
+    assert handoff.mitigation_switches("data-tiers") == frozenset({"spe_harden_data_tiers"})
+    assert handoff.mitigation_switches("egress-allowlist") == frozenset({"spe_harden_egress"})
+    assert handoff.mitigation_switches("typed-tools") == frozenset()   # planned: no `on` yet
+
+
+def test_mitigation_switches_flow_mapping_keys(repo_root):
+    mitigations = repo_root / "mitigations"
+    mitigations.mkdir(parents=True)
+    (mitigations / "two.yml").write_text('id: two\n"on": {spe_mitigate_a: [x, y], \'spe_mitigate_b\': {k: v}}\n')
+    (mitigations / "block.yml").write_text('id: block\n"on":\n  spe_mitigate_c: true\n')
+    assert handoff.mitigation_switches("two", repo_root) == frozenset({"spe_mitigate_a", "spe_mitigate_b"})
+    assert handoff.mitigation_switches("block", repo_root) == frozenset()
+
+
+@pytest.mark.parametrize("mitigation_id", ["nope", "../../etc/passwd", "trs-read-only/../../etc"])
 def test_mitigation_probes_unknown_or_unsafe_id(repo_root, mitigation_id):
     with pytest.raises(handoff.ConfigError):
         handoff.mitigation_probes(mitigation_id, repo_root)

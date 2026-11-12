@@ -134,13 +134,13 @@ def test_attack_only_fixture_passes(tmp_path):
 
 
 def test_mitigation_only_fixture_passes(tmp_path):
-    d = write_experiment(tmp_path, "mitigation-only", threat="TM-003", paths=["P2"], mitigation="L2",
+    d = write_experiment(tmp_path, "mitigation-only", threat="TM-003", paths=["P2"], mitigation="data-tiers",
                           base=[], injections=[], tests=["list-workflows"])
     assert ce.check("mitigation-only", **real_dirs(experiments_dir=d)) == []
 
 
 def test_both_fixture_passes(tmp_path):
-    d = write_experiment(tmp_path, "both", threat="TM-003", paths=["P1"], mitigation="L1", base=[],
+    d = write_experiment(tmp_path, "both", threat="TM-003", paths=["P1"], mitigation="trs-read-only", base=[],
                           injections=["registry-preflight"], tests=[], canaries=["registry_tokens"])
     assert ce.check("both", **real_dirs(experiments_dir=d)) == []
 
@@ -158,13 +158,13 @@ def test_unknown_threat_is_reported(tmp_path):
 
 def test_mitigation_off_mismatch_is_reported(tmp_path):
     mitigations_dir = copy_dir("mitigations", tmp_path)
-    (mitigations_dir / "L2.yml").write_text(
-        (mitigations_dir / "L2.yml").read_text().replace(
+    (mitigations_dir / "data-tiers.yml").write_text(
+        (mitigations_dir / "data-tiers.yml").read_text().replace(
             '"off": {spe_harden_data_tiers: []}', '"off": {spe_harden_data_tiers: [ref]}'
         )
     )
     problems = ce.check(None, **real_dirs(mitigations_dir=mitigations_dir, experiments_dir=tmp_path / "no-experiments"))
-    assert any(p.id == "L2" and "does not match the group_vars default" in p.problem for p in problems), problems
+    assert any(p.id == "data-tiers" and "does not match the group_vars default" in p.problem for p in problems), problems
 
 
 def test_two_mitigations_sharing_an_ansible_key_is_reported(tmp_path):
@@ -172,16 +172,16 @@ def test_two_mitigations_sharing_an_ansible_key_is_reported(tmp_path):
     (mitigations_dir / "mx.yml").write_text(
         'id: mx\n'
         'name: Duplicate on-key fixture\n'
-        'description: Shares L1\'s Ansible key, to exercise check_experiment.py\'s catalog check wiring.\n'
+        'description: Shares trs-read-only\'s Ansible key, to exercise check_experiment.py\'s catalog check wiring.\n'
         'closes: [P2]\n'
         '"on": {spe_harden_trs_readonly: true}\n'
         '"off": {spe_harden_trs_readonly: false}\n'
     )
     problems = ce.check(None, **real_dirs(mitigations_dir=mitigations_dir, experiments_dir=tmp_path / "no-experiments"))
     # validate.check_mitigations_catalog names every owner of the contested key, not just two:
-    # "L1.yml" and "mx.yml" both appear, not the word "both" itself.
+    # "trs-read-only.yml" and "mx.yml" both appear, not the word "both" itself.
     assert any(p.id == "mitigations" and "spe_harden_trs_readonly" in p.problem
-               and "L1.yml" in p.problem and "mx.yml" in p.problem
+               and "trs-read-only.yml" in p.problem and "mx.yml" in p.problem
                for p in problems), problems
 
 
@@ -199,10 +199,10 @@ def test_todo_in_experiment_file_is_reported(tmp_path):
 
 def test_todo_in_mitigation_file_is_reported(tmp_path):
     mitigations_dir = copy_dir("mitigations", tmp_path)
-    (mitigations_dir / "L2.yml").write_text((mitigations_dir / "L2.yml").read_text() + "# TODO: explain\n")
-    d = write_experiment(tmp_path, "todo-mitigation", threat="TM-003", paths=["P2"], mitigation="L2")
+    (mitigations_dir / "data-tiers.yml").write_text((mitigations_dir / "data-tiers.yml").read_text() + "# TODO: explain\n")
+    d = write_experiment(tmp_path, "todo-mitigation", threat="TM-003", paths=["P2"], mitigation="data-tiers")
     problems = ce.check("todo-mitigation", **real_dirs(experiments_dir=d, mitigations_dir=mitigations_dir))
-    assert any(p.id == "L2" and "TODO left in the mitigation file" in p.problem for p in problems), problems
+    assert any(p.id == "data-tiers" and "TODO left in the mitigation file" in p.problem for p in problems), problems
 
 
 def test_todo_in_tests_file_is_reported(tmp_path):

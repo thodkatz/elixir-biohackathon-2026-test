@@ -8,7 +8,7 @@ names them.
 |---|---|---|---|
 | Threat | `threats/TM-NNN-<slug>.md` | `TM-NNN` | yes (TM-001 … TM-005), checked by `validate.py` |
 | Path | `paths/P<n>-<slug>.md` | `P<n>` | no: P1–P4 are a table in the ladder's design text |
-| Mitigation | `mitigations/<id>.yml` | `L<n>` for ladder levels, else kebab-case | no: four Ansible variables |
+| Mitigation | `mitigations/<id>.yml` | kebab-case, naming what it does (e.g. `trs-read-only`), never a ladder position | no: four Ansible variables |
 | Injection | `platform/ansible/catalog/injections/fixtures.json` entry plus its payload file | kebab-case `id` of the entry | yes: three, each on its own `spe_inject_*` switch |
 | Test | `platform/promptfoo-evals/tests/<group>.yaml` (ladder) and `tests/experiments/<name>.yaml` | kebab-case `id` in the test's `metadata` | ladder tests yes; experiment tests no |
 | Experiment | `experiments/<name>.yml` | the file's stem | no |
@@ -45,7 +45,7 @@ parameter.
 `mitigations/<id>.yml`:
 
 ```yaml
-id: L2
+id: data-tiers
 name: Data tiers
 description: Workflow containers mount only the listed tiers of /data-share and /drs-data.
 closes: [P3]                 # path ids; may be empty for a control that narrows rather than closes
@@ -58,7 +58,7 @@ probes: [tier-reach]         # optional: the controls-suite probes it closes whe
 
 - `on` and `off` are the Ansible values; `off` must equal the defaults in `platform/ansible/inventory/group_vars/all.yml`
   (decision 4), so a build without the mitigation is today's build. A value may be a list or a map, which a plain
-  boolean switch could not express (L2 is a list).
+  boolean switch could not express (`data-tiers` is a list).
 - A participant's mitigation adds its own variable, default off, named `spe_mitigate_<id with _>`, and guards
   its Ansible change with it.
   Like an injection on a new surface (*Attacks*), its change carries the `stack`, `drs`, `trs` or `frontend` tag so
@@ -149,9 +149,14 @@ mitigation against attacks already merged names theirs); `spe-eval` builds the a
 | `closed_by` | a mitigation id or null | `mitigations/` |
 
 `matrix.CATALOGUE` is built from these files at import (decision 3); its role as the one definition the lint and
-`counts` share does not change, and the ladder's ids (TM-001…, P1–P4, L1–L5) keep their meaning, so committed
-counts stay valid. L4 and L5 stay valid `closed_by` values while their mitigation files do not yet exist: a
-mitigation may be listed with `status: planned` and no `on`/`off`, which the form does not offer.
+`counts` share does not change. The ladder's threat and path ids (TM-001…, P1–P4) keep their meaning; its
+mitigations are named for what they do (`trs-read-only`, `data-tiers`, `egress-allowlist`, `typed-tools`,
+`answer-airlock`, clarification 5), and `matrix.py` reads an old `closed_by: L1`…`L5` in a stored report as the
+new id, so older reports still count and the committed counts render unchanged. `typed-tools` and
+`answer-airlock` are valid `closed_by` values before they are built: a mitigation may be listed with
+`status: planned` and no `on`/`off`, which the form does not offer. Which mitigations are the ladder's, and in
+what order, is not in their ids or files: it is the ladder's switch order (`controls_asserts.py`'s `LADDER`), and
+a ladder mitigation is one whose `on` sets one of those switches.
 
 ## Experiments
 

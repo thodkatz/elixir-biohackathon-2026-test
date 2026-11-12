@@ -228,7 +228,7 @@ new template), how the person tests it, and how a tested change becomes a templa
 | Path | What |
 |---|---|
 | `threats/`, `vocabulary.yaml`, `validate.py` | Threat model catalog (`TM-NNN-*.md`, new entries start from `threats/TEMPLATE.md`), its controlled vocabulary and validator |
-| `paths/`, `mitigations/` | Paths (`P<n>-*.md`) and mitigations (`<id>.yml`: ladder levels `L<n>` plus contributed ones), both checked by `validate.py` |
+| `paths/`, `mitigations/` | Paths (`P<n>-*.md`) and mitigations (`<id>.yml`, named for what it does: the ladder's, e.g. `trs-read-only`, plus contributed ones), both checked by `validate.py` |
 | `experiments/`, `check_experiment.py` | A threat and path measured against a mitigation (`<name>.yml`, checked by `validate.py` and `check_experiment.py`; `experiments/README.md` indexes them): the `spe-experiments` Coder template's presets (`platform/coder/experiments-template/`) |
 | `CONTRIBUTING.md` | How to fill an experiment's slots and send one back as a pull request |
 | `platform/ansible/` | Playbooks that create, verify, archive and destroy one SPE instance (`platform/ansible/README.md`) |

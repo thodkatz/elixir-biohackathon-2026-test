@@ -202,15 +202,16 @@ the receiver down whatever the switch was.
 Five switches in `group_vars/all.yml`, all off by default: an instance file without them builds today's
 deployment (L0).
 
-| Switch | Level | What it does |
-|---|---|---|
-| `spe_harden_trs_readonly` | L1 | TRS GET-only at Traefik; WES runs only installed TRS tools |
-| `spe_harden_data_tiers` | L2 | the tiers workflow containers mount, e.g. `[ref, genomes]`; `[]` mounts all |
-| `spe_harden_egress` | L3 | the sandbox reaches only the API host on 443 |
-| `spe_agent_tool_surface` | L4 | anything but `shell` gives the agent only typed tools |
-| `spe_harden_airlock` | L5 | a pattern filter on the agent's final answer; default `false`; only the AG-UI agent has an airlock, so `create.yml` refuses it while `openwebui` is in `spe_frontends` |
+| Switch | Level | Mitigation (`mitigations/<id>.yml`) | What it does |
+|---|---|---|---|
+| `spe_harden_trs_readonly` | L1 | `trs-read-only` | TRS GET-only at Traefik; WES runs only installed TRS tools |
+| `spe_harden_data_tiers` | L2 | `data-tiers` | the tiers workflow containers mount, e.g. `[ref, genomes]`; `[]` mounts all |
+| `spe_harden_egress` | L3 | `egress-allowlist` | the sandbox reaches only the API host on 443 |
+| `spe_agent_tool_surface` | L4 | `typed-tools` (planned) | anything but `shell` gives the agent only typed tools |
+| `spe_harden_airlock` | L5 | `answer-airlock` (planned) | a pattern filter on the agent's final answer; default `false`; only the AG-UI agent has an airlock, so `create.yml` refuses it while `openwebui` is in `spe_frontends` |
 
-`hardening.json`'s `level` counts the leading switches that are on, in this order; a non-contiguous pattern
+`hardening.json`'s `level` counts the leading switches that are on, in this order (`controls_asserts.py`'s
+`LADDER` holds it; mitigation ids name what each does, not its place); a non-contiguous pattern
 never counts past its first switch that is off. The `handoff` role writes it (`roles/handoff/tasks/hardening.yml`).
 
 ### L1: `spe_harden_trs_readonly`
@@ -260,8 +261,9 @@ experiment's `vars` into the build, in Terraform, not here
 (`../../docs/specs/2026-11-10-experiments-design/`, part 02).
 
 `create.yml` checks `spe_mitigations` before anything is created (skipped when it is empty): an unknown or
-`status: planned` id, an unmet `requires`, a `conflicts` pair both selected, or non-contiguous ladder levels
-(a `Ln` selected without every `L1`..`L<n-1>`) each refuse the build, naming the offending id(s). `hardening.json`
+`status: planned` id, an unmet `requires`, a `conflicts` pair both selected, or non-contiguous ladder mitigations
+(one whose switch is the hardening ladder's n-th, below, selected without those of the switches before it, e.g.
+`data-tiers` without `trs-read-only`) each refuse the build, naming the offending id(s). `hardening.json`
 records `mitigations` and `experiment` (`[]`/`""` when experiments are off), read by the controls suite and
 `run.sh`.
 

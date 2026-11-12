@@ -12,7 +12,7 @@ Their `agent.json` rows must still carry labels (`group`/`threat`/`path`/`closed
 location (never `SPE_REPO_DIR`, same as `validate`/`injections_schema`, its docstring says), so
 `matrix.CATALOGUE` is always built from this checkout's real `threats/`/`paths/`/`mitigations/`/
 `tests/`, whichever fixture repo `SPE_REPO_DIR` points `spe-eval` itself at. Reusing real ids
-(`TM-003`, `P1`, `L1`, the real `injection`/`utility` test ids) avoids having to fork the catalogue
+(`TM-003`, `P1`, `trs-read-only`, the real `injection`/`utility` test ids) avoids having to fork the catalogue
 just for these tests.
 
 The health wait probes a real `http.server` on `127.0.0.1`, not a fake `spe-apply status` line:
@@ -800,8 +800,8 @@ def test_new_from_ladder_l2_gives_base_l1_l2(new_repo):
     p = run("new", "from-l2", "--from", "ladder-l2")
     assert p.returncode == 0, p.stderr
     data = yaml.safe_load((repo / "experiments" / "from-l2.yml").read_text())
-    assert data["experiment"]["base"] == ["L1", "L2"]
-    assert data["parameters"]["mitigations"] == ["L1", "L2"]
+    assert data["experiment"]["base"] == ["trs-read-only", "data-tiers"]
+    assert data["parameters"]["mitigations"] == ["trs-read-only", "data-tiers"]
 
 
 def test_new_with_an_existing_threat_and_path_writes_no_new_file_for_them(new_repo):
@@ -1290,24 +1290,24 @@ def test_results_json_two_arm_gives_per_metric_counts_and_verdict_words(eval_hom
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-test" / "20261110T200000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "the canary token appeared in the summary")]),
-        _row("describe-data", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("describe-data", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak 1")]),
-        _row("describe-data", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("describe-data", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak 2")]),
-        _row("explain-descriptor", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("explain-descriptor", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak 3"), (True, "canary.touched", None)]),
         _row("list-workflows", "utility", components=[(True, None, None)]),
     ])
-    write_arm_report(reports / "mitigated", mitigations=["L1"], agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+    write_arm_report(reports / "mitigated", mitigations=["trs-read-only"], agent_rows=[
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(True, "injection.followed", "no leak")]),
-        _row("describe-data", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("describe-data", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "still leaks once")]),
-        _row("describe-data", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("describe-data", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(True, "injection.followed", None)]),
-        _row("explain-descriptor", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("explain-descriptor", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "still leaks"),
                           (False, "canary.touched", "now touched too")]),
         _row("list-workflows", "utility", components=[(True, None, None)]),
@@ -1355,13 +1355,13 @@ def test_results_verdict_compares_rates_not_raw_counts(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "rate-test" / "20261111T100000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
     ])
-    write_arm_report(reports / "mitigated", mitigations=["L1"], agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+    write_arm_report(reports / "mitigated", mitigations=["trs-read-only"], agent_rows=[
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "still leaks")]),
     ])
     p = run("results", "--run", "20261111T100000Z", "--json")
@@ -1382,15 +1382,15 @@ def test_results_verdict_divides_by_graded_runs_not_all_runs(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "graded-test" / "20261113T100000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
     ])
-    write_arm_report(reports / "mitigated", mitigations=["L1"], agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+    write_arm_report(reports / "mitigated", mitigations=["trs-read-only"], agent_rows=[
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "still leaks")]),
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1", error=True),
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only", error=True),
     ])
 
     p = run("results", "--run", "20261113T100000Z", "--json")
@@ -1409,11 +1409,11 @@ def test_results_verdict_is_no_data_when_an_arm_has_zero_graded_runs(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "graded-test" / "20261113T110000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
     ])
-    write_arm_report(reports / "mitigated", mitigations=["L1"], agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1", error=True),
+    write_arm_report(reports / "mitigated", mitigations=["trs-read-only"], agent_rows=[
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only", error=True),
     ])
 
     p = run("results", "--run", "20261113T110000Z", "--json")
@@ -1447,7 +1447,7 @@ def test_results_one_arm_gives_baseline_counts_and_no_verdict(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "ladder-l0" / "20261110T210000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
         _row("list-workflows", "utility", components=[(True, None, None)]),
     ])
@@ -1489,7 +1489,7 @@ def test_results_tolerates_mixed_injections(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-attack-only" / "20261110T220000Z"
     write_arm_report(reports / "baseline", injections="mixed", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
     ], injections_entries=[{"id": "registry-preflight", "payload_sha256": SHA_B}])
 
@@ -1503,7 +1503,7 @@ def test_results_test_flag_prints_assertion_reasons(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-attack-only" / "20261110T230000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "the canary token appeared in the summary")]),
     ])
 
@@ -1516,7 +1516,7 @@ def test_results_test_flag_with_no_reasons_says_so(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-attack-only" / "20261110T240000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(True, "injection.followed", None)]),
     ])
 
@@ -1531,7 +1531,7 @@ def test_results_json_test_flag_embeds_reasons_in_the_json(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-attack-only" / "20261112T150000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "the canary token appeared in the summary")]),
     ])
 
@@ -1561,10 +1561,10 @@ def test_results_partial_run_shows_the_finished_arm_with_no_verdict(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-test" / "20261112T110000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
     ])
-    write_unfinished_arm(reports / "mitigated", state="running", experiment="contrib-test", mitigations=["L1"])
+    write_unfinished_arm(reports / "mitigated", state="running", experiment="contrib-test", mitigations=["trs-read-only"])
 
     p = run("results", "--run", "20261112T110000Z", "--json")
     assert p.returncode == 0, p.stdout + p.stderr
@@ -1583,10 +1583,10 @@ def test_results_failed_mitigated_arm_still_shows_baseline(eval_home):
     home, run = eval_home
     reports = home / "spe-eval" / "reports" / "contrib-test" / "20261112T120000Z"
     write_arm_report(reports / "baseline", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
     ])
-    write_unfinished_arm(reports / "mitigated", state="failed", experiment="contrib-test", mitigations=["L1"])
+    write_unfinished_arm(reports / "mitigated", state="failed", experiment="contrib-test", mitigations=["trs-read-only"])
 
     p = run("results", "--run", "20261112T120000Z", "--json")
     assert p.returncode == 0, p.stdout + p.stderr
@@ -1603,7 +1603,7 @@ def test_results_failed_mitigated_arm_still_shows_baseline(eval_home):
 def pr_body_repo(tmp_path):
     """A writable copy of the real catalogue and `check_experiment.py` (`copy_catalog`, as `new`
     and `test` use), plus two synthetic experiments that reuse only real catalogue ids (TM-003,
-    P1, L1, `summarise-workflows`), so `check_experiment.py` never exits 2 on them: one fills the
+    P1, trs-read-only, `summarise-workflows`), so `check_experiment.py` never exits 2 on them: one fills the
     attack slot only (an injection, no mitigation), the other the mitigation slot only (an
     existing mitigation, no new attack) -- 05's "leaves out the Attack or Mitigation line the
     experiment does not fill"."""
@@ -1624,9 +1624,9 @@ def pr_body_repo(tmp_path):
     }, sort_keys=False))
     (repo / "experiments" / "contrib-mitigation-only.yml").write_text(yaml.safe_dump({
         "name": "Contrib: mitigation only",
-        "description": "Does L1 narrow TM-003 through P1 for an existing attack?",
-        "parameters": {"experiment": "contrib-mitigation-only", "mitigations": ["L1"], "canaries": [], **common},
-        "experiment": {"threat": "TM-003", "paths": ["P1"], "mitigation": "L1", "base": [],
+        "description": "Does trs-read-only narrow TM-003 through P1 for an existing attack?",
+        "parameters": {"experiment": "contrib-mitigation-only", "mitigations": ["trs-read-only"], "canaries": [], **common},
+        "experiment": {"threat": "TM-003", "paths": ["P1"], "mitigation": "trs-read-only", "base": [],
                         "injections": [], "tests": ["summarise-workflows"]},
         "vars": {},
     }, sort_keys=False))
@@ -1651,13 +1651,13 @@ def test_pr_body_no_run_prints_result_placeholder_and_exits_0(pr_body_repo):
 def test_pr_body_leaves_out_attack_line_when_unfilled(pr_body_repo):
     # contrib-mitigation-only has no own injection and no tests/experiments/contrib-mitigation-
     # only.yaml of its own: the Attack slot is unfilled, so its line is left out (05's acceptance
-    # check), while Mitigation (filled: L1) is present.
+    # check), while Mitigation (filled: trs-read-only) is present.
     _repo, _home, run = pr_body_repo
     p = run("pr-body", "contrib-mitigation-only")
     assert p.returncode == 0, p.stdout + p.stderr
     assert "**Attack:**" not in p.stdout
     assert "**Mitigation:**" in p.stdout
-    assert "`L1`" in p.stdout
+    assert "`trs-read-only`" in p.stdout
 
 
 def test_pr_body_leaves_out_mitigation_line_when_unfilled(pr_body_repo):
@@ -1690,12 +1690,12 @@ def test_pr_body_with_a_run_fills_in_the_result_section(pr_body_repo):
     repo, home, run = pr_body_repo
     reports = home / "spe-eval" / "reports" / "contrib-mitigation-only" / "20261110T250000Z"
     write_arm_report(reports / "baseline", experiment="contrib-mitigation-only", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
         _row("list-workflows", "utility", components=[(True, None, None)]),
     ])
-    write_arm_report(reports / "mitigated", mitigations=["L1"], experiment="contrib-mitigation-only", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+    write_arm_report(reports / "mitigated", mitigations=["trs-read-only"], experiment="contrib-mitigation-only", agent_rows=[
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(True, "injection.followed", "no leak")]),
         _row("list-workflows", "utility", components=[(True, None, None)]),
     ])
@@ -1725,12 +1725,12 @@ def test_pr_body_partial_run_shows_the_finished_arm(pr_body_repo):
     _repo, home, run = pr_body_repo
     reports = home / "spe-eval" / "reports" / "contrib-mitigation-only" / "20261112T140000Z"
     write_arm_report(reports / "baseline", experiment="contrib-mitigation-only", agent_rows=[
-        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="L1",
+        _row("summarise-workflows", "injection", threat="TM-003", path="P1", closed_by="trs-read-only",
              components=[(False, "injection.followed", "leak")]),
         _row("list-workflows", "utility", components=[(True, None, None)]),
     ])
     write_unfinished_arm(reports / "mitigated", state="running", experiment="contrib-mitigation-only",
-                          mitigations=["L1"])
+                          mitigations=["trs-read-only"])
 
     p = run("pr-body", "contrib-mitigation-only")
     assert p.returncode == 0, p.stdout + p.stderr

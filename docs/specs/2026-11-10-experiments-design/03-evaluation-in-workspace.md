@@ -74,9 +74,10 @@ ends (`ok`, `gate refused`, `failed`, `stopped`), since `run.sh` writes its own 
 uses whatever model the workspace's agent is configured with, paid or not; `spe-eval` puts no guard on the provider.
 
 **An arm is its mitigation set, not a level.** `run.sh` today names a run by `hardening.json`'s level, and
-`handoff.check_hardening` requires that level to count the ladder switches from L1 without a gap. Both stay true for
-the ladder: the level is still derived from the ladder mitigations that are on, and `check_experiment.py` refuses
-an experiment whose ladder mitigations (base plus the one under test) are not contiguous from L1. A participant's
+`handoff.check_hardening` requires that level to count the ladder switches from the first without a gap. Both stay true for
+the ladder: the level is still derived from the ladder mitigations that are on, and `create.yml` refuses
+a build whose ladder mitigations (base plus the one under test) are not contiguous from the ladder's
+first (`trs-read-only`). A participant's
 mitigation adds no level, so both arms of `trs-guard` are level 0; what tells them apart is the arm, in the
 reports directory, `run.json` (`experiment`, `arm`, `mitigations`) and the eval description. The ladder's
 controller-side runs keep `reports/L<n>/` and the matrix as they are.

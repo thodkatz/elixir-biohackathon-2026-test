@@ -1,4 +1,4 @@
-id: L4
+id: typed-tools
 name: Typed tool surface
 description: >
   spe_agent_tool_surface set to anything but shell: typed GA4GH tools replace the open-terminal shell, returning

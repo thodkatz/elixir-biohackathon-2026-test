@@ -1,8 +1,8 @@
 """create.yml's pre_tasks: spe_mitigations checked against mitigations/<id>.yml before anything is
 created (spec docs/specs/2026-11-10-experiments-design/02-coder-template.md, *Into Ansible*): an
 unknown or planned id, an unmet `requires`, a `conflicts` pair both selected, and selected ladder
-mitigations not contiguous from L1, are all refused; empty spe_mitigations (the default) reads no
-file, so a build without spe_experiments is unchanged.
+mitigations not contiguous in the ladder's order (LADDER), are all refused; empty spe_mitigations (the default)
+reads no file, so a build without spe_experiments is unchanged.
 
 Loads the task from playbooks/create.yml by name (as test_repo_local_vars.py does for roles/repo),
 instead of duplicating its Jinja here, so this test tracks the source and cannot silently drift
@@ -60,7 +60,7 @@ def test_empty_spe_mitigations_reads_no_file(tmp_path):
 
 
 def test_known_non_planned_mitigations_pass(tmp_path):
-    p = run(tmp_path, REAL_MITIGATIONS, ["L1", "L2"])
+    p = run(tmp_path, REAL_MITIGATIONS, ["trs-read-only", "data-tiers"])
     assert p.returncode == 0, p.stdout[-2000:] + p.stderr[-2000:]
 
 
@@ -71,9 +71,9 @@ def test_unknown_id_refused(tmp_path):
 
 
 def test_planned_id_refused(tmp_path):
-    p = run(tmp_path, REAL_MITIGATIONS, ["L4"])  # status: planned, mitigations/L4.yml
+    p = run(tmp_path, REAL_MITIGATIONS, ["typed-tools"])  # status: planned, mitigations/typed-tools.yml
     assert p.returncode != 0
-    assert "unknown or planned" in p.stdout and "L4" in p.stdout
+    assert "unknown or planned" in p.stdout and "typed-tools" in p.stdout
 
 
 def test_template_yml_is_not_a_known_mitigation(tmp_path):
@@ -124,7 +124,7 @@ def test_conflicting_mitigation_not_selected_passes(tmp_path):
     assert p.returncode == 0, p.stdout[-2000:] + p.stderr[-2000:]
 
 
-@pytest.mark.parametrize("selected", [["L2"], ["L1", "L3"]])
+@pytest.mark.parametrize("selected", [["data-tiers"], ["trs-read-only", "egress-allowlist"]])
 def test_non_contiguous_ladder_refused(tmp_path, selected):
     p = run(tmp_path, REAL_MITIGATIONS, selected)
     assert p.returncode != 0
@@ -132,7 +132,7 @@ def test_non_contiguous_ladder_refused(tmp_path, selected):
 
 
 def test_contiguous_ladder_passes(tmp_path):
-    p = run(tmp_path, REAL_MITIGATIONS, ["L1", "L2"])
+    p = run(tmp_path, REAL_MITIGATIONS, ["trs-read-only", "data-tiers"])
     assert p.returncode == 0, p.stdout[-2000:] + p.stderr[-2000:]
 
 
@@ -143,5 +143,15 @@ def test_the_default_root_is_the_repositorys_mitigations(tmp_path):
     play_dir = tmp_path / "platform/ansible/playbooks"
     play_dir.mkdir(parents=True)
     (tmp_path / "mitigations").symlink_to(REAL_MITIGATIONS)
-    p = run(tmp_path, None, ["L1"], play_dir)
+    p = run(tmp_path, None, ["trs-read-only"], play_dir)
     assert p.returncode == 0, p.stdout[-2000:] + p.stderr[-2000:]
+
+
+def test_ladder_switches_match_controls_asserts_ladder():
+    """create.yml's ladder switch list is a copy of controls_asserts.py's LADDER, the ladder's one
+    ordered list (ids no longer say a mitigation's place: experiments spec, clarification 5)."""
+    import ast
+    source = (REPO_ROOT / "platform/promptfoo-evals/controls_asserts.py").read_text()
+    ladder = next(ast.literal_eval(node.value) for node in ast.parse(source).body
+                  if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "LADDER")
+    assert mitigation_check_task()["vars"]["spe_mitigation_ladder_switches"] == list(ladder)

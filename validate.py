@@ -20,7 +20,8 @@ paths/TEMPLATE.md):
   - the body has exactly the headings `## Route`, `## Shown by`, in order
 
 Checks per mitigation (mitigations/<id>.yml):
-  - only the allowed keys are present; `id` equals the file stem
+  - only the allowed keys are present; `id` is kebab-case (never the ladder's
+    old L<n>/l<n> shape) and equals the file stem
   - `closes` names existing paths; `requires` and `conflicts` name existing
     mitigations; `probes` names existing controls probes
     (platform/promptfoo-evals/probes/*.sh)
@@ -118,12 +119,12 @@ PATH_FILENAME_PATTERN = re.compile(r"^(P\d+)-[a-z0-9-]+\.md$")
 PATH_REQUIRED_FIELDS = ["id", "name", "description", "reaches"]
 PATH_BODY_HEADINGS = [(2, "Route"), (2, "Shown by")]
 
-MITIGATION_ID_PATTERN = re.compile(r"^(?:L\d+|[a-z0-9]+(?:-[a-z0-9]+)*)$")
-# A lowercase l<n> matches the kebab-case branch above (a single word of letters and digits needs
-# no hyphen), so it would otherwise pass as an ordinary contributed id indistinguishable from the
-# ladder's own reserved L<n> (uppercase only): refused instead, on the ruling that the whole l<n>
-# shape is reserved, not just L<n>.
-LOWERCASE_LADDER_ID_PATTERN = re.compile(r"^l\d+$")
+MITIGATION_ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+# An id names what the mitigation does (clarification 5 of the experiments spec), never a ladder
+# position: the ladder's order lives in controls_asserts.LADDER (its switches), not in ids. A bare
+# L<n>/l<n> id (the ladder's old ids) is refused with that reason rather than a bare format error;
+# l<n> would otherwise pass as a one-word kebab-case id and read as a ladder level.
+LADDER_SHAPED_ID_PATTERN = re.compile(r"^[Ll]\d+$")
 MITIGATION_REQUIRED_FIELDS = ["id", "name", "description", "closes"]
 MITIGATION_OPTIONAL_FIELDS = ["on", "off", "requires", "conflicts", "probes", "status"]
 MITIGATION_ALLOWED_FIELDS = MITIGATION_REQUIRED_FIELDS + MITIGATION_OPTIONAL_FIELDS
@@ -458,13 +459,13 @@ def check_mitigation(mitigation: Mitigation, path_ids: set[str], mitigation_ids:
         return errors  # further checks need the fields
 
     entry_id = meta["id"]
-    if not isinstance(entry_id, str) or not MITIGATION_ID_PATTERN.match(entry_id):
-        errors.append(f"id '{entry_id}' does not match format L<n> or kebab-case")
-    elif LOWERCASE_LADDER_ID_PATTERN.match(entry_id):
+    if isinstance(entry_id, str) and LADDER_SHAPED_ID_PATTERN.match(entry_id):
         errors.append(
-            f"id '{entry_id}' looks like a ladder level written lowercase: reserved ladder ids "
-            "are L<n> (uppercase) only, pick a different id"
+            f"id '{entry_id}' looks like a ladder level: an id says what the mitigation does "
+            "(kebab-case, e.g. trs-read-only), never its place on the ladder"
         )
+    elif not isinstance(entry_id, str) or not MITIGATION_ID_PATTERN.match(entry_id):
+        errors.append(f"id '{entry_id}' is not kebab-case")
     elif entry_id != stem:
         errors.append(f"id '{entry_id}' does not match filename stem '{stem}'")
 

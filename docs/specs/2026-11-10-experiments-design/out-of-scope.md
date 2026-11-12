@@ -3,7 +3,7 @@
 | Item | Why not now | Where it goes |
 |---|---|---|
 | A shared, team-wide view of the official ladder results (the replayed evals) on the portal | an experiment's viewer is per workspace and owner-only; a shared one needs its own access rule for canary values and its own service | a later spec of its own |
-| L4 and L5 as selectable mitigations | L4 (typed tools) is not built; L5 (airlock) is refused while Open WebUI runs | `mitigations/L4.yml`, `L5.yml` stay `status: planned` until their specs land |
+| `typed-tools` and `answer-airlock` (the ladder's L4 and L5) as selectable mitigations | typed tools are not built; the airlock is refused while Open WebUI runs | `mitigations/typed-tools.yml`, `answer-airlock.yml` stay `status: planned` until their specs land |
 | Branch templates from forks or PR refs | the portal makes them from upstream branches only | a later change to `sync-template.sh` |
 | CI running `check_experiment.py` | the repositories have no workflows yet | with the first CI workflow |
 | Detecting runtime conflicts between mitigations (two that set different keys but write the same file or firewall chain) | the checker sees Ansible keys only; candidate strategies (combined probes, an idempotence re-run, declared resource ownership, pairwise builds) are untried | fork issue #91, then a spike |

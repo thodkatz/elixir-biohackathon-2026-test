@@ -170,6 +170,11 @@ because Z." This file wins over the guides in `.methodology/shared/guides/`.
   to fork-only files, instead of `docs/superpowers/specs/` in `development-workflow.md`, *Full mode*, because it
   then ports unchanged; its plan stays in `docs/superpowers/plans/`. First used by the living AG-UI spec,
   `docs/specs/2026-10-15-agui-frontend-design/`.
+- In this repo, **a mechanical rename is Direct** (ids, files or paths renamed across any number of files, no
+  behaviour changed, logic added or decision taken, and every test command in *Running things* that covers the
+  touched files passing before the commit) instead of a Change in `development-workflow.md`, *Choosing a mode*,
+  because a PR's claim and review round cost more than a search-and-replace is worth (the user, 2026-11-12). A
+  rename that also changes code, as #96 did (`create.yml`'s contiguity check, `handoff.py`), is still a Change.
 
 ## Contributing upstream
 

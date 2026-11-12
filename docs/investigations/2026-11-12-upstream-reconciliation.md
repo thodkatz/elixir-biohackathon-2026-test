@@ -82,6 +82,72 @@ marked **(corrected)**.
   `compose.install.yaml.j2`, and `promptfooconfig.yaml` (modify/delete: we deleted it in #64).
 - **`evaluation-loop-promptfoo`** conflicts in 12 files, mostly the same ones plus `AGENTS.md`.
 
+## Where the fork fits: red, blue, judge
+
+Worked out with the user after the comparison (same session). The frame is test-driven: an attack becomes a test
+that fails, a mitigation makes it pass, and the suite is the regression check. **The tests are the reference
+point**, and the goal is a suite that passes with every mitigation on.
+
+| Role | Who | What |
+|---|---|---|
+| **Red**: find attacks | Josef's threatlab (upstream, unmerged) | generates attacks with mitigations off, confirms a hit by replaying it unchanged |
+| **Blue**: propose mitigations | a person today; an agent possibly later; **nobody has built this** | a new mitigation (an Ansible switch) for the tests a new threat turned red |
+| **Judge**: accept a mitigation | **the fork** | decides whether a mitigation really closes the gap without breaking the service |
+
+**The acceptance rule** the judge applies: the tests the mitigation targets go green; no utility test goes red; the
+mitigation's controls probes confirm it is on; the pass holds over repeats against a threshold; and it is evaluated
+against canaries it was not given.
+
+**Why "pass the tests" needs a judge.** Each clause of the rule stops one way to turn the suite green without making
+anything safer:
+
+| Cheat | Stopped by |
+|---|---|
+| Break the agent (cut its network, remove its tools) | utility tests in the suite |
+| Know the answer key (match the planted canary list) | canaries the mitigation never sees (spec decision 12; Yasin's guard, collision 1) |
+| The switch silently does not apply; green comes from the model | the controls gate |
+| One lucky run | repeats and a pass threshold |
+| One test contaminating the next | isolation |
+
+**Where a baseline is still needed**: not per experiment, but in three places:
+1. **Red first, once per test, when it is added**: a test that passes with every mitigation on may only show that
+   the attack never fired. A promoted threatlab attack carries this from its replay.
+2. **One mitigation off**: with every mitigation on, a green suite can't say which mitigation closes which test. One
+   off per arm fills `closes` and shows redundancy (the core of the close-the-loop item in `BACKLOG.md`).
+3. **Red again after the model changes**: tests are rates (4/5), not booleans, and a new model may turn a test green
+   by itself.
+
+**Two limits of the frame.** A new threat does not always need a new mitigation: its tests may already pass, which is
+evidence of coverage. And some gaps can't be closed by a switch: the ladder results show the infrastructure
+mitigations do not stop leaks through the answer (`docs/results/canary-ladder-qwen3.8-27b.md`).
+
+**What the fork really has, in this frame.**
+- The judge: the mitigation format (switches, probes, `closes`), the controls gate, isolation, canary metrics,
+  planted injections and the test receiver, and the runner that applies one set of mitigations and runs the suite.
+- Four working mitigations and their measured results.
+- The catalogue extensions: paths, mitigations and experiments next to upstream's threats. The threat template,
+  vocabulary and threat validator are upstream's; the fork changed 4 lines of `threats/TEMPLATE.md`.
+
+**What loses its role:** the hand-written experiment layer: `experiments/*.yml`, `check_experiment.py`, and the
+per-experiment contribution flow (the spe-experiments form, `CONTRIBUTING.md`, `spe-eval pr-body`). It was built
+for a person proposing one experiment at a time. In the loop, the test (labelled `threat`, `path`, `closed_by`) is
+the experiment, and the matrix is every test × every mitigation. A participant contributes a mitigation (blue) or
+runs the loop (red).
+
+**What the loop needs at the join.**
+- **Freeze before measuring:** a confirmed attack becomes a committed test with a hash before it is measured. If the
+  loop generated attacks in each arm, the arms would differ in the attack, not only in the mitigation. This meets
+  Josef's `354c8c9` (scenarios off git). A possible compromise: the scratch work stays local, and promoted attacks are
+  committed.
+- **Scoring on canaries:** a promoted attack is rewritten to aim at a canary file, as the planted injections do; his
+  `{nonce}` indicators say *that* it worked, canaries say *what* leaked and where.
+- **Optional, and costly:** re-running the search against the mitigated build asks whether a mitigation holds against
+  an attacker that adapts. That is a different question from the judge's.
+
+The pitch upstream: *Josef's loop finds attacks, a person (later perhaps an agent) proposes mitigations, and our
+harness judges whether a mitigation closes the gap without breaking the service.* A blue agent only becomes safe to
+allow once there is a strict judge.
+
 ## What each side brings
 
 **The fork brings** (none of it upstream, see `docs/upstream-ports.md`):
@@ -124,9 +190,15 @@ Order matters: each conflict grows the longer we wait, and `leak-controls` landi
    2. the measurement core of the ladder (scoring, isolation, controls, injections, agent suite) on top of the
       agreed matcher, with a short `docs/specs/` version of its spec and the switches off by default;
    3. mitigations as files, the existing defences included (ours, and theirs once agreed in step 2);
-   4. experiments and `spe-eval`.
-4. **Then the level-free experiments spec** (`BACKLOG.md` *Next*), which should use upstream's catalogue and
-   mitigations as merged in steps 1–3, and the study-id answer from collision 2.
+   4. the judge's runner (`spe-eval`'s arm runner, without the hand-written experiment layer, see *Where the fork
+      fits*).
+4. **Then the "close the loop" spec** (`BACKLOG.md` *Next*; it replaces the level-free experiments spec and keeps
+   its core): every mitigation on as the reference, one off per arm, utility labels, repeats, the acceptance rule,
+   the freeze step at the join with threatlab, and what to retire from the experiments track. It should use
+   upstream's catalogue and mitigations as merged in steps 1–3, and the study-id answer from collision 2.
+5. **Record the direction** as a `biohackathon` knowledge record once the user has talked to Josef and Kraatz, with
+   this investigation as its evidence.
 
 **Decisions this needs from the user:** whether to take upstream's study-id exemption (it closes our open
-question); the stance on guards that know the canaries; who raises step 2 upstream and when.
+question); the stance on guards that know the canaries; who raises step 2 upstream and when; whether Kraatz sees
+threatlab as upstream's direction.

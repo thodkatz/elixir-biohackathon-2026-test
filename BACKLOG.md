@@ -11,6 +11,7 @@ Due soon, on any track: what someone said to do "in the next session", and what 
 start reads this section; keep it short.
 
 <!-- - <item> — from <investigation / review / handoff>; <waits on the user: what> | <due: why soon>. -->
+- Experiments without ladder levels: a spec (full mode) for a build as its mitigation set (the gate expects the union of the set's `probes`; `LADDER`, `PROBE_CONTROL`'s levels and `hardening.json`'s `level` go), all-on as the reference with one mitigation off per experiment, a label for the utility tests a mitigation could break, and repeats per arm from <https://yasint.dev/write-an-eval-for-your-agent/> — from the user, 2026-11-12 (`docs/handoffs/2026-11-12T0104Z-mitigation-names-review-next.md`); due: next track after PR #96; the spec waits on the user's approval and first needs the study-id answer below.
 - Open the upstream PR for `contrib/canary-hit-viewer` from the compare link in fork issue #82 (title and body
   there), then close the issue; once it has a number, the ledger lines in `docs/upstream-ports.md` for `dc64a92`
   (#74, the spec) and #77–#81 (#77's noting that its `promptfoo-evals` and `test_airlock.py` changes go up with the

@@ -43,7 +43,7 @@ The existing parameters, as in `spe`, plus:
 | `mitigations` | list(string), multi-select | every `mitigations/*.yml` without `status: planned`, shown by its `name` | `[]` | yes |
 
 Each experiment file is also a preset, described on the form by its `description` followed by what it measures,
-generated from its `experiment:` block (`TM-001 via P2 · mitigation L1: TRS read-only`), so the threat and paths
+generated from its `experiment:` block (`TM-001 via P2 · mitigation trs-read-only: TRS read-only`), so the threat and paths
 show where the experiment is picked. Threats and paths are not form fields: they describe an experiment, they do
 not set the build. Its `parameters` set the form, including `experiment` (its own stem) and
 `mitigations` (its `base`: the workspace starts in the baseline arm). `spe-eval` switches arms on the running VM
@@ -53,8 +53,9 @@ preset values (a Terraform test compares them). An experiment picked in the drop
 form's other values; when they differ from the experiment's `parameters`, `spe-eval` refuses it and names the keys
 (03), and the preset is the fix.
 
-`create.yml` refuses a build whose selected ladder mitigations are not contiguous from L1 (`[L2]` alone), as
-`handoff.check_hardening` already requires of the switches.
+`create.yml` refuses a build whose selected ladder mitigations are not contiguous from the ladder's first
+(`[data-tiers]` alone), as `handoff.check_hardening` already requires of the switches; a mitigation's place on
+the ladder is its switch's place in the ladder's switch order, not its id.
 
 Changing either on a running workspace rebuilds it (stop is destroy, start is create): the form chooses a build,
 `spe-eval` compares arms.

@@ -14,8 +14,9 @@ first steps (`arm`, `run`, `status`, `wait`), which the early output tries with 
 ladder experiments as worked examples. Nothing an agent needs is only in a UI or only in this spec.
 
 The section includes one worked example of writing a mitigation, the step the commands cannot do for the agent:
-L1 (TRS read-only) as the reference, shown as its parts: the Ansible change in the SPE agent's path (Traefik and
-WES, not an installer), the Jinja guard on its switch so the stack is unchanged with it off, `mitigations/L1.yml`,
+`trs-read-only` (TRS read-only) as the reference, shown as its parts: the Ansible change in the SPE agent's path
+(Traefik and WES, not an installer), the Jinja guard on its switch so the stack is unchanged with it off,
+`mitigations/trs-read-only.yml`,
 the probe that shows it, and the two `curl` checks (one refused, one still working) to make after
 `spe-eval arm … mitigated`. A participant's guard service follows the same shape.
 
@@ -30,7 +31,7 @@ hand, `run` to measure both arms (the baseline only, with no mitigation under te
 
 | Step | Command | For an agent |
 |---|---|---|
-| Start | `spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--injection <surface>] [--from <experiment>]` | Writes every slot of the skeleton (05, *A skeleton, not a rulebook*): `experiments/<name>.yml` (its `base` the `--from` experiment's `base` plus its mitigation: from `ladder-l2`, `[L1, L2]`), `mitigations/<name>.yml` with a `spe_mitigate_<name>` switch, its default in `group_vars`, with `--injection` a `fixtures.json` entry, a payload file and a `spe_inject_<name>` switch defaulting to `false` (01, *Attacks*), `tests/experiments/<name>.yaml` with one labelled test, and threat or path files from their templates when the ids are new; with `--path`, the experiment's `tests` and `injections` list the catalogue's attacks on that path as a starting point; prints each path and the `TODO`s to fill, and that a slot the idea does not need is deleted (for an attack only: the mitigation file and switch, and `mitigation: null`) |
+| Start | `spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--injection <surface>] [--from <experiment>]` | Writes every slot of the skeleton (05, *A skeleton, not a rulebook*): `experiments/<name>.yml` (its `base` the `--from` experiment's `base` plus its mitigation: from `ladder-l2`, `[trs-read-only, data-tiers]`), `mitigations/<name>.yml` with a `spe_mitigate_<name>` switch, its default in `group_vars`, with `--injection` a `fixtures.json` entry, a payload file and a `spe_inject_<name>` switch defaulting to `false` (01, *Attacks*), `tests/experiments/<name>.yaml` with one labelled test, and threat or path files from their templates when the ids are new; with `--path`, the experiment's `tests` and `injections` list the catalogue's attacks on that path as a starting point; prints each path and the `TODO`s to fill, and that a slot the idea does not need is deleted (for an attack only: the mitigation file and switch, and `mitigation: null`) |
 | Check | `check_experiment.py [<name>] [--json]` | each problem as `file:line: id: what is wrong: what to do`; `--json` the same as a list |
 | Test offline | `spe-eval test` | the offline checks, no instance and no model: the evaluations' unit tests (`pytest` in `platform/promptfoo-evals`, which lint the catalogue and every assertion a test names) and the checker; seconds, so an agent runs it after every edit |
 | Try | `spe-eval arm [<name>] baseline\|mitigated` | applies one arm and exits when the stack answers |

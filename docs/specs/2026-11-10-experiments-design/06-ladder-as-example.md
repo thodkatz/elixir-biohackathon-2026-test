@@ -7,7 +7,7 @@ is slice 1–2's work, and its test: if the ladder needs a special case, the str
 |---|---|---|
 | Threats | TM-001, TM-003 | unchanged |
 | Paths | P1–P4, a table in the ladder's design | `paths/P1-read-api-metadata.md`, `P2-agent-written-code.md`, `P3-installed-workflows.md`, `P4-egress.md` |
-| Mitigations | `spe_harden_trs_readonly`, `_data_tiers`, `_egress`, `_airlock`, `spe_agent_tool_surface` | `mitigations/L1.yml` (trs-readonly, closes P2, probes `trs-write`, `wes-inline`, `e2e-exploit`), `L2.yml` (data tiers, P3, `tier-reach`), `L3.yml` (egress, P4, `egress`; `api-reach` stays open by design); `L4.yml`, `L5.yml` with `status: planned` |
+| Mitigations | `spe_harden_trs_readonly`, `_data_tiers`, `_egress`, `_airlock`, `spe_agent_tool_surface` | `mitigations/trs-read-only.yml` (L1: closes P2, probes `trs-write`, `wes-inline`, `e2e-exploit`), `data-tiers.yml` (L2: P3, `tier-reach`), `egress-allowlist.yml` (L3: P4, `egress`; `api-reach` stays open by design); `typed-tools.yml` (L4), `answer-airlock.yml` (L5) with `status: planned`; each id says what the mitigation does, its level is its switch's place in the ladder (clarification 5) |
 | Tests | the 13-test agent suite and the controls suite | unchanged, still `agent.yaml`; their labels now resolve from the files |
 | Builds | `instances/L<n>.example.yml` on a maintainer's controller | experiments `ladder-l0` … `ladder-l3` on `spe-experiments` |
 | Results | `docs/results/qwen3.8-27b/` and its rendered matrix | the reference a participant's numbers are read against |
@@ -31,9 +31,9 @@ The model is the portal's (de.NBI).
 | Experiment | `base` | `mitigation` | Baseline arm | Mitigated arm |
 |---|---|---|---|---|
 | `ladder-l0` | – | – (`null`) | L0 | – (one arm: the baseline) |
-| `ladder-l1` | – | `L1` | L0 | L1 |
-| `ladder-l2` | `L1` | `L2` | L1 | L2 |
-| `ladder-l3` | `L1`, `L2` | `L3` | L2 | L3 |
+| `ladder-l1` | – | `trs-read-only` | L0 | L1 |
+| `ladder-l2` | `trs-read-only` | `data-tiers` | L1 | L2 |
+| `ladder-l3` | `trs-read-only`, `data-tiers` | `egress-allowlist` | L2 | L3 |
 
 Each ladder experiment measures one rung's step. The full ladder (every level against the same canaries) stays the
 controller-side runs and their matrix; an experiment reproduces one step of it in one workspace, which is what a

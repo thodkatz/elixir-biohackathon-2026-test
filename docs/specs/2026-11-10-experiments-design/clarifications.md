@@ -60,3 +60,24 @@ Numbered, append-only: why the design changed after approval.
    the decision needed and the code lacked. *Cost if wrong:* a `spe-eval` killed outright leaves its window open
    until the next run, so a participant's receiver hit in between counts as eval. *Amends:* 03 (*Canary hits*).
    *Status:* folded.
+5. **Mitigations named for what they do, not their ladder position** (2026-11-12; PR #96). The ladder's
+   mitigations are renamed: `L1` → `trs-read-only`, `L2` → `data-tiers`, `L3` → `egress-allowlist`, `L4` →
+   `typed-tools`, `L5` → `answer-airlock` (files `mitigations/<id>.yml`, the experiments' `mitigation` and
+   `base`, the test catalogue's `closed_by`); their `name`s are unchanged. Ids are kebab-case only, and
+   `validate.py` refuses an `L<n>`/`l<n>` id, which would read as a ladder level. The ladder's order is not
+   written into the mitigation files: it stays where it already was, the ladder's switch order in code
+   (`controls_asserts.py`'s `LADDER`), and a ladder mitigation is one whose `on` sets one of those switches (the
+   gate's skip of the ladder's own mitigations and `create.yml`'s contiguity check read it so; `create.yml`'s copy
+   of the switch list is pinned to `LADDER` by a test). Unchanged: the experiments `ladder-l0` … `ladder-l3`
+   (their ids; their display names now say the mitigation, e.g. *Ladder L1: TRS read-only*) and the ladder
+   *levels* (`hardening.json`'s `level`, `reports/L<n>/`, `instances/L<n>.example.yml`, the matrix's columns,
+   `docs/results/`). The committed results keep their old `closed_by` labels as written; `matrix.py` reads an old
+   `closed_by: L1`…`L5` in a stored report as the new id (`LEGACY_CLOSED_BY`), so a run made before the rename
+   still counts, and the committed matrix renders unchanged. *Reason:* the user, 2026-11-12: `L1`, `L2` "which you
+   can't really tell" — an id should say what the mitigation does, on the form, in `closed_by` and in an
+   experiment. *Cost if wrong:* a workspace built from the `spe-experiments` template before this change carries
+   the old ids in its Mitigations parameter and fails `spe-eval` until rebuilt (the template is fork-only, so no
+   participant workspace has them). *Amends:* decisions 2, 5, 6 and 19; 01 (the kinds table, *Mitigations*, the
+   catalogue's `closed_by`), 02 (the preset description, the contiguity check), 03 (*An arm is its mitigation
+   set*), 05 (the attack shape's `base`), 06 (the mitigations row, *The experiments*), 07 (the worked example,
+   `new --from`), inputs for the plan (slice 1), out of scope (the planned mitigations). *Status:* folded.

@@ -1,7 +1,7 @@
 """create.yml's pre_tasks: spe_mitigations checked against mitigations/<id>.yml before anything is
 created (spec docs/specs/2026-11-10-experiments-design/02-coder-template.md, *Into Ansible*): an
 unknown or planned id, an unmet `requires`, a `conflicts` pair both selected, and selected ladder
-mitigations not contiguous in their `ladder` order, are all refused; empty spe_mitigations (the default)
+mitigations not contiguous in the ladder's order (LADDER), are all refused; empty spe_mitigations (the default)
 reads no file, so a build without spe_experiments is unchanged.
 
 Loads the task from playbooks/create.yml by name (as test_repo_local_vars.py does for roles/repo),

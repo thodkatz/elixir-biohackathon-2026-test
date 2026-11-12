@@ -87,7 +87,7 @@ def make_repo(tmp_path: Path) -> tuple[Path, Path]:
     (repo / "experiments").mkdir()
     (repo / "experiments/ladder-l0.yml").write_text("name: Ladder L0\n")
     (repo / "mitigations").mkdir()
-    (repo / "mitigations/L1.yml").write_text("id: L1\n")
+    (repo / "mitigations/trs-read-only.yml").write_text("id: trs-read-only\n")
     (repo / "platform/ansible/catalog/injections").mkdir(parents=True)
     (repo / "platform/ansible/catalog/injections/fixtures.json").write_text('{"fixtures": []}\n')
 
@@ -148,7 +148,7 @@ def test_experiment_branch_pushed_as_spe_x_name_with_its_worktree_assembled_dir(
     # The "x." marker keeps experiment/<name> worktrees distinct from template/<name> ones
     # (whose names can never contain a dot), not "experiment-foo".
     assert worktree_dir == branch_dir / "x.foo/platform/coder/experiments-template"
-    assert sorted(p.name for p in (worktree_dir / "mitigations").glob("*.yml")) == ["L1.yml"]
+    assert sorted(p.name for p in (worktree_dir / "mitigations").glob("*.yml")) == ["trs-read-only.yml"]
     edits = [c for c in read_calls(log) if c[:2] == ["templates", "edit"] and c[2] == "spe-x-foo"]
     assert edits and flag(edits[0], "--display-name") == "experiment/foo"
 

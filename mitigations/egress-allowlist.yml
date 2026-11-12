@@ -1,4 +1,4 @@
-id: L3
+id: egress-allowlist
 name: Egress
 description: >
   The sandbox reaches only the API host on 443, so a request to any other host from the sandbox gets no

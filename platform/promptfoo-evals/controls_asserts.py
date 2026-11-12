@@ -10,8 +10,8 @@ instead of failing. A probe one of the arm's mitigations actually declares close
 mitigations/<id>.yml) passes as expected, no note needed. A probe closed by the arm but declared by none of
 its mitigations (a mitigation's `probes` is optional: out-of-scope.md, "A probe for every participant
 mitigation") still passes, with a note ("<probe> closed by this arm; declare it in probes") prompting the
-author to declare it. The ladder's own L1..L5 ids are skipped (the level already counts them, via the plain
-level check) and do not count as a participant mitigation, so a plain ladder hand-off (no participant
+author to declare it. The ladder's own mitigations (those whose switch is in LADDER) are skipped (the level
+already counts them, via the plain level check) and do not count as a participant mitigation, so a plain ladder hand-off (no participant
 mitigations at all) keeps today's exact, strict expectations.
 
 CLI: `gate <controls.json> [--notes <file>]` exits 1 on any mismatch, prints every note to stdout and, with
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from handoff import ConfigError, handoff_dir, load_hardening, mitigation_probes  # noqa: E402
+from handoff import ConfigError, handoff_dir, load_hardening, mitigation_probes, mitigation_switches  # noqa: E402
 
 # Confirmed against the build (slice 3 task 1, 2026-11-08T170211Z): egress is open at L0..L2 (sandbox reaches
 # the open internet), and WESkit bc18498 accepts an inline workflow_attachment, so wes-inline closes at L1 too.
@@ -38,10 +38,10 @@ PROBE_CONTROL: dict[str, int | None] = {
     "isolation-plant": None, "isolation-check": None,
 }
 FIXED_STATE = {"api-reach": "open", "isolation-plant": "open", "isolation-check": "closed"}
+# The ladder's order, its one source of truth (ladder_level, and is_ladder_mitigation below; handoff.py's
+# check_hardening and roles/handoff/tasks/hardening.yml count the same switches in the same order).
 LADDER = ("spe_harden_trs_readonly", "spe_harden_data_tiers", "spe_harden_egress", "spe_agent_tool_surface",
           "spe_harden_airlock")
-LADDER_IDS = frozenset(f"L{n}" for n in range(1, 6))  # the ladder's own mitigation ids; the level already
-# counts them, so arm_closed_probes skips them rather than closing a probe twice
 NOTE_SUFFIX = "closed by this arm; declare it in probes"
 INSTANCE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -59,15 +59,24 @@ def ladder_level(switches: dict) -> int:
     return level
 
 
+def is_ladder_mitigation(mitigation_id: str) -> bool:
+    """Whether mitigations/<id>.yml is one of the ladder's own: its `on` sets a switch in LADDER, the
+    ladder's one ordered list (ids name what a mitigation does, not its place: experiments spec,
+    clarification 5). A planned ladder mitigation (typed-tools, answer-airlock) has no `on` yet and
+    so does not count, but a planned mitigation cannot be in an arm either (validate.py, create.yml)."""
+    return bool(mitigation_switches(mitigation_id) & set(LADDER))
+
+
 def arm_closed_probes(mitigations: list | None) -> frozenset[str]:
     """Probes closed by a non-ladder mitigation in the arm's hardening.json `mitigations`
     (experiments spec part 03, decision 9): the union of each one's own `probes`
-    (mitigations/<id>.yml, via handoff.mitigation_probes). The ladder's L1..L5 ids are skipped: the
-    level in hardening.json already accounts for them, via `expected_state`'s `level` argument.
+    (mitigations/<id>.yml, via handoff.mitigation_probes). The ladder's own mitigations (their switch in
+    LADDER, is_ladder_mitigation) are skipped: the level in hardening.json already accounts for them, via
+    `expected_state`'s `level` argument, so a probe is not closed twice.
     """
     closed: set[str] = set()
     for mitigation_id in mitigations or []:
-        if mitigation_id in LADDER_IDS:
+        if is_ladder_mitigation(mitigation_id):
             continue
         closed |= mitigation_probes(mitigation_id)
     return frozenset(closed)
@@ -99,7 +108,7 @@ def probe_state(output: str, context: dict) -> dict:
         hardening = load_hardening(handoff_dir())
         level = _level(hardening)
         mitigations = hardening.get("mitigations") or []
-        has_participant_mitigation = any(m not in LADDER_IDS for m in mitigations)
+        has_participant_mitigation = any(not is_ladder_mitigation(m) for m in mitigations)
         closed = arm_closed_probes(mitigations)
         ladder_expected = expected_state(probe, level)
         expected = expected_state(probe, level, closed)

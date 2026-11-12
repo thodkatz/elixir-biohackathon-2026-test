@@ -47,7 +47,7 @@ locals {
   }
   injection_fixtures = jsondecode(file("${path.module}/catalog/injections/fixtures.json")).fixtures
 
-  # What each experiment measures, shown on its preset: "TM-001 via P2 · mitigation L1: TRS read-only".
+  # What each experiment measures, shown on its preset: "TM-001 via P2 · mitigation trs-read-only: TRS read-only".
   experiment_measures = {
     for stem, e in local.experiments : stem => format(
       "%s via %s · %s",

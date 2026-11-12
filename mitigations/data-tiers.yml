@@ -1,4 +1,4 @@
-id: L2
+id: data-tiers
 name: Data tiers
 description: >
   Workflow containers mount only the listed tiers of /data-share and /drs-data, so an installed workflow run

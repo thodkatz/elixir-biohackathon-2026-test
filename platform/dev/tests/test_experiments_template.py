@@ -131,21 +131,21 @@ def test_assemble_replaces_stale_copies(tmp_path):
 def test_ladder_l2_preset_builds_the_baseline_arm(template):
     v = build_vars(plan(template, preset_parameters("ladder-l2")))
     assert v["spe_harden_trs_readonly"] is True
-    assert "spe_harden_data_tiers" not in v   # L2 is under test, not in the base: its Ansible default ([])
+    assert "spe_harden_data_tiers" not in v   # data-tiers is under test, not in the base: its Ansible default ([])
     assert v["spe_frontends"] == ["agui"]
     for fixture in json.loads((REPO / "platform/ansible/catalog/injections/fixtures.json").read_text())["fixtures"]:
         assert v[fixture["switch"]] is True
-    assert (v["spe_experiments"], v["spe_experiment"], v["spe_mitigations"]) == (True, "ladder-l2", ["L1"])
+    assert (v["spe_experiments"], v["spe_experiment"], v["spe_mitigations"]) == (True, "ladder-l2", ["trs-read-only"])
     assert {"spe_experiments", "spe_experiment", "spe_mitigations", "spe_harden_trs_readonly",
             "spe_frontends", "spe_eval_sink", "spe_agui_smoke"} <= set(v["spe_local_vars_extra"])
 
 
 @needs_tofu
 def test_selected_mitigations_merge_their_on_values(template):
-    v = build_vars(plan(template, {**preset_parameters("ladder-l2"), "mitigations": ["L1", "L2"]}))
+    v = build_vars(plan(template, {**preset_parameters("ladder-l2"), "mitigations": ["trs-read-only", "data-tiers"]}))
     assert v["spe_harden_trs_readonly"] is True
     assert v["spe_harden_data_tiers"] == ["ref", "genomes"]
-    assert v["spe_mitigations"] == ["L1", "L2"]
+    assert v["spe_mitigations"] == ["trs-read-only", "data-tiers"]
 
 
 @needs_tofu
@@ -181,7 +181,7 @@ def test_presets_are_the_experiment_files(ladder_l0_plan):
     experiments = {p.stem: load_yaml(p) for p in (REPO / "experiments").glob("*.yml") if p.stem != "TEMPLATE"}
     assert set(presets) == {e["name"] for e in experiments.values()}
     l1 = presets[experiments["ladder-l1"]["name"]]
-    assert l1["description"].endswith(" — TM-001 via P2 · mitigation L1: TRS read-only")
+    assert l1["description"].endswith(" — TM-001 via P2 · mitigation trs-read-only: TRS read-only")
     assert len(l1["description"].encode()) <= 128   # the coder provider's limit, in bytes
     assert l1["parameters"]["mitigations"] == "[]"
     assert presets[experiments["ladder-l0"]["name"]]["description"].endswith(
@@ -208,7 +208,7 @@ def test_planned_mitigations_are_not_offered(ladder_l0_plan):
     offered = {o["value"] for o in parameter(ladder_l0_plan, "mitigations")["option"]}
     planned = {p.stem for p in (REPO / "mitigations").glob("*.yml") if load_yaml(p).get("status") == "planned"}
     assert planned and not offered & planned
-    assert {"L1", "L2", "L3"} <= offered
+    assert {"trs-read-only", "data-tiers", "egress-allowlist"} <= offered
 
 
 @needs_tofu

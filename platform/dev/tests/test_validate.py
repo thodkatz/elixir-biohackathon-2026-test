@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[3]
 VALIDATE = REPO / "validate.py"
 GROUP_VARS_PATH = REPO / "platform/ansible/inventory/group_vars/all.yml"
@@ -77,13 +79,13 @@ def write_experiment(tmp_path: Path, text: str, name: str = "test-experiment.yml
     return d
 
 
-# A valid experiment: base L1, mitigation under test L2, one real injection, no own tests.
+# A valid experiment: base trs-read-only, mitigation under test data-tiers, one real injection, no own tests.
 GOOD_EXPERIMENT = """
 name: Test experiment
 description: A fixture experiment for validate.py's tests.
 parameters:
   experiment: test-experiment
-  mitigations: [L1]
+  mitigations: [trs-read-only]
   samples: [HG002]
   tiers: [ref]
   workflows: [wes-drs-smoke]
@@ -93,8 +95,8 @@ parameters:
 experiment:
   threat: TM-001
   paths: [P2]
-  mitigation: L2
-  base: [L1]
+  mitigation: data-tiers
+  base: [trs-read-only]
   injections: [registry-preflight]
   tests: []
 vars:
@@ -213,26 +215,26 @@ def test_experiment_unknown_path_fails(tmp_path):
 
 
 def test_experiment_planned_mitigation_under_test_fails(tmp_path):
-    # L4 exists but is status: planned (no on/off yet).
-    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("mitigation: L2", "mitigation: L4"))
+    # typed-tools exists but is status: planned (no on/off yet).
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("mitigation: data-tiers", "mitigation: typed-tools"))
     _, problems = validate_experiments(d)
-    assert any("L4" in p and "planned" in p for p in problems), problems
+    assert any("typed-tools" in p and "planned" in p for p in problems), problems
 
 
 def test_experiment_unknown_mitigation_in_base_fails(tmp_path):
-    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("base: [L1]", "base: [not-a-mitigation]"))
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("base: [trs-read-only]", "base: [not-a-mitigation]"))
     _, problems = validate_experiments(d)
     assert any("not-a-mitigation" in p for p in problems), problems
 
 
 def test_experiment_mitigation_under_test_also_in_base_fails(tmp_path):
-    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("mitigation: L2", "mitigation: L1"))
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("mitigation: data-tiers", "mitigation: trs-read-only"))
     _, problems = validate_experiments(d)
-    assert any("L1" in p and "also in base" in p for p in problems), problems
+    assert any("trs-read-only" in p and "also in base" in p for p in problems), problems
 
 
 def test_experiment_parameters_mitigations_mismatch_base_fails(tmp_path):
-    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("mitigations: [L1]", "mitigations: []"))
+    d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace("mitigations: [trs-read-only]", "mitigations: []"))
     _, problems = validate_experiments(d)
     assert any("parameters.mitigations" in p for p in problems), problems
 
@@ -253,18 +255,18 @@ def test_experiment_unknown_test_fails(tmp_path):
 
 def test_experiment_requires_not_satisfied_in_arm_fails(tmp_path):
     mitigations = dict(real_mitigations_by_id())
-    mitigations["L2"] = {**mitigations["L2"], "requires": ["L3"]}
+    mitigations["data-tiers"] = {**mitigations["data-tiers"], "requires": ["egress-allowlist"]}
     d = write_experiment(tmp_path, GOOD_EXPERIMENT)
     _, problems = validate_experiments(d, mitigations)
-    assert any("requires" in p and "L3" in p for p in problems), problems
+    assert any("requires" in p and "egress-allowlist" in p for p in problems), problems
 
 
 def test_experiment_conflicts_violated_in_arm_fails(tmp_path):
     mitigations = dict(real_mitigations_by_id())
-    mitigations["L2"] = {**mitigations["L2"], "conflicts": ["L1"]}
+    mitigations["data-tiers"] = {**mitigations["data-tiers"], "conflicts": ["trs-read-only"]}
     d = write_experiment(tmp_path, GOOD_EXPERIMENT)
     _, problems = validate_experiments(d, mitigations)
-    assert any("conflicts" in p and "L1" in p for p in problems), problems
+    assert any("conflicts" in p and "trs-read-only" in p for p in problems), problems
 
 
 def test_experiment_vars_key_set_by_injection_switch_fails(tmp_path):
@@ -280,7 +282,7 @@ def test_experiment_vars_key_set_by_mitigation_on_fails(tmp_path):
         "vars:\n  spe_eval_sink: true", "vars:\n  spe_harden_trs_readonly: true"
     ))
     _, problems = validate_experiments(d)
-    assert any("spe_harden_trs_readonly" in p and "L1" in p for p in problems), problems
+    assert any("spe_harden_trs_readonly" in p and "trs-read-only" in p for p in problems), problems
 
 
 def test_experiment_vars_key_set_by_parameter_fails(tmp_path):
@@ -292,13 +294,14 @@ def test_experiment_vars_key_set_by_parameter_fails(tmp_path):
 
 
 def test_experiment_vars_key_set_by_an_unselected_mitigations_on_fails(tmp_path):
-    # GOOD_EXPERIMENT selects L1 (base) and L2 (mitigation under test), never L3: its 'on' key
-    # is still refused, named by L3's id (spec 01: one place per value, selected or not).
+    # GOOD_EXPERIMENT selects trs-read-only (base) and data-tiers (mitigation under test), never
+    # egress-allowlist: its 'on' key is still refused, named by egress-allowlist's id (spec 01: one
+    # place per value, selected or not).
     d = write_experiment(tmp_path, GOOD_EXPERIMENT.replace(
         "vars:\n  spe_eval_sink: true", "vars:\n  spe_harden_egress: true"
     ))
     _, problems = validate_experiments(d)
-    assert any("spe_harden_egress" in p and "L3" in p for p in problems), problems
+    assert any("spe_harden_egress" in p and "egress-allowlist" in p for p in problems), problems
 
 
 def test_experiment_vars_key_set_by_an_unlisted_injections_switch_fails(tmp_path):
@@ -349,8 +352,8 @@ def test_path_bad_reaches_value_fails(tmp_path):
 def test_mitigation_off_mismatch_fails(tmp_path):
     mitigations_dir = tmp_path / "mitigations"
     shutil.copytree(REPO / "mitigations", mitigations_dir)
-    (mitigations_dir / "L1.yml").write_text(
-        "id: L1\n"
+    (mitigations_dir / "trs-read-only.yml").write_text(
+        "id: trs-read-only\n"
         "name: TRS read-only\n"
         "description: TRS GET-only at Traefik.\n"
         "closes: [P2]\n"
@@ -360,7 +363,7 @@ def test_mitigation_off_mismatch_fails(tmp_path):
     _, problems = validate.validate_mitigations_catalog(
         mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
     )
-    assert any("L1.yml" in p and "spe_harden_trs_readonly" in p for p in problems), problems
+    assert any("trs-read-only.yml" in p and "spe_harden_trs_readonly" in p for p in problems), problems
 
 
 def test_two_mitigations_setting_the_same_on_key_fail_naming_both_files(tmp_path):
@@ -368,8 +371,8 @@ def test_two_mitigations_setting_the_same_on_key_fail_naming_both_files(tmp_path
     shutil.copytree(REPO / "mitigations", mitigations_dir)
     (mitigations_dir / "trs-guard.yml").write_text(
         "id: trs-guard\n"
-        "name: TRS guard (duplicate of L1's switch, for the test)\n"
-        "description: Sets the same Ansible key as L1.\n"
+        "name: TRS guard (duplicate of trs-read-only's switch, for the test)\n"
+        "description: Sets the same Ansible key as trs-read-only.\n"
         "closes: []\n"
         '"on": {spe_harden_trs_readonly: true}\n'
         '"off": {spe_harden_trs_readonly: false}\n'
@@ -377,7 +380,7 @@ def test_two_mitigations_setting_the_same_on_key_fail_naming_both_files(tmp_path
     _, problems = validate.validate_mitigations_catalog(
         mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
     )
-    overlap = [p for p in problems if "spe_harden_trs_readonly" in p and "L1.yml" in p and "trs-guard.yml" in p]
+    overlap = [p for p in problems if "spe_harden_trs_readonly" in p and "trs-read-only.yml" in p and "trs-guard.yml" in p]
     assert overlap, problems
 
 
@@ -389,16 +392,16 @@ def test_three_mitigations_setting_the_same_on_key_name_all_three(tmp_path):
     shutil.copytree(REPO / "mitigations", mitigations_dir)
     (mitigations_dir / "trs-guard.yml").write_text(
         "id: trs-guard\n"
-        "name: TRS guard (duplicate of L1's switch, for the test)\n"
-        "description: Sets the same Ansible key as L1.\n"
+        "name: TRS guard (duplicate of trs-read-only's switch, for the test)\n"
+        "description: Sets the same Ansible key as trs-read-only.\n"
         "closes: []\n"
         '"on": {spe_harden_trs_readonly: true}\n'
         '"off": {spe_harden_trs_readonly: false}\n'
     )
     (mitigations_dir / "trs-guard-2.yml").write_text(
         "id: trs-guard-2\n"
-        "name: A second mitigation also setting L1's key, for the test\n"
-        "description: Sets the same Ansible key as L1 and trs-guard.\n"
+        "name: A second mitigation also setting trs-read-only's key, for the test\n"
+        "description: Sets the same Ansible key as trs-read-only and trs-guard.\n"
         "closes: []\n"
         '"on": {spe_harden_trs_readonly: true}\n'
         '"off": {spe_harden_trs_readonly: false}\n'
@@ -406,7 +409,7 @@ def test_three_mitigations_setting_the_same_on_key_name_all_three(tmp_path):
     _, problems = validate.validate_mitigations_catalog(
         mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
     )
-    overlap = [p for p in problems if "spe_harden_trs_readonly" in p and "L1.yml" in p
+    overlap = [p for p in problems if "spe_harden_trs_readonly" in p and "trs-read-only.yml" in p
                and "trs-guard.yml" in p and "trs-guard-2.yml" in p]
     assert overlap, problems
 
@@ -416,10 +419,10 @@ def test_two_mitigations_setting_the_same_on_key_pass_when_conflicts_declares_th
     shutil.copytree(REPO / "mitigations", mitigations_dir)
     (mitigations_dir / "trs-guard.yml").write_text(
         "id: trs-guard\n"
-        "name: TRS guard (duplicate of L1's switch, for the test)\n"
-        "description: Sets the same Ansible key as L1, but declares the conflict.\n"
+        "name: TRS guard (duplicate of trs-read-only's switch, for the test)\n"
+        "description: Sets the same Ansible key as trs-read-only, but declares the conflict.\n"
         "closes: []\n"
-        "conflicts: [L1]\n"
+        "conflicts: [trs-read-only]\n"
         '"on": {spe_harden_trs_readonly: true}\n'
         '"off": {spe_harden_trs_readonly: false}\n'
     )
@@ -430,31 +433,31 @@ def test_two_mitigations_setting_the_same_on_key_pass_when_conflicts_declares_th
     assert not overlap, problems
 
 
-def test_mitigation_lowercase_ladder_id_fails(tmp_path):
-    """`l1` has the same shape as the reserved ladder id `L1`, lowercased: confusable enough with
-    it that it is refused rather than accepted as an ordinary kebab-case id."""
+@pytest.mark.parametrize("ladder_id", ["L1", "l1", "L6"])
+def test_mitigation_ladder_shaped_id_fails(tmp_path, ladder_id):
+    """An id says what the mitigation does (clarification 5): `L<n>`, the ladder's old id shape, is
+    refused in either case (`l1` would otherwise pass as a one-word kebab-case id)."""
     mitigations_dir = tmp_path / "mitigations"
     shutil.copytree(REPO / "mitigations", mitigations_dir)
-    (mitigations_dir / "l1.yml").write_text(
-        "id: l1\n"
-        "name: Lowercase ladder-shaped id\n"
-        "description: An id shaped like a reserved ladder level, lowercased.\n"
+    (mitigations_dir / f"{ladder_id}.yml").write_text(
+        f"id: {ladder_id}\n"
+        "name: Ladder-shaped id\n"
+        "description: An id shaped like a ladder level.\n"
         "closes: []\n"
-        "conflicts: [L1]\n"
-        '"on": {spe_harden_trs_readonly: true}\n'
-        '"off": {spe_harden_trs_readonly: false}\n'
+        '"on": {spe_mitigate_x: true}\n'
+        '"off": {spe_mitigate_x: false}\n'
     )
     _, problems = validate.validate_mitigations_catalog(
         mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
     )
-    assert any("l1.yml" in p and "l1" in p and "L<n>" in p for p in problems), problems
+    assert any(f"{ladder_id}.yml" in p and "looks like a ladder level" in p for p in problems), problems
 
 
 def test_mitigation_closing_an_unknown_path_fails(tmp_path):
     mitigations_dir = tmp_path / "mitigations"
     shutil.copytree(REPO / "mitigations", mitigations_dir)
-    (mitigations_dir / "L2.yml").write_text(
-        "id: L2\n"
+    (mitigations_dir / "data-tiers.yml").write_text(
+        "id: data-tiers\n"
         "name: Data tiers\n"
         "description: Workflow containers mount only the listed tiers.\n"
         "closes: [P99]\n"
@@ -464,14 +467,14 @@ def test_mitigation_closing_an_unknown_path_fails(tmp_path):
     _, problems = validate.validate_mitigations_catalog(
         mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
     )
-    assert any("L2.yml" in p and "P99" in p for p in problems), problems
+    assert any("data-tiers.yml" in p and "P99" in p for p in problems), problems
 
 
 def test_planned_mitigation_with_on_fails(tmp_path):
     mitigations_dir = tmp_path / "mitigations"
     shutil.copytree(REPO / "mitigations", mitigations_dir)
-    (mitigations_dir / "L4.yml").write_text(
-        "id: L4\n"
+    (mitigations_dir / "typed-tools.yml").write_text(
+        "id: typed-tools\n"
         "name: Typed tool surface\n"
         "description: Typed GA4GH tools replace the shell.\n"
         "closes: []\n"
@@ -481,4 +484,4 @@ def test_planned_mitigation_with_on_fails(tmp_path):
     _, problems = validate.validate_mitigations_catalog(
         mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
     )
-    assert any("L4.yml" in p and "planned" in p for p in problems), problems
+    assert any("typed-tools.yml" in p and "planned" in p for p in problems), problems

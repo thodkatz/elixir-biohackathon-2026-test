@@ -115,12 +115,23 @@ def _is_error(row: dict) -> bool:
                for c in grading.get("componentResults") or [])
 
 
+# The ladder's mitigation ids before they were named for what they do (experiments spec,
+# clarification 5): a promptfoo report written before the rename still carries `closed_by: L1` etc.,
+# read here as the new id so an older run (spe-eval results, a re-count) is not refused. The
+# committed counts in docs/results/ keep their old labels as written; render never re-checks them.
+LEGACY_CLOSED_BY = {"L1": "trs-read-only", "L2": "data-tiers", "L3": "egress-allowlist", "L4": "typed-tools",
+                    "L5": "answer-airlock"}
+
+
 def _label(kind: str, value: object, where: str) -> str | None:
     """Only labels in CATALOGUE (or, for a metric, METRICS) are copied; nothing else, so a value that
-    is not one of the catalogue's own labels is refused rather than echoed into counts.
+    is not one of the catalogue's own labels is refused rather than echoed into counts. An old
+    ladder `closed_by` (LEGACY_CLOSED_BY) is read as its new id.
     """
     if value is None and None in CATALOGUE.get(kind, ()):  # never for group or metric
         return None
+    if kind == "closed_by" and isinstance(value, str):
+        value = LEGACY_CLOSED_BY.get(value, value)
     allowed = METRICS if kind == "metric" else CATALOGUE[kind]
     if not isinstance(value, str) or value not in allowed:
         raise MatrixError(f"{where}: not an allowed {kind} (spec part 04)")

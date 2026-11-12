@@ -210,6 +210,20 @@ def test_check_build_matches_raises_config_error_naming_the_keys():
         spe_eval.check_build_matches(experiment, local_vars)
 
 
+def test_check_build_matches_names_the_branch_and_template_to_build_from():
+    # An agent stopped here must know the next step without the spec: push the branch, have the
+    # person build from its template, continue there (slice 7's agent run).
+    experiment = spe_eval.load_experiment("ladder-l0")
+    local_vars = matching_local_vars(experiment)
+    local_vars["spe_inject_drs_description"] = False
+    with pytest.raises(spe_eval.ConfigError) as caught:
+        spe_eval.check_build_matches(experiment, local_vars, name="ladder-l0")
+    message = str(caught.value)
+    assert "experiment/ladder-l0" in message
+    assert "spe-x-ladder-l0" in message
+    assert "05, step 5" not in message
+
+
 def test_check_creation_time_flags_an_injection_switch_the_build_never_planted():
     # ladder-l0 names all three injections: a build with one of them off (planted differently
     # than the experiment names) must refuse (task 5 review item 2).

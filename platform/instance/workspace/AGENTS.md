@@ -88,7 +88,10 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
 (`experiments/ladder-l0.yml`…`ladder-l3.yml`) as the worked example, indexed with every other experiment in
 `experiments/README.md`.
 
-1. **Start**: `spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--injection <surface>] [--from <experiment>]`
+1. **Start**: first `git switch -c experiment/<name>` in `~/sperange`, so every commit lands on the experiment's
+   branch (the workspace's clone starts on whatever branch it was built from); in a workspace built from
+   `spe-x-<name>`, the branch exists already: `git switch experiment/<name>` instead. Then
+   `spe-eval new <name> [--threat TM-NNN] [--path P<n>] [--injection <surface>] [--from <experiment>]`
    writes every slot's file with `TODO`s: `experiments/<name>.yml`, `mitigations/<name>.yml` with its
    `spe_mitigate_<name>` switch (added to `group_vars/all.yml`), `tests/experiments/<name>.yaml`, and a threat or
    path file from its template when the id is new. Success prints `spe-eval new <name>: wrote` and each path, then
@@ -136,7 +139,14 @@ your idea needs (threat, path, attack, mitigation, tests) and reuse the rest fro
    experiment. Success prints `<name> <arm>: applied, the stack answers` and exits 0. An unknown experiment, a
    build whose settings no longer match its creation-time ones, an arm the experiment does not have (`mitigated`
    on one with no mitigation under test, e.g. `ladder-l0`), or the lock already held by a run or another `arm`
-   each exit 2.
+   each exit 2. A build whose settings differ is what a new injection (or new data, tiers or workflows) always
+   gets here: those are planted when a workspace is created, so this one cannot try or measure them. Stop there,
+   as the refusal says: commit and push `experiment/<name>` (after `check_experiment.py <name>` exits 0), tell the
+   person to build a workspace from the template `spe-x-<name>`, and continue in that one (on `experiment/<name>`,
+   step 1); `spe-eval test` and the
+   checker still run here meanwhile. Apply arms with `spe-eval arm`, not `spe-apply … -e key=value`: `-e` with
+   `=` passes a string, which the roles' `when:` refuses ("Conditionals must have a boolean result"); by hand,
+   `-e '{"spe_mitigate_<name>": true}'`.
 4. **Measure every arm**: `spe-eval run [<name>] [--repeat N] [--detach]` applies each arm in turn (`baseline`,
    then `mitigated` if the experiment has one), runs the controls-then-agent suite against it `N` times (default
    1), and returns the workspace to its own build's arm when done. Before anything else it prints, and you say to
@@ -273,7 +283,16 @@ the reference, in its parts:
 
 A participant's own mitigation follows the same shape: a switch default off, guarded in the Ansible path the
 SPE agent actually uses (never an installer that only runs at creation), a `mitigations/<id>.yml`, and the two
-checks to run by hand before trusting `spe-eval run`'s own numbers.
+checks to run by hand before trusting `spe-eval run`'s own numbers. Two things L1 does not show:
+
+- **The stack's own writes go through a guard too.** `trs_install` seeds the catalog with `PUT`s through the
+  same router at every build and arm, the injection payloads among them, which name sensitive paths on purpose. A
+  guard that matches any mention of such a path refuses those and fails the build, and the task's `no_log` hides
+  why: match what the attack writes (a workflow file's content), not every field, and reproduce `trs_install`'s
+  requests with `curl` when an apply fails there.
+- **A new probe needs its controls entries**: a line in `platform/promptfoo-evals/controls.yaml` and its
+  mitigation level in `controls_asserts.py`'s `PROBE_CONTROL` (`None` for one no ladder level closes, with its
+  state in `FIXED_STATE`); `spe-eval test` fails, naming the probe, until both are there.
 
 ### Conventions
 

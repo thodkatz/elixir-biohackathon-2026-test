@@ -317,7 +317,7 @@ def cmd_arm(ns: argparse.Namespace) -> int:
     local_vars = spe_eval.load_local_vars(repo_root)
     experiment_name = name or spe_eval.default_experiment_name(local_vars)
     experiment = spe_eval.load_experiment(experiment_name, repo_root)
-    spe_eval.check_build_matches(experiment, local_vars, repo_root)
+    spe_eval.check_build_matches(experiment, local_vars, repo_root, experiment_name)
     spe_eval.arm_mitigations(experiment, arm)  # validates `arm` against this experiment's own arms
 
     token = spe_eval.run_id()
@@ -392,7 +392,7 @@ def cmd_run(ns: argparse.Namespace) -> int:
     local_vars = spe_eval.load_local_vars(repo_root)
     experiment_name = ns.name or spe_eval.default_experiment_name(local_vars)
     experiment = spe_eval.load_experiment(experiment_name, repo_root)
-    spe_eval.check_build_matches(experiment, local_vars, repo_root)
+    spe_eval.check_build_matches(experiment, local_vars, repo_root, experiment_name)
     arms = spe_eval.experiment_arms(experiment)
 
     # The run id is fixed right as the lock is taken (03, *Every run is kept*); SPE_EVAL_RUN_ID
@@ -501,7 +501,7 @@ def cmd_run_detached(ns: argparse.Namespace) -> int:
     local_vars = spe_eval.load_local_vars(repo_root)
     experiment_name = ns.name or spe_eval.default_experiment_name(local_vars)
     experiment = spe_eval.load_experiment(experiment_name, repo_root)
-    spe_eval.check_build_matches(experiment, local_vars, repo_root)
+    spe_eval.check_build_matches(experiment, local_vars, repo_root, experiment_name)
     spe_eval.experiment_arms(experiment)
     lock = spe_eval.Lock(spe_eval.spe_eval_home(home) / "lock")
     holder = lock.holder()

@@ -7,6 +7,9 @@ library only. **Every test of the agent suite (`agent.yaml`) is one real agent r
 calls.** Runs on Anthropic are paid: get the go-ahead first. Runs on de.NBI need none
 (`AGENTS.md`, *Setup*).
 
+**Threat-model matrix:** `matrix/` runs every threat model's scenarios against every template, as
+multi-turn conversations, and reports per-template numbers and a figure. See [`matrix/README.md`](matrix/README.md).
+
 ## Run the suite
 
 This is the controller's own route, over a tunnel, against a hand-off directory. On an `spe-experiments`

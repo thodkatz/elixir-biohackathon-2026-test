@@ -29,14 +29,33 @@ Routes (Caddy sends /reports* here):
                                     resume (the page reloads on reconnect); the same bounds
     GET  /reports/static/<file>    the page's CSS and script
     GET  /reports/healthz          200, no login
+    GET  /reports/runs             the runs browser (a page; its data comes from the API below)
+
+The API, JSON unless noted, for the browser page and for scripts (the session token
+goes in the coder_session_token cookie or in a Coder-Session-Token header; without
+one the answer is 401, never a redirect). Everyone logged in may read all of it:
+    GET  /reports/api/reports                                   the live reports (the list above as JSON)
+    GET  /reports/api/runs                                      every archived run under RUNS_DIR, newest first
+    GET  /reports/api/workspaces/<id>                           one workspace's runs with their chats, and its live report
+    GET  /reports/api/runs/<run>                                one run: parameters, report, chats of both frontends
+    GET  /reports/api/runs/<run>/report.md                      the archived report, text/markdown
+    GET  /reports/api/runs/<run>/chats/<frontend>/<chat>        one chat as turns (role, time, sanitized HTML)
+    GET  /reports/api/runs/<run>/chats/<frontend>/<chat>.md     the chat's Markdown as archived
+    GET  /reports/api/runs/<run>/chats/<frontend>/<chat>.json   the chat's export as archived
+    GET  /reports/api/runs/<run>/agui/agent-runs.jsonl          the agent's run log (AG-UI runs)
+    GET  /reports/api/runs/<run>/agui/journals/<session>.jsonl  one AG-UI session journal as stored
+<run> is the archive directory's name (<UTC time>_<instance>), <frontend> is openwebui
+or agui, <chat> the file stem (01-title). run.yml's participant e-mail is never served;
+neither is canaries.json.
 
 Login is Coder's: the browser's coder_session_token cookie is forwarded to
 Coder's users/me endpoint and nowhere else. The report's owner (the sidecar's
 username) and Coder owners may write; everyone logged in may read. The hits
 routes are narrower (decision 10): only the workspace's owner and Coder owners.
 
-Standard library plus python3-markdown. Environment: CODER_URL (default
-http://127.0.0.1:7080), REPORTS_DIR (default /data-share/reports), HITS_DIR
+Standard library plus python3-markdown and python3-yaml. Environment: CODER_URL
+(default http://127.0.0.1:7080), REPORTS_DIR (default /data-share/reports), RUNS_DIR
+(default /data-share/runs, the archives written by playbooks/archive.yml), HITS_DIR
 (default /data-share/canary-hits, the canary hit viewer's watcher output), LISTEN
 (default 127.0.0.1:7090).
 """
@@ -46,7 +65,9 @@ import datetime
 import hashlib
 import html
 import json
+import math
 import os
+import re
 import sys
 import threading
 import time
@@ -59,6 +80,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import markdown
+import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from canary_hits import HitsFile  # noqa: E402
@@ -67,7 +89,9 @@ from hits_view import (LOUD, UUID_RE, admin_body, empty_text, hit_html, newest_f
                        workspace_rows)
 
 PREFIX = "/reports"
+API = PREFIX + "/api/"
 COOKIE = "coder_session_token"
+TOKEN_HEADER = "Coder-Session-Token"
 MAX_BYTES = 1_000_000
 CACHE_SECONDS = 30
 HITS_DIR = "/data-share/canary-hits"
@@ -81,6 +105,11 @@ STREAM_WRITE_TIMEOUT = 30  # seconds a write may block (a client that stops read
 STREAM_STATUS_REFRESH = 10  # seconds before an unchanged status is resent, so "watched N s ago" ages live
 ADMIN_PAGE_HITS = 500  # hits the admin page renders; the rest are on each workspace's page
 ADMIN_JSON_HITS = 2000  # hits the admin hits.json returns; a workspace's full list is its own hits.json
+# An archive directory (<UTC time>_<instance>), a chat file stem (01-title), a frontend's chats directory.
+RUN_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z_[a-z0-9][a-z0-9._-]*$")
+CHAT_RE = re.compile(r"^[0-9]+-[a-z0-9][a-z0-9-]*$")
+FRONTEND_DIRS = {"openwebui": "chats", "agui": os.path.join("agui", "chats")}
+RUNS_CACHE_SECONDS = 10
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 STATIC_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".woff2": "font/woff2"}
 # Scripts only from here, no inline script; inline styles are allowed because the editor
@@ -227,6 +256,369 @@ class Store:
         return rows
 
 
+# --- the archived runs ---------------------------------------------------------
+# playbooks/archive.yml writes one directory per stopped workspace under RUNS_DIR:
+# run.yml (parameters), report.md/.json (the report as it was), chats/<nn>-<title>.json|.md
+# (Open WebUI), agui/chats/... (AG-UI, rendered the same way), agui/agent-runs.jsonl and
+# agui/agui-journals/<session>.jsonl (raw). Read-only here; a listing is cached briefly.
+
+TURN_RE = re.compile(r"^## (?P<role>[^(·\n]+?)(?: \((?P<model>[^)]*)\))?(?: · (?P<rest>.*))?$")
+TURN_ROLES = ("user", "assistant", "system", "tool")
+# write_run.py's own '##' sections in an AG-UI chat; any other '##' line is the model's text.
+TURN_SECTIONS = ("Compacted", "Other branches", "sent by the client, not used")
+HIDDEN_RUN_KEYS = ("participant_email", "owner_email")
+
+
+def _read_json(path: str):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _read_text(path: str) -> str | None:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def public(d: dict) -> dict:
+    """A run's or report's metadata without the fields that are not for other participants."""
+    return {k: v for k, v in d.items() if k not in HIDDEN_RUN_KEYS}
+
+
+def split_turns(md: str, render: bool = True) -> tuple[dict, list[dict]]:
+    """A chat as write_run.py renders it: a title, '- Key: value' facts, then one '## role · time'
+    heading per turn (Open WebUI adds the model in parentheses; AG-UI has a few other '##' sections,
+    'Compacted', 'Other branches', which become turns of their own kind). A '##' line the model wrote
+    in its answer is not a turn: it stays in the body, like everything inside a code fence."""
+    facts: dict[str, str] = {}
+    turns: list[dict] = []
+    current: dict | None = None
+    body: list[str] = []
+    in_fence = False
+
+    def close():
+        if current is not None:
+            text = "\n".join(body).strip("\n")
+            current["markdown"] = text
+            if render:
+                current["html"] = render_markdown(text)
+            turns.append(current)
+
+    for line in md.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+        m = TURN_RE.match(line) if not in_fence and line.startswith("## ") else None
+        if m and (m.group("role").strip().lower() in TURN_ROLES and m.group("rest") is not None
+                  or m.group("role").strip() in TURN_SECTIONS):
+            close()
+            role = m.group("role").strip()
+            current = {"role": role.lower() if role.lower() in TURN_ROLES else "section",
+                       "label": role, "model": m.group("model") or "", "at": m.group("rest") or ""}
+            body = []
+            continue
+        if current is None:
+            if stripped.startswith("- ") and ": " in stripped:
+                k, _, v = stripped[2:].partition(": ")
+                facts[k.strip()] = v.strip()
+            continue
+        body.append(line)
+    close()
+    return facts, turns
+
+
+# --- the threat score -----------------------------------------------------------
+# How much a user turn resembles known adversarial prompts: the same model file and arithmetic as
+# the agent's POST /threat-score (platform/agui/pydantic-ai-agent/src/spe_agent/threat.py), here for
+# the archived chats. The turn is embedded by an OpenAI-compatible endpoint (THREAT_EMBEDDINGS_URL,
+# THREAT_EMBEDDINGS_KEY) and scored by threat_model.json next to this file: logistic regressions on
+# the embedding, one general head and one per category. Without the endpoint, or when it fails, the
+# chats are served without scores. Scores are kept in memory only.
+
+THREAT_EMBED_CHARS = 6000   # what is embedded, as in training
+THREAT_BATCH = 32
+THREAT_CACHE = 4096
+
+
+def threat_display(p: float, elevated: float, high: float) -> int:
+    """A probability on the head's own scale: 50 is its `elevated` threshold (5% of benign in-domain
+    prompts score above it), 75 its `high` threshold (1%)."""
+    if p < elevated:
+        value = 50 * p / elevated if elevated > 0 else 50.0
+    elif p < high:
+        value = 50 + 25 * (p - elevated) / (high - elevated)
+    else:
+        value = 75 + 25 * (p - high) / (1 - high) if high < 1 else 100.0
+    return max(0, min(100, round(value)))
+
+
+def threat_level(score: int) -> str:
+    return "high" if score >= 75 else "elevated" if score >= 50 else "low"
+
+
+class ThreatScorer:
+    def __init__(self, model_path: str, base_url: str, api_key: str, embedding_model: str, post=None, timeout: float = 15.0):
+        with open(model_path, encoding="utf-8") as f:
+            data = json.load(f)
+        self.heads = data["heads"]
+        self.dimensions = data["dimensions"]
+        self.info = {"version": data["version"], "trained": data["trained"], "embedding_model": data["embedding_model"]}
+        if not self.heads or self.heads[0]["id"] != "general" or any(len(h["weights"]) != self.dimensions for h in self.heads):
+            raise ValueError(f"{model_path}: not a threat model")
+        self.url = base_url.rstrip("/") + "/embeddings"
+        self.api_key = api_key
+        self.embedding_model = embedding_model
+        self.timeout = timeout
+        self._post = post or self._http_post
+        self._cache: dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def _http_post(self, body: dict) -> dict:
+        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), method="POST", headers={
+            "Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            return json.load(r)
+
+    def score(self, embedding: list[float]) -> dict:
+        if len(embedding) != self.dimensions:
+            raise ValueError(f"the embedding has {len(embedding)} dimensions, the model needs {self.dimensions}")
+        norm = math.sqrt(sum(v * v for v in embedding)) or 1.0
+        x = [v / norm for v in embedding]
+        scored = []
+        for head in self.heads:
+            z = sum(w * v for w, v in zip(head["weights"], x)) + head["bias"]
+            p = 1 / (1 + math.exp(-z)) if z > -700 else 0.0
+            value = threat_display(p, head["elevated"], head["high"])
+            scored.append({"id": head["id"], "label": head["label"], "score": value, "level": threat_level(value),
+                           "examples": head["examples"], "auc": head["auc"]})
+        general, categories = scored[0], sorted(scored[1:], key=lambda c: -c["score"])
+        return {"score": general["score"], "level": general["level"], "categories": categories}
+
+    def scores(self, texts: list[str]) -> list[dict | None]:
+        """One score per text, None where there is none (an empty text, or the endpoint failed)."""
+        keys = [t.strip()[:THREAT_EMBED_CHARS] for t in texts]
+        with self._lock:
+            todo = [k for k in dict.fromkeys(keys) if k and k not in self._cache]
+        try:
+            for i in range(0, len(todo), THREAT_BATCH):
+                batch = todo[i:i + THREAT_BATCH]
+                data = self._post({"model": self.embedding_model, "input": batch})["data"]
+                rows = sorted(data, key=lambda e: e["index"])
+                if len(rows) != len(batch):
+                    raise ValueError(f"{len(rows)} embeddings for {len(batch)} texts")
+                fresh = {k: self.score(e["embedding"]) for k, e in zip(batch, rows)}
+                with self._lock:
+                    while len(self._cache) + len(fresh) > THREAT_CACHE:
+                        self._cache.pop(next(iter(self._cache)))
+                    self._cache.update(fresh)
+        except Exception as e:  # the chats are served without scores; the reason only, never the key
+            print(f"sperange-report: threat score unavailable: {type(e).__name__}: {str(e)[:200]}", flush=True)
+        with self._lock:
+            return [self._cache.get(k) for k in keys]
+
+
+class Runs:
+    def __init__(self, root: str, threat: ThreatScorer | None = None):
+        self.root = root
+        self.threat = threat
+        self.lock = threading.Lock()
+        self._listing: tuple[float, list[dict]] | None = None
+
+    # ---- paths (every component validated by the caller's regexes; nothing else joins a path)
+    def dir(self, rid: str) -> str:
+        return os.path.join(self.root, rid)
+
+    def chat_path(self, rid: str, frontend: str, chat: str, ext: str) -> str:
+        return os.path.join(self.dir(rid), FRONTEND_DIRS[frontend], chat + ext)
+
+    def exists(self, rid: str) -> bool:
+        return bool(RUN_RE.match(rid)) and (os.path.isfile(os.path.join(self.dir(rid), "run.yml"))
+                                             or os.path.isfile(os.path.join(self.dir(rid), "report.json")))
+
+    # ---- metadata
+    def params(self, rid: str) -> dict:
+        try:
+            with open(os.path.join(self.dir(rid), "run.yml"), encoding="utf-8") as f:
+                y = yaml.safe_load(f)
+        except (OSError, yaml.YAMLError):
+            y = None
+        if not isinstance(y, dict):
+            y = {}
+            side = _read_json(os.path.join(self.dir(rid), "report.json"))
+            if isinstance(side, dict):  # an older archive without run.yml: what the sidecar knows
+                y = {"instance": side.get("instance"), "participant": side.get("owner"),
+                     "coder_workspace": side.get("workspace"), **(side.get("parameters") or {})}
+        return public(y)
+
+    def report(self, rid: str) -> dict | None:
+        md = _read_text(os.path.join(self.dir(rid), "report.md"))
+        if md is None:
+            return None
+        side = _read_json(os.path.join(self.dir(rid), "report.json"))
+        side = side if isinstance(side, dict) else {}
+        template = side.get("template_sha256")
+        filled = hashlib.sha256(md.encode("utf-8")).hexdigest() != template if template else None
+        return {"markdown": md, "filled": filled, "workspace_id": side.get("workspace_id"),
+                "created": side.get("created")}
+
+    def chats(self, rid: str) -> list[dict]:
+        rows = []
+        for frontend, sub in FRONTEND_DIRS.items():
+            d = os.path.join(self.dir(rid), sub)
+            try:
+                names = sorted(os.listdir(d))
+            except OSError:
+                continue
+            for name in names:
+                stem, ext = os.path.splitext(name)
+                if ext != ".json" or not CHAT_RE.match(stem) or not os.path.isfile(os.path.join(d, stem + ".md")):
+                    continue
+                c = _read_json(os.path.join(d, name))
+                c = c if isinstance(c, dict) else {}
+                chat = c.get("chat") if isinstance(c.get("chat"), dict) else {}
+                messages = chat.get("messages") if isinstance(chat.get("messages"), list) else []
+                history = (chat.get("history") or {}).get("messages") if isinstance(chat.get("history"), dict) else None
+                rows.append({
+                    "frontend": frontend, "id": stem,
+                    "title": str(c.get("title") or chat.get("title") or stem),
+                    "created": when(c.get("created_at")), "updated": when(c.get("updated_at")),
+                    "messages": len(history) if isinstance(history, dict) and history else len(messages),
+                    "tags": [str(t.get("name") if isinstance(t, dict) else t) for t in (chat.get("tags") or [])
+                             if t] if isinstance(chat.get("tags"), list) else [],
+                    "archived": bool(c.get("archived")),
+                })
+        return rows
+
+    def files(self, rid: str) -> dict:
+        agui = os.path.join(self.dir(rid), "agui")
+        journals = []
+        try:
+            journals = sorted(n[:-6] for n in os.listdir(os.path.join(agui, "agui-journals"))
+                              if n.endswith(".jsonl") and UUID_RE.match(n[:-6]))
+        except OSError:
+            pass
+        return {"agent_runs": os.path.isfile(os.path.join(agui, "agent-runs.jsonl")), "journals": journals}
+
+    def summary(self, rid: str) -> dict:
+        params = self.params(rid)
+        chats = self.chats(rid)
+        report = self.report(rid)
+        counts = {f: sum(1 for c in chats if c["frontend"] == f) for f in FRONTEND_DIRS}
+        return {
+            "id": rid,
+            "archived_at": str(params.get("archived_at") or rid.split("_", 1)[0]),
+            "instance": str(params.get("instance") or rid.split("_", 1)[-1]),
+            "participant": str(params.get("participant") or ""),
+            "workspace": str(params.get("coder_workspace") or ""),
+            "model": str(params.get("model") or ""),
+            "flavor": str(params.get("flavor") or ""),
+            "frontends": [str(f) for f in params.get("frontends") or []],
+            "workflows": [str(w) for w in params.get("workflows") or []],
+            "samples": [str(x) for x in params.get("samples") or []],
+            "tiers": [str(x) for x in params.get("tiers") or []],
+            "seed": params.get("seed"),
+            "chats": counts,
+            "report": None if report is None else {"filled": report["filled"], "workspace_id": report["workspace_id"]},
+        }
+
+    def listing(self) -> list[dict]:
+        now = time.monotonic()
+        with self.lock:
+            if self._listing and self._listing[0] > now:
+                return self._listing[1]
+        try:
+            names = os.listdir(self.root)
+        except OSError:
+            names = []
+        rows = [self.summary(rid) for rid in sorted(names, reverse=True) if self.exists(rid)]
+        with self.lock:
+            self._listing = (now + RUNS_CACHE_SECONDS, rows)
+        return rows
+
+    def for_workspace(self, wid: str, instance: str | None) -> list[dict]:
+        """The runs of one workspace: those whose archived report sidecar names it, or (archives
+        without a sidecar) whose instance is the one the workspace's live sidecar names."""
+        rows = []
+        for s in self.listing():
+            report = s.get("report") or {}
+            if report.get("workspace_id") == wid or (instance and s["instance"] == instance and not report.get("workspace_id")):
+                rows.append({**s, "chat_list": self.chats(s["id"])})
+        return rows
+
+    def detail(self, rid: str) -> dict:
+        d = self.summary(rid)
+        d["parameters"] = self.params(rid)
+        d["chat_list"] = self.with_threat(rid, self.chats(rid))
+        report = self.report(rid)
+        if report is not None:
+            d["report"] = {**report, "html": render_markdown(report["markdown"])}
+        d["files"] = self.files(rid)
+        return d
+
+    def with_threat(self, rid: str, chats: list[dict]) -> list[dict]:
+        """Each chat with the highest threat score among its user turns (one request for the whole run)."""
+        if self.threat is None:
+            return chats
+        texts: list[str] = []
+        spans = []
+        for c in chats:
+            md = _read_text(self.chat_path(rid, c["frontend"], c["id"], ".md")) or ""
+            mine = [t["markdown"] for t in split_turns(md, render=False)[1] if t["role"] == "user"]
+            spans.append((len(texts), len(texts) + len(mine)))
+            texts += mine
+        scores = self.threat.scores(texts)
+        out = []
+        for c, (a, b) in zip(chats, spans):
+            top = max((s for s in scores[a:b] if s), key=lambda s: s["score"], default=None)
+            out.append({**c, "threat": {"score": top["score"], "level": top["level"]}} if top else c)
+        return out
+
+    def chat(self, rid: str, frontend: str, chat: str) -> dict | None:
+        md = _read_text(self.chat_path(rid, frontend, chat, ".md"))
+        if md is None:
+            return None
+        facts, turns = split_turns(md)
+        if self.threat is not None:
+            users = [t for t in turns if t["role"] == "user"]
+            for t, score in zip(users, self.threat.scores([t["markdown"] for t in users])):
+                if score:
+                    t["threat"] = score
+        meta = next((c for c in self.chats(rid) if c["frontend"] == frontend and c["id"] == chat), None)
+        title = md.split("\n", 1)[0].lstrip("# ").strip() if md.startswith("# ") else chat
+        return {"run": rid, "frontend": frontend, "id": chat, "title": (meta or {}).get("title") or title,
+                "meta": meta, "facts": facts, "turns": turns,
+                "threat_model": self.threat.info if self.threat is not None else None,
+                "links": {"markdown": f"{API}runs/{rid}/chats/{frontend}/{chat}.md",
+                          "json": f"{API}runs/{rid}/chats/{frontend}/{chat}.json"}}
+
+    def raw(self, rid: str, relpath: str) -> bytes | None:
+        """A file of the archive by a path the caller has already validated component by component."""
+        try:
+            with open(os.path.join(self.dir(rid), relpath), "rb") as f:
+                return f.read()
+        except OSError:
+            return None
+
+
+def when(t) -> str:
+    """Epoch seconds or milliseconds (Open WebUI and AG-UI exports) to '2026-11-03 10:00 UTC'."""
+    try:
+        s = float(t)
+    except (TypeError, ValueError):
+        return str(t or "")
+    if s > 1e11:
+        s /= 1000
+    try:
+        return iso(s)
+    except (OverflowError, OSError, ValueError):
+        return str(t)
+
+
 def etag_of(data: bytes) -> str:
     return '"' + hashlib.sha256(data).hexdigest() + '"'
 
@@ -290,28 +682,40 @@ def is_admin(user: dict) -> bool:
 # top bar and cards. The editor is EasyMDE (vendored in static/, with Font Awesome 4
 # for its toolbar); readers get the rendered report instead of an editor.
 
-def page(title: str, body: str, user: dict | None, editor: bool = False, scripts: tuple[str, ...] = (),
-         styles: tuple[str, ...] = ()) -> bytes:
-    """`scripts` and `styles` are file names under `static/` (the hits page's `hits.js`,
-    `hits.css`), linked absolute like the page's own (`{PREFIX}/static/<name>`); always with a
-    `src`/`href`, never inline (the CSP forbids inline script)."""
+def page(title: str, body: str, user: dict | None, editor: bool = False, styles: tuple[str, ...] = (),
+         scripts: tuple[str, ...] = ("report.js",)) -> bytes:
+    """`scripts` and `styles` are file names under `static/` (the runs browser's `runs.js`, the hits
+    page's `hits.js` and `report.js`), linked absolute like the page's own (`{PREFIX}/static/<name>`);
+    always with a `src`/`href`, never inline (the CSP forbids inline script)."""
     who = html.escape(user.get("username", "")) if user else ""
     extra = (f"<link rel=\"stylesheet\" href=\"{PREFIX}/static/font-awesome.min.css\">"
              f"<link rel=\"stylesheet\" href=\"{PREFIX}/static/easymde.min.css\">" if editor else "")
     extra += "".join(f"<link rel=\"stylesheet\" href=\"{PREFIX}/static/{html.escape(name)}\">" for name in styles)
-    tail_scripts = "".join(f"<script src=\"{PREFIX}/static/{html.escape(name)}\"></script>" for name in scripts)
     return (
         "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
         f"<title>{html.escape(title)}</title>{extra}"
         f"<link rel=\"stylesheet\" href=\"{PREFIX}/static/report.css\"></head>"
         "<body><div class=\"wrap\"><header class=\"top\"><a class=\"brand\" href=\"/\">SPE Range</a>"
-        f"<nav><a href=\"/workspaces\">Portal</a><a href=\"{PREFIX}/\">Reports</a>"
+        f"<nav><a href=\"/workspaces\">Portal</a><a href=\"/threats/\">Catalog</a>"
+        f"<a href=\"{PREFIX}/runs\">Runs</a><a href=\"{PREFIX}/\">Reports</a>"
         f"<span class=\"who\">{who}</span></nav></header>{body}</div>"
         + (f"<script src=\"{PREFIX}/static/easymde.min.js\"></script>" if editor else "")
-        + tail_scripts
-        + f"<script src=\"{PREFIX}/static/report.js\"></script></body></html>"
+        + "".join(f"<script src=\"{PREFIX}/static/{html.escape(name)}\"></script>" for name in scripts)
+        + "</body></html>"
     ).encode()
+
+
+def runs_page(user: dict) -> bytes:
+    """The runs browser: a shell the script fills from the API (list, one run, one chat; the view is in
+    the URL's hash so every state has a link). Without script it says where the data is."""
+    body = (f"<main class=\"runs\" id=\"runs\" data-api=\"{API}\" data-reports=\"{PREFIX}/\">"
+            "<h1>Runs</h1><p class=\"lead\">Every archived run of the range and the live reports of the "
+            "workspaces that exist now. Everyone logged in can read them.</p>"
+            f"<noscript><p>This page needs JavaScript. The same data is at <a href=\"{API}runs\">{API}runs</a> "
+            f"and <a href=\"{API}reports\">{API}reports</a> as JSON.</p></noscript>"
+            "<div id=\"view\" class=\"view\" aria-live=\"polite\"><p class=\"muted\">Loading…</p></div></main>")
+    return page("Runs", body, user, styles=("runs.css",), scripts=("runs.js",))
 
 
 def list_page(rows: list[dict], user: dict) -> bytes:
@@ -330,10 +734,7 @@ def list_page(rows: list[dict], user: dict) -> bytes:
              if trs else "<p class=\"muted\">No report yet. A report is created with each workspace.</p>")
     admin_link = (f"<p class=\"admin-link\"><a href=\"{PREFIX}/hits\">Canary hits</a></p>"
                   if is_admin(user) else "")
-    body = ("<main class=\"list\"><h1>Run reports</h1><p class=\"lead\">One report per workspace, written by its "
-            "owner while testing. Everyone logged in can read them.</p>"
-            f"{admin_link}"
-            f"<section class=\"card\">{table}</section></main>")
+    body = f"<main class=\"list\"><h1>Run reports</h1>{admin_link}<section class=\"card\">{table}</section></main>"
     return page("Run reports", body, user)
 
 
@@ -443,6 +844,7 @@ class Handler(BaseHTTPRequestHandler):
     store: Store
     coder: Coder
     hits_dir: str | None = None
+    runs: Runs
 
     # ---- helpers
     def send(self, status: int, body: bytes = b"", ctype: str = "text/html; charset=utf-8", headers: dict | None = None):
@@ -463,6 +865,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send(status, json.dumps(obj).encode(), "application/json", headers)
 
     def token(self) -> str:
+        header = self.headers.get(TOKEN_HEADER, "").strip()
+        if header:
+            return header
         c = SimpleCookie()
         try:
             c.load(self.headers.get("Cookie", ""))
@@ -541,7 +946,7 @@ class Handler(BaseHTTPRequestHandler):
         content = (f'<section id="hits" data-wid="{html.escape(wid)}" data-last="{last}">'
                    f'{participant_body(body_meta, hits, body_status)}</section>')
         return self.send(HTTPStatus.OK, page(f"Canary hits · {label}", content, user,
-                                             scripts=("hits.js",), styles=("hits.css",)))
+                                             scripts=("hits.js", "report.js"), styles=("hits.css",)))
 
     def hits_json(self, wid: str, user: dict) -> None:
         if not UUID_RE.match(wid):
@@ -582,7 +987,7 @@ class Handler(BaseHTTPRequestHandler):
         content = (f'<section id="admin-hits-page">'
                    f'{admin_body(rows, shown, states, more=len(hits) - len(shown))}</section>')
         return self.send(HTTPStatus.OK, page("Canary hits · all workspaces", content, user,
-                                             scripts=("hits-admin.js",), styles=("hits.css",)))
+                                             scripts=("hits-admin.js", "report.js"), styles=("hits.css",)))
 
     def admin_json(self, user: dict) -> None:
         if not is_admin(user):
@@ -779,7 +1184,7 @@ class Handler(BaseHTTPRequestHandler):
         except (urllib.error.URLError, OSError, ValueError):
             return self.send(HTTPStatus.BAD_GATEWAY, message_page("Portal unavailable", "Coder did not answer; try again in a moment."))
         if user is None:
-            if rest.endswith(".md") or rest.endswith("hits.json") or rest.endswith("hits/events"):
+            if rest.endswith(".md") or rest.startswith("api/") or rest.endswith("hits.json") or rest.endswith("hits/events"):
                 return self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "not logged in"})
             return self.login_redirect(path)  # the page asked for, the hits page included
         if rest == "":
@@ -797,6 +1202,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.hits_json(rest[:-len("/hits.json")], user)
         if rest.endswith("/hits"):
             return self.hits_page(rest[:-len("/hits")], user)
+        if rest == "runs":
+            return self.send(HTTPStatus.OK, runs_page(user))
+        if rest.startswith("api/"):
+            return self.api(rest[len("api/"):])
         wid, is_md = (rest[:-3], True) if rest.endswith(".md") else (rest, False)
         if not UUID_RE.match(wid):
             return self.send(HTTPStatus.NOT_FOUND, message_page("Not found", "No such report.", user))
@@ -812,6 +1221,51 @@ class Handler(BaseHTTPRequestHandler):
         state = self.coder.workspace_state(self.token(), wid)
         return self.send(HTTPStatus.OK, editor_page(wid, meta, user, self.can_edit(meta, user), state,
                                                     self.store.last_saved(wid), content[0]))
+
+    # ---- the API (the viewer is logged in; everything here is read-only)
+    def api(self, rest: str):
+        parts = rest.split("/")
+        if parts == ["reports"]:
+            return self.send_json(HTTPStatus.OK, {"reports": [public(r) for r in self.store.listing()]})
+        if parts == ["runs"]:
+            return self.send_json(HTTPStatus.OK, {"runs": self.runs.listing()})
+        if len(parts) == 2 and parts[0] == "workspaces" and UUID_RE.match(parts[1]):
+            wid = parts[1]
+            meta = self.store.meta(wid)
+            live = None
+            if meta is not None and os.path.isfile(self.store._md(wid)):
+                live = {**public(meta), "workspace_id": wid, "last_saved": self.store.last_saved(wid)}
+            runs = self.runs.for_workspace(wid, (meta or {}).get("instance"))
+            return self.send_json(HTTPStatus.OK, {"workspace_id": wid, "live_report": live, "runs": runs})
+        if len(parts) < 2 or parts[0] != "runs" or not self.runs.exists(parts[1]):
+            return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        rid, sub = parts[1], parts[2:]
+        if not sub:
+            return self.send_json(HTTPStatus.OK, self.runs.detail(rid))
+        if sub == ["report.md"]:
+            data = self.runs.raw(rid, "report.md")
+            return self.send_bytes(data, "text/markdown; charset=utf-8")
+        if len(sub) == 3 and sub[0] == "chats" and sub[1] in FRONTEND_DIRS:
+            chat, ext = os.path.splitext(sub[2]) if sub[2].endswith((".md", ".json")) else (sub[2], "")
+            if not CHAT_RE.match(chat):
+                return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            if ext:
+                data = self.runs.raw(rid, os.path.join(FRONTEND_DIRS[sub[1]], chat + ext))
+                return self.send_bytes(data, "text/markdown; charset=utf-8" if ext == ".md" else "application/json")
+            c = self.runs.chat(rid, sub[1], chat)
+            if c is None:
+                return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            return self.send_json(HTTPStatus.OK, c)
+        if sub == ["agui", "agent-runs.jsonl"]:
+            return self.send_bytes(self.runs.raw(rid, os.path.join("agui", "agent-runs.jsonl")), "application/x-ndjson")
+        if len(sub) == 3 and sub[:2] == ["agui", "journals"] and sub[2].endswith(".jsonl") and UUID_RE.match(sub[2][:-6]):
+            return self.send_bytes(self.runs.raw(rid, os.path.join("agui", "agui-journals", sub[2])), "application/x-ndjson")
+        return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+
+    def send_bytes(self, data: bytes | None, ctype: str):
+        if data is None:
+            return self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+        return self.send(HTTPStatus.OK, data, ctype)
 
     def do_PUT(self):
         path, rest = self.route()
@@ -898,10 +1352,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send(HTTPStatus.OK, data, STATIC_TYPES[ext], {"Cache-Control": "public, max-age=300"})
 
 
-def make_server(listen: str, reports_dir: str, coder_url: str, hits_dir: str | None = None) -> ThreadingHTTPServer:
+def make_server(listen: str, reports_dir: str, coder_url: str, runs_dir: str | None = None,
+                threat: ThreatScorer | None = None, hits_dir: str | None = None) -> ThreadingHTTPServer:
     host, _, port = listen.rpartition(":")
     handler = type("BoundHandler", (Handler,), {"store": Store(reports_dir), "coder": Coder(coder_url),
-                                                 "hits_dir": hits_dir})
+                                                "runs": Runs(runs_dir or os.path.join(os.path.dirname(reports_dir.rstrip("/")), "runs"), threat),
+                                                "hits_dir": hits_dir})
     srv = ThreadingHTTPServer((host or "127.0.0.1", int(port)), handler)
     srv.daemon_threads = True
     srv.streams, srv.streams_lock = 0, threading.Lock()  # open event streams, at most stream_max
@@ -917,10 +1373,23 @@ def main():
     reports_dir = os.environ.get("REPORTS_DIR", "/data-share/reports")
     hits_dir = os.environ.get("HITS_DIR", HITS_DIR)
     coder_url = os.environ.get("CODER_URL", "http://127.0.0.1:7080")
+    runs_dir = os.environ.get("RUNS_DIR", "/data-share/runs")
     if not os.path.isdir(reports_dir):
         sys.exit(f"sperange-report: REPORTS_DIR {reports_dir} is not a directory")
-    srv = make_server(listen, reports_dir, coder_url, hits_dir)
-    print(f"sperange-report: {reports_dir} on {listen}, Coder at {coder_url}, hits in {hits_dir}", flush=True)
+    if not os.path.isdir(runs_dir):  # the runs browser is then empty, the reports still work
+        print(f"sperange-report: RUNS_DIR {runs_dir} is not a directory; no archived runs to show", flush=True)
+    threat = None
+    embeddings_url, embeddings_key = os.environ.get("THREAT_EMBEDDINGS_URL"), os.environ.get("THREAT_EMBEDDINGS_KEY")
+    if embeddings_url and embeddings_key:
+        model_path = os.environ.get("THREAT_MODEL", os.path.join(os.path.dirname(os.path.abspath(__file__)), "threat_model.json"))
+        try:
+            threat = ThreatScorer(model_path, embeddings_url, embeddings_key,
+                                  os.environ.get("THREAT_EMBEDDING_MODEL", "vllm/BAAI/bge-m3"))
+        except (OSError, ValueError, KeyError) as e:  # the runs browser works without it
+            print(f"sperange-report: no threat scores: {type(e).__name__}: {e}", flush=True)
+    srv = make_server(listen, reports_dir, coder_url, runs_dir, threat, hits_dir)
+    print(f"sperange-report: {reports_dir} and {runs_dir} on {listen}, Coder at {coder_url}, "
+          f"hits in {hits_dir}, threat scores {'on' if threat else 'off'}", flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

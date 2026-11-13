@@ -485,3 +485,16 @@ def test_planned_mitigation_with_on_fails(tmp_path):
         mitigations_dir, real_path_ids(), real_probe_ids(), real_group_vars()
     )
     assert any("typed-tools.yml" in p and "planned" in p for p in problems), problems
+
+
+THREAT_BODY = "# TM-999: x\n## Attack Scenarios\n## Preconditions\n## Mitigations\n### Preventive\n### Detective\n### Responsive\n"
+PATH_BODY = "# P99: x\n## Route\n## Shown by\n"
+
+
+def test_threat_body_may_end_with_evidence():
+    assert validate.check_body(THREAT_BODY + "## Evidence\n", "TM-999", "x") == []
+    assert validate.check_body(THREAT_BODY + "## Evidence\n## Evidence\n", "TM-999", "x")
+
+
+def test_path_body_may_not_end_with_evidence():
+    assert validate.check_body_headings(PATH_BODY + "## Evidence\n", "P99: x", validate.PATH_BODY_HEADINGS)

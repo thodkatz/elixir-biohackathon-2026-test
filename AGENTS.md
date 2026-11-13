@@ -277,7 +277,7 @@ uv run --with pyyaml --with mkdocs-material python platform/site/build.py   # la
 uv run --with pytest --with pyyaml --with mkdocs-material pytest platform/dev/tests -q   # dataset generator, host preflight, site build, archive
 (cd platform/agui/pydantic-ai-agent && uv run --group dev pytest -q)   # agent
 (cd platform/promptfoo-evals && uv run --group dev pytest -q)          # promptfoo provider and assertions
-uv run --with pytest --with markdown pytest platform/report/tests -q    # run report service
+uv run --with pytest --with markdown --with pyyaml pytest platform/report/tests -q   # run report service
 (cd platform/agui/copilotkit-chat && npm ci && npm run build)          # chat UI (type check)
 (cd platform/agui/copilotkit-chat && npm ci && npm test)               # chat UI (sessions, recorder, API)
 cd platform/ansible && ansible-playbook playbooks/create.yml -e @instances/NAME.yml </dev/null

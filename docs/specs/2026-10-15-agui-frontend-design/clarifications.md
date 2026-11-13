@@ -318,16 +318,15 @@ in the parts it amends.
     `CopilotChatToolCallsView`'s `group` slot: CopilotKit 1.84.1's message view lays out such runs itself
     (`toolCallDisplay`, default `"grouped"`, `getToolCallLayouts`), so no `groupMessages` function of ours.
     *Reason:* asked for by the user (2026-11-04; testing on de.NBI 2026-11-08); on Anthropic `claude-haiku-5-5`,
-    which makes one call per model step, no call was ever grouped (the all-features check: `groups=0 cards=4`).
-    The backlog's open question, whether a stray text line beside a call ends a group, is answered by
-    CopilotKit's rule: non-blank assistant text does. *Cost if wrong:* the grouping rule is CopilotKit's, so an
+    which makes one call per model step, no call was ever grouped (a browser check of every chat feature: `groups=0 cards=4`).
+    Whether a stray text line beside a call ends a group is CopilotKit's rule: non-blank assistant text does. *Cost if wrong:* the grouping rule is CopilotKit's, so an
     upgrade can change it, and no automated check in this repository covers grouping across steps; a model that narrates
     between calls (qwen) gets several groups, as before; as in clarification 17, the first card remounts under
     the header when a second call joins, so a card opened while calls stream in closes. *Amends:* §6 *Tool calls
     are rendered*; supersedes the one-response limit of clarifications 17 and 20. *Status:* folded.
 
-26. **A New chat is titled as its first run starts, from its question alone** (2026-11-08, the user's choice; the
-    fork's PR #52). §6 *Sessions* now has the browser fetch the list as a New chat's first run starts, so the
+26. **A New chat is titled as its first run starts, from its question alone** (2026-11-08, the user's choice).
+    §6 *Sessions* now has the browser fetch the list as a New chat's first run starts, so the
     sidebar and header show the fallback title (first message, 60 characters) within a second of sending, and ask
     for the model title at once; `POST /api/sessions/{id}/title` titles from the first run that added a user
     message, whatever its status (running, finished, failed or stopped), with that question alone, instead of the

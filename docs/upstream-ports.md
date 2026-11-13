@@ -65,3 +65,4 @@ its commit again (the guide's step 7).
 - `b4ecbef` AG-UI leave a running chat: an agent per session, switching, running mark (2/3) (#58) → kraatz #33 (merged)
 - `86cd332` Chat: leave a running chat, rejoin it (3/3) (#62) → kraatz #33 (merged)
 - `e841b64` Evals: run the agent through the chat server (via: chat) (#89) → kraatz #47 (merged)
+- `b3f9e48` Merge upstream/main (2026-11-12): threat score, threat matrix, runs browser, Evidence → not for upstream: a merge of upstream itself. One behaviour it adds for upstream's code: the matrix's `conversation_provider.py` now runs through our `agui_provider._run`, so its runs carry `spe_source: eval` and retry a 503 until ready; goes up with `agui_provider.py`'s port

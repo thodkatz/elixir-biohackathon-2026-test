@@ -207,7 +207,7 @@ link to anyone else:
 ## Running and testing
 
 ```bash
-REPORTS_DIR=/tmp/reports RUNS_DIR=/tmp/runs CODER_URL=http://127.0.0.1:7080 python3 sperange_report.py
+REPORTS_DIR=/tmp/reports RUNS_DIR=/tmp/runs HITS_DIR=/tmp/hits CODER_URL=http://127.0.0.1:7080 python3 sperange_report.py
 curl -I http://127.0.0.1:7090/reports/healthz
 ```
 

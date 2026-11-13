@@ -111,7 +111,7 @@ def server(tmp_path, coder):
     (reports_dir / f"{WID}.json").write_text(json.dumps(
         {"owner": "anna", "owner_email": "anna@example.org", "workspace": "tm-test",
          "instance": "cw-anna-tm-test", "created": "2026-11-06 15:00 UTC"}))
-    srv = sr.make_server("127.0.0.1:0", str(reports_dir), coder, str(hits_dir))
+    srv = sr.make_server("127.0.0.1:0", str(reports_dir), coder, hits_dir=str(hits_dir))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{srv.server_port}", hits_dir, srv
     srv.shutdown()
@@ -590,18 +590,22 @@ def test_events_access_rule(service):
 
 def test_no_route_takes_a_token(service, streams):
     """Decision 10: no URL carries a canary value. The routes table names no path parameter but the
-    workspace id (and the service's own static files); a canary in a path is a 404, in any query key
-    but `after` it is ignored."""
+    workspace id (and the service's own static files) outside the runs browser's API, whose
+    parameters are archive names (`RUN_RE`, `CHAT_RE`); a canary in a path is a 404, in any query
+    key but `after` it is ignored."""
     routes = re.findall(r"^\s+(?:GET|PUT|POST)\s+(\S+)", sr.__doc__, re.M)
     assert f"{sr.PREFIX}/<id>/hits/events" in routes
-    params = {p for r in routes for p in re.findall(r"<[^>]+>", r)}
+    params = {p for r in routes if not r.startswith(f"{sr.PREFIX}/api/") for p in re.findall(r"<[^>]+>", r)}
     assert params == {"<id>", "<file>"}
+    api_params = {p for r in routes if r.startswith(f"{sr.PREFIX}/api/") for p in re.findall(r"<[^>]+>", r)}
+    assert api_params <= {"<id>", "<run>", "<frontend>", "<chat>", "<session>"}  # each matched by its regex
     assert [r for r in routes if "<file>" in r] == [f"{sr.PREFIX}/static/<file>"]
     base, hits_dir = service
     write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
     for path in (f"/reports/{WID}/hits/FCANARY-TEST01", "/reports/FCANARY-TEST01/hits",
                  "/reports/FCANARY-TEST01/hits.json", f"/reports/{WID}/hits/events/FCANARY-TEST01",
-                 "/reports/FCANARY-TEST01"):
+                 "/reports/FCANARY-TEST01", "/reports/api/runs/FCANARY-TEST01",
+                 "/reports/api/workspaces/FCANARY-TEST01"):
         assert call(base, path, token="tok-anna")[0] == 404, path
     plain = json.loads(call(base, f"/reports/{WID}/hits.json", token="tok-anna")[2])
     keyed = json.loads(call(base, f"/reports/{WID}/hits.json?token=FCANARY-TEST01&canary=FCANARY-TEST01",
@@ -633,7 +637,7 @@ def test_latency_fake_instance(tmp_path, coder, streams):
     transport, output_root, reports_dir, runs_dir = make_fake_instance(tmp_path)
     hits_dir = tmp_path / "hits"
     watcher = canary_watch.Watcher(str(hits_dir), str(reports_dir), str(runs_dir), str(output_root), transport)
-    srv = sr.make_server("127.0.0.1:0", str(reports_dir), coder, str(hits_dir))
+    srv = sr.make_server("127.0.0.1:0", str(reports_dir), coder, hits_dir=str(hits_dir))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     stop = threading.Event()
 

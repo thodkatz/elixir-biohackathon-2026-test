@@ -1,5 +1,6 @@
 """build.py renders the landing page and every entry, and refuses a catalog
 that does not validate."""
+import re
 import shutil
 import subprocess
 import sys
@@ -64,7 +65,7 @@ def test_invalid_catalog_stops_the_build(tmp_path):
     shutil.copy(REPO / "vocabulary.yaml", root / "vocabulary.yaml")
     shutil.copy(REPO / "validate.py", root / "validate.py")
     first = sorted((root / "threats").glob("TM-*.md"))[0]
-    first.write_text(first.read_text().replace("status: hypothesised", "status: done", 1))
+    first.write_text(re.sub(r"(?m)^status: .*$", "status: done", first.read_text(), count=1))
     res = build(root, tmp_path / "dist")
     assert res.returncode == 1
     assert "unknown status value 'done'" in res.stderr

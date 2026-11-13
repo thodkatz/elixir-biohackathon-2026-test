@@ -54,10 +54,15 @@ its commit again (the guide's step 7).
 - `d03751c` Reset an existing host's frontend through its compose link (#41) → kraatz #17 (merged)
 - `9abdbb9` Contributing guide: the package port path; spec's latest clarification is 23 → kraatz #17 (merged)
 - `d1daa75` TM-007: AG-UI's client-held history as a known protocol weakness (#43) → kraatz #17 (merged)
-- `338eb8e` AG-UI archive Markdown: Compacted wording, autolinks, refusal reason, bad timestamps (#44) → kraatz #28 (open)
-- `70d6505` AG-UI chat: reopened sessions land on their end; menu focus after a click outside (#46) → kraatz #29 (open)
-- `8e0b891` denbi example: set spe_data_root, say where the API IP comes from → kraatz #30 (open)
+- `338eb8e` AG-UI archive Markdown: Compacted wording, autolinks, refusal reason, bad timestamps (#44) → kraatz #28 (merged)
+- `70d6505` AG-UI chat: reopened sessions land on their end; menu focus after a click outside (#46) → kraatz #29 (merged)
+- `8e0b891` denbi example: set spe_data_root, say where the API IP comes from → kraatz #30 (merged)
 - `171398a` Migrate the methodology off the submodule (253d08561b5640f4c1227e3e807be466c82a588a) → not for upstream: its shared files (`.gitignore`, `.gitmodules`) only drop the fork's methodology submodule
 - `231ba4c` Merge upstream/main (2026-11-08): kraatz #17 merged, report app, dependency bumps, TM-005 → not for upstream: a merge of upstream itself; the fork work it carries has its own lines
-- `23a944b` AG-UI chat: group tool calls across model steps (#50) → kraatz #31 (open)
-- `9eec3a8` AG-UI chat: title a new session as its first run starts (#52) → kraatz #32 (open)
+- `23a944b` AG-UI chat: group tool calls across model steps (#50) → kraatz #33 (merged; first kraatz #31, its branch merged into #33's)
+- `9eec3a8` AG-UI chat: title a new session as its first run starts (#52) → kraatz #33 (merged; first kraatz #32, its branch merged into #33's)
+- `eb19523` AG-UI leave a running chat: running in the API, rejoin check verdict live (1/3) (#57) → kraatz #33 (merged)
+- `b4ecbef` AG-UI leave a running chat: an agent per session, switching, running mark (2/3) (#58) → kraatz #33 (merged)
+- `86cd332` Chat: leave a running chat, rejoin it (3/3) (#62) → kraatz #33 (merged)
+- `e841b64` Evals: run the agent through the chat server (via: chat) (#89) → kraatz #47 (merged)
+- `b3f9e48` Merge upstream/main (2026-11-12): threat score, threat matrix, runs browser, Evidence → not for upstream: a merge of upstream itself. One behaviour it adds for upstream's code: the matrix's `conversation_provider.py` now runs through our `agui_provider._run`, so its runs carry `spe_source: eval` and retry a 503 until ready; goes up with `agui_provider.py`'s port

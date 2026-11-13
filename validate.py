@@ -8,7 +8,8 @@ Checks per threat (threats/TM-*.md):
   - no duplicate IDs across the catalog
   - `status` is one vocabulary.yaml value; `entry-points`, `assets` and
     `stride` are non-empty lists of vocabulary.yaml values
-  - the body has exactly the headings of the template, in order
+  - the body has exactly the headings of the template, in order,
+    optionally followed by a single '## Evidence' section
 
 Checks per path (paths/P<n>-*.md), the same shape as a threat (see
 paths/TEMPLATE.md):
@@ -113,6 +114,9 @@ BODY_HEADINGS = [
     (3, "Detective"),
     (3, "Responsive"),
 ]
+# Optional: an entry that is no longer `hypothesised` may end with a single
+# '## Evidence' section recording where it was reproduced or blocked.
+OPTIONAL_TRAILING_HEADING = (2, "Evidence")
 
 PATH_ID_PATTERN = re.compile(r"^P\d+$")
 PATH_FILENAME_PATTERN = re.compile(r"^(P\d+)-[a-z0-9-]+\.md$")
@@ -278,18 +282,23 @@ def check_entry(entry: Entry, vocab: dict) -> list[str]:
 
 
 def check_body(content: str, entry_id: str, name: str) -> list[str]:
-    return check_body_headings(content, f"{entry_id}: {name}", BODY_HEADINGS)
+    return check_body_headings(content, f"{entry_id}: {name}", BODY_HEADINGS, OPTIONAL_TRAILING_HEADING)
 
 
-def check_body_headings(content: str, expected_h1: str, headings: list[tuple[int, str]]) -> list[str]:
-    """Shared by threats and paths: an H1 of '<id>: <name>', then exactly `headings`."""
+def check_body_headings(content: str, expected_h1: str, headings: list[tuple[int, str]],
+                        optional_trailing: tuple[int, str] | None = None) -> list[str]:
+    """Shared by threats and paths: an H1 of '<id>: <name>', then exactly `headings`, optionally
+    followed by `optional_trailing` (threats only: their '## Evidence')."""
     found = [(len(h), text) for h, text in HEADING_PATTERN.findall(content)]
     if not found or found[0][0] != 1:
         return ["body must start with the heading '# <id>: <name>'"]
     errors = []
     if found[0][1] != expected_h1:
         errors.append(f"H1 is '{found[0][1]}', expected '{expected_h1}'")
-    if found[1:] != headings:
+    body = found[1:]
+    if optional_trailing and body and body[-1] == optional_trailing:
+        body = body[:-1]
+    if body != headings:
         expected = ", ".join(f"{'#' * lvl} {t}" for lvl, t in headings)
         got = ", ".join(f"{'#' * lvl} {t}" for lvl, t in found[1:])
         errors.append(

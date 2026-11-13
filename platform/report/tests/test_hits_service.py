@@ -597,12 +597,15 @@ def test_no_route_takes_a_token(service, streams):
     assert f"{sr.PREFIX}/<id>/hits/events" in routes
     params = {p for r in routes if not r.startswith(f"{sr.PREFIX}/api/") for p in re.findall(r"<[^>]+>", r)}
     assert params == {"<id>", "<file>"}
+    api_params = {p for r in routes if r.startswith(f"{sr.PREFIX}/api/") for p in re.findall(r"<[^>]+>", r)}
+    assert api_params <= {"<id>", "<run>", "<frontend>", "<chat>", "<session>"}  # each matched by its regex
     assert [r for r in routes if "<file>" in r] == [f"{sr.PREFIX}/static/<file>"]
     base, hits_dir = service
     write_hits(hits_dir, WID, [_record(WID, _agui_hit())])
     for path in (f"/reports/{WID}/hits/FCANARY-TEST01", "/reports/FCANARY-TEST01/hits",
                  "/reports/FCANARY-TEST01/hits.json", f"/reports/{WID}/hits/events/FCANARY-TEST01",
-                 "/reports/FCANARY-TEST01"):
+                 "/reports/FCANARY-TEST01", "/reports/api/runs/FCANARY-TEST01",
+                 "/reports/api/workspaces/FCANARY-TEST01"):
         assert call(base, path, token="tok-anna")[0] == 404, path
     plain = json.loads(call(base, f"/reports/{WID}/hits.json", token="tok-anna")[2])
     keyed = json.loads(call(base, f"/reports/{WID}/hits.json?token=FCANARY-TEST01&canary=FCANARY-TEST01",

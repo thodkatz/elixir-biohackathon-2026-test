@@ -1189,6 +1189,11 @@ class Handler(BaseHTTPRequestHandler):
             return self.login_redirect(path)  # the page asked for, the hits page included
         if rest == "":
             return self.send(HTTPStatus.OK, list_page(self.store.listing(), user))
+        # The runs browser first, so no API path reaches the hits suffix routes below.
+        if rest == "runs":
+            return self.send(HTTPStatus.OK, runs_page(user))
+        if rest.startswith("api/"):
+            return self.api(rest[len("api/"):])
         # The admin routes first: "hits" is not a workspace id, so the <id> routes below never see it.
         if rest == "hits":
             return self.admin_page(user)
@@ -1202,10 +1207,6 @@ class Handler(BaseHTTPRequestHandler):
             return self.hits_json(rest[:-len("/hits.json")], user)
         if rest.endswith("/hits"):
             return self.hits_page(rest[:-len("/hits")], user)
-        if rest == "runs":
-            return self.send(HTTPStatus.OK, runs_page(user))
-        if rest.startswith("api/"):
-            return self.api(rest[len("api/"):])
         wid, is_md = (rest[:-3], True) if rest.endswith(".md") else (rest, False)
         if not UUID_RE.match(wid):
             return self.send(HTTPStatus.NOT_FOUND, message_page("Not found", "No such report.", user))

@@ -154,6 +154,15 @@ def test_key_from_file(agent, monkeypatch, tmp_path):
     assert "error" not in agui_provider.call_api("x", {}, {})
 
 
+def test_target_key_file_wins_over_the_environment(agent, monkeypatch, tmp_path):
+    """A multi-workspace run (matrix/) gives each target its own key: `config.api_key_file` comes first."""
+    f = tmp_path / "target_key"
+    f.write_text(KEY + "\n")
+    monkeypatch.setenv("SPE_AGENT_API_KEY", "wrong-" + KEY)
+    assert "error" not in agui_provider.call_api("x", {"config": {"api_key_file": str(f)}}, {})
+    assert "401" in agui_provider.call_api("x", {"config": {}}, {})["error"]
+
+
 def test_http_error_does_not_echo_the_key(agent, monkeypatch):
     monkeypatch.setenv("SPE_AGENT_API_KEY", "wrong-" + KEY)
     res = agui_provider.call_api("x", {}, {})
